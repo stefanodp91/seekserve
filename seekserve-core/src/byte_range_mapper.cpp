@@ -1,5 +1,7 @@
 #include "seekserve/byte_range_mapper.hpp"
 
+#include <spdlog/spdlog.h>
+
 namespace seekserve {
 
 ByteRangeMapper::ByteRangeMapper(const lt::file_storage& fs, FileIndex file_idx)
@@ -9,6 +11,8 @@ ByteRangeMapper::ByteRangeMapper(const lt::file_storage& fs, FileIndex file_idx)
     , file_size_(fs.file_size(lt::file_index_t{file_idx}))
     , piece_length_(fs.piece_length())
 {
+    spdlog::debug("ByteRangeMapper: file_idx={} offset={} size={} piece_len={} pieces=[{},{})",
+                  file_idx_, file_offset_, file_size_, piece_length_, first_piece(), end_piece());
 }
 
 PieceSpan ByteRangeMapper::map(const ByteRange& range) const {

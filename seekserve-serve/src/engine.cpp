@@ -46,9 +46,15 @@ void SeekServeEngine::wire_alerts() {
             auto ti = a.handle.torrent_file();
             auto st = a.handle.status(lt::torrent_handle::query_name);
             auto id = infohash_to_hex(st.info_hashes);
+
+            // Guard: skip if torrent was explicitly removed
+            {
+                std::lock_guard lock(mu_);
+                if (removed_ids_.count(id)) return;
+            }
+
             catalog_.on_metadata_received(id, ti);
 
-            // Register files in cache
             auto files_result = catalog_.list_files(id);
             if (files_result) {
                 cache_->on_torrent_added(id, files_result.value());
@@ -69,6 +75,13 @@ void SeekServeEngine::wire_alerts() {
             if (ti) {
                 auto st = a.handle.status(lt::torrent_handle::query_name);
                 auto id = infohash_to_hex(st.info_hashes);
+
+                // Guard: skip if torrent was explicitly removed
+                {
+                    std::lock_guard lock(mu_);
+                    if (removed_ids_.count(id)) return;
+                }
+
                 catalog_.on_metadata_received(id, ti);
 
                 auto files_result = catalog_.list_files(id);
@@ -118,10 +131,13 @@ Result<TorrentId> SeekServeEngine::add_torrent(const std::string& uri,
 }
 
 Result<void> SeekServeEngine::remove_torrent(const TorrentId& id, bool delete_files) {
+    // Mark as removed FIRST so alert handlers skip late alerts for this torrent
     {
         std::lock_guard lock(mu_);
+        removed_ids_.insert(id);
         states_.erase(id);
     }
+    catalog_.remove(id);
     return sessions_->remove_torrent(id, delete_files);
 }
 
@@ -291,6 +307,14 @@ void SeekServeEngine::stop_server() {
 
     if (api_server_) api_server_->stop();
     if (http_server_) http_server_->stop();
+
+    // Cancel all active ByteSources so in-flight reads unblock immediately
+    {
+        std::lock_guard lock(mu_);
+        for (auto& [id, state] : states_) {
+            if (state->source) state->source->cancel();
+        }
+    }
 
     if (work_guard_) {
         work_guard_.reset();

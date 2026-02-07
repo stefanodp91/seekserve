@@ -33,6 +33,38 @@
         "SEEKSERVE_BUILD_DEMO": "ON",
         "SEEKSERVE_BUILD_CAPI": "ON"
       }
+    },
+    {
+      "name": "asan",
+      "inherits": "default",
+      "displayName": "Debug + AddressSanitizer",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SEEKSERVE_ENABLE_WEBTORRENT": "OFF",
+        "SEEKSERVE_BUILD_TESTS": "ON",
+        "SEEKSERVE_BUILD_DEMO": "ON",
+        "SEEKSERVE_BUILD_CAPI": "ON",
+        "CMAKE_C_FLAGS": "-fsanitize=address -fno-omit-frame-pointer",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "default",
+      "displayName": "Debug + ThreadSanitizer",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SEEKSERVE_ENABLE_WEBTORRENT": "OFF",
+        "SEEKSERVE_BUILD_TESTS": "ON",
+        "SEEKSERVE_BUILD_DEMO": "ON",
+        "SEEKSERVE_BUILD_CAPI": "ON",
+        "CMAKE_C_FLAGS": "-fsanitize=thread",
+        "CMAKE_CXX_FLAGS": "-fsanitize=thread",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=thread"
+      }
     }
   ],
   "buildPresets": [
@@ -43,6 +75,14 @@
     {
       "name": "release",
       "configurePreset": "release"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan"
     }
   ]
 }

@@ -21,6 +21,7 @@ public:
 
     void on_metadata_received(const TorrentId& id,
                               std::shared_ptr<const lt::torrent_info> ti);
+    void remove(const TorrentId& id);
 
     Result<std::vector<FileInfo>> list_files(const TorrentId& id) const;
     Result<FileInfo> get_file(const TorrentId& id, FileIndex fi) const;

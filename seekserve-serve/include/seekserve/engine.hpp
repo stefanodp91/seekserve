@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <mutex>
 #include <atomic>
 #include <functional>
@@ -96,6 +97,7 @@ private:
     std::unique_ptr<net::steady_timer> tick_timer_;
 
     std::unordered_map<TorrentId, std::unique_ptr<TorrentState>> states_;
+    std::unordered_set<TorrentId> removed_ids_;  // guards alert handlers against late alerts
     mutable std::mutex mu_;
 
     EventCallback event_cb_;

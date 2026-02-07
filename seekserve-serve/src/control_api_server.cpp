@@ -10,6 +10,7 @@
 
 #include <regex>
 #include <thread>
+#include <sys/socket.h>
 
 #include <libtorrent/torrent_status.hpp>
 #include <libtorrent/hex.hpp>
@@ -19,6 +20,14 @@ namespace seekserve {
 namespace beast = boost::beast;
 namespace http = beast::http;
 using json = nlohmann::json;
+
+static std::string sanitize_url(std::string_view url) {
+    auto pos = url.find("token=");
+    if (pos == std::string_view::npos) return std::string(url);
+    auto end = url.find('&', pos);
+    return std::string(url.substr(0, pos)) + "token=***" +
+           (end != std::string_view::npos ? std::string(url.substr(end)) : "");
+}
 
 static bool constant_time_compare(const std::string& a, const std::string& b) {
     if (a.size() != b.size()) return false;
@@ -151,15 +160,34 @@ void ControlApiServer::do_accept() {
                 return;
             }
 
-            std::thread([this, s = std::move(socket)]() mutable {
-                handle_connection(std::move(s));
-            }).detach();
+            // Connection limit (reuse max_concurrent_streams as general limit)
+            if (active_connections_.load() >= 20) {
+                spdlog::warn("ControlApiServer: connection limit reached, rejecting");
+                boost::system::error_code close_ec;
+                socket.close(close_ec);
+            } else {
+                struct timeval tv;
+                tv.tv_sec = 30;
+                tv.tv_usec = 0;
+                setsockopt(socket.native_handle(), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+                setsockopt(socket.native_handle(), SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+                std::thread([this, s = std::move(socket)]() mutable {
+                    handle_connection(std::move(s));
+                }).detach();
+            }
 
             do_accept();
         });
 }
 
 void ControlApiServer::handle_connection(tcp::socket socket) {
+    active_connections_.fetch_add(1);
+    struct ConnGuard {
+        std::atomic<int>& count;
+        ~ConnGuard() { count.fetch_sub(1); }
+    } guard{active_connections_};
+
     beast::flat_buffer buffer;
     http::request<http::string_body> req;
 
@@ -170,7 +198,21 @@ void ControlApiServer::handle_connection(tcp::socket socket) {
         return;
     }
 
-    spdlog::debug("ControlApiServer: {} {}", req.method_string(), req.target());
+    spdlog::debug("ControlApiServer: {} {}", req.method_string(), sanitize_url(req.target()));
+
+    // Reject oversized request bodies (> 1MB)
+    static constexpr std::size_t kMaxBodySize = 1024 * 1024;
+    if (req.body().size() > kMaxBodySize) {
+        http::response<http::string_body> res{http::status::payload_too_large, req.version()};
+        res.set(http::field::server, "SeekServe/0.1");
+        res.set(http::field::content_type, "application/json");
+        res.set(http::field::connection, "close");
+        res.body() = R"({"error":"Request body too large"})";
+        res.prepare_payload();
+        boost::system::error_code write_ec;
+        http::write(socket, res, write_ec);
+        return;
+    }
 
     auto send_json = [&](http::status status, const json& body) {
         http::response<http::string_body> res{status, req.version()};

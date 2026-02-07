@@ -11,6 +11,7 @@
 
 #include <regex>
 #include <thread>
+#include <sys/socket.h>
 
 namespace seekserve {
 
@@ -74,6 +75,15 @@ static std::optional<ParsedTarget> parse_target(const std::string& target) {
     }
 
     return pt;
+}
+
+// Strip token= from URL for safe logging
+static std::string sanitize_url(std::string_view url) {
+    auto pos = url.find("token=");
+    if (pos == std::string_view::npos) return std::string(url);
+    auto end = url.find('&', pos);
+    return std::string(url.substr(0, pos)) + "token=***" +
+           (end != std::string_view::npos ? std::string(url.substr(end)) : "");
 }
 
 static bool constant_time_compare(const std::string& a, const std::string& b) {
@@ -194,18 +204,45 @@ void HttpRangeServer::do_accept() {
                 return;
             }
 
-            // Handle each connection in its own thread so long-running
-            // streams don't block the accept loop (important for VLC seeks).
-            std::thread([this, s = std::move(socket)]() mutable {
-                handle_connection(std::move(s));
-            }).detach();
+            // Connection limit check
+            if (active_connections_.load() >= config_.max_concurrent_streams) {
+                spdlog::warn("HttpRangeServer: connection limit reached ({}/{}), rejecting",
+                             active_connections_.load(), config_.max_concurrent_streams);
+                boost::system::error_code close_ec;
+                socket.close(close_ec);
+            } else {
+                // Set socket timeouts
+                struct timeval tv_read;
+                tv_read.tv_sec = config_.read_timeout.count();
+                tv_read.tv_usec = 0;
+                setsockopt(socket.native_handle(), SOL_SOCKET, SO_RCVTIMEO,
+                           &tv_read, sizeof(tv_read));
+
+                struct timeval tv_send;
+                tv_send.tv_sec = config_.connection_timeout.count();
+                tv_send.tv_usec = 0;
+                setsockopt(socket.native_handle(), SOL_SOCKET, SO_SNDTIMEO,
+                           &tv_send, sizeof(tv_send));
+
+                // Handle each connection in its own thread so long-running
+                // streams don't block the accept loop (important for VLC seeks).
+                std::thread([this, s = std::move(socket)]() mutable {
+                    handle_connection(std::move(s));
+                }).detach();
+            }
 
             do_accept();
         });
 }
 
 void HttpRangeServer::handle_connection(tcp::socket socket) {
-    spdlog::debug("HttpRangeServer: new connection");
+    active_connections_.fetch_add(1);
+    struct ConnGuard {
+        std::atomic<int>& count;
+        ~ConnGuard() { count.fetch_sub(1); }
+    } guard{active_connections_};
+
+    spdlog::debug("HttpRangeServer: new connection (active: {})", active_connections_.load());
     beast::flat_buffer buffer;
     http::request<http::string_body> req;
 
@@ -216,7 +253,7 @@ void HttpRangeServer::handle_connection(tcp::socket socket) {
         return;
     }
     spdlog::debug("HttpRangeServer: {} {} range={}",
-                  req.method_string(), req.target(),
+                  req.method_string(), sanitize_url(req.target()),
                   req.count(http::field::range) ? std::string(req[http::field::range]) : "(none)");
 
     auto send_small_response = [&](auto&& res) {

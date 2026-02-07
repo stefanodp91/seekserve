@@ -1,5 +1,7 @@
 #include "seekserve/piece_availability.hpp"
 
+#include <spdlog/spdlog.h>
+
 #include <algorithm>
 
 namespace seekserve {
@@ -13,6 +15,7 @@ PieceAvailabilityIndex::PieceAvailabilityIndex(int num_pieces, int piece_length,
     for (auto& a : completed_) {
         a.store(false, std::memory_order_relaxed);
     }
+    spdlog::debug("PieceAvailabilityIndex: created with {} pieces, piece_len={}", num_pieces, piece_length);
 }
 
 void PieceAvailabilityIndex::reset(int num_pieces, int piece_length, int last_piece_length) {

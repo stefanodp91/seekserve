@@ -82,10 +82,46 @@ echo ""
 echo "[5/6] CMake configure (preset: $BUILD_TYPE)..."
 rm -rf "$SCRIPT_DIR/build/$BUILD_TYPE"
 
+# Map build type to CMake build type and optional sanitizer flags
+CMAKE_BUILD_TYPE="Debug"
+EXTRA_C_FLAGS=""
+EXTRA_CXX_FLAGS=""
+EXTRA_LINKER_FLAGS=""
+
+case "$BUILD_TYPE" in
+    debug)
+        CMAKE_BUILD_TYPE="Debug"
+        ;;
+    release)
+        CMAKE_BUILD_TYPE="Release"
+        ;;
+    asan)
+        CMAKE_BUILD_TYPE="Debug"
+        EXTRA_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer"
+        EXTRA_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer"
+        EXTRA_LINKER_FLAGS="-fsanitize=address"
+        echo "  AddressSanitizer enabled"
+        ;;
+    tsan)
+        CMAKE_BUILD_TYPE="Debug"
+        EXTRA_C_FLAGS="-fsanitize=thread"
+        EXTRA_CXX_FLAGS="-fsanitize=thread"
+        EXTRA_LINKER_FLAGS="-fsanitize=thread"
+        echo "  ThreadSanitizer enabled"
+        ;;
+    *)
+        echo "  Unknown build type '$BUILD_TYPE', using Debug"
+        ;;
+esac
+
 cmake -S "$SCRIPT_DIR" -B "$SCRIPT_DIR/build/$BUILD_TYPE" \
     -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$VCPKG_DIR/scripts/buildsystems/vcpkg.cmake" \
-    -DCMAKE_BUILD_TYPE="$(echo "$BUILD_TYPE" | sed 's/debug/Debug/;s/release/Release/')" \
+    -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE" \
+    -DCMAKE_C_FLAGS="$EXTRA_C_FLAGS" \
+    -DCMAKE_CXX_FLAGS="$EXTRA_CXX_FLAGS" \
+    -DCMAKE_EXE_LINKER_FLAGS="$EXTRA_LINKER_FLAGS" \
+    -DCMAKE_SHARED_LINKER_FLAGS="$EXTRA_LINKER_FLAGS" \
     -DSEEKSERVE_ENABLE_WEBTORRENT="$WEBTORRENT" \
     -DSEEKSERVE_BUILD_TESTS=ON \
     -DSEEKSERVE_BUILD_DEMO=ON \

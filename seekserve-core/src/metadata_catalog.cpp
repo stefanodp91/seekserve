@@ -44,6 +44,11 @@ void MetadataCatalog::on_metadata_received(const TorrentId& id,
     catalog_[id] = std::move(entry);
 }
 
+void MetadataCatalog::remove(const TorrentId& id) {
+    std::lock_guard lock(mu_);
+    catalog_.erase(id);
+}
+
 Result<std::vector<FileInfo>> MetadataCatalog::list_files(const TorrentId& id) const {
     std::lock_guard lock(mu_);
     auto it = catalog_.find(id);

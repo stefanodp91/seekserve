@@ -8,3 +8,6 @@ build/
 compile_commands.json
 .DS_Store
 downloads/
+*.db
+*.db-wal
+*.db-shm

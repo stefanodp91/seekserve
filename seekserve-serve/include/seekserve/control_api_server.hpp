@@ -49,6 +49,7 @@ private:
     std::unique_ptr<tcp::acceptor> acceptor_;
     std::atomic<std::uint16_t> port_{0};
     std::atomic<bool> running_{false};
+    std::atomic<int> active_connections_{0};
     ShutdownCallback shutdown_cb_;
 };
 

@@ -64,6 +64,7 @@ private:
     RangeCallback range_callback_;
     std::atomic<std::uint16_t> port_{0};
     std::atomic<bool> running_{false};
+    std::atomic<int> active_connections_{0};
 };
 
 } // namespace seekserve
