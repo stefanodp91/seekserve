@@ -1,0 +1,30 @@
+{
+  "name": "seekserve",
+  "version-semver": "0.1.0",
+  "dependencies": [
+    "boost-asio",
+    "boost-beast",
+    "boost-config",
+    "boost-crc",
+    "boost-date-time",
+    "boost-functional",
+    "boost-intrusive",
+    "boost-logic",
+    "boost-multi-index",
+    "boost-multiprecision",
+    "boost-optional",
+    "boost-pool",
+    "boost-predef",
+    "boost-range",
+    "boost-smart-ptr",
+    "boost-system",
+    "boost-utility",
+    "boost-variant",
+    "nlohmann-json",
+    "spdlog",
+    "sqlite3",
+    "gtest"
+  ],
+  "overrides": [],
+  "builtin-baseline": "aa2d37682e3318d93aef87efa7b0e88e81cd3d59"
+}

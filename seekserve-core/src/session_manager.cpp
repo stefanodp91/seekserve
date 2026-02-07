@@ -1,0 +1,145 @@
+#include "seekserve/session_manager.hpp"
+
+#include <libtorrent/magnet_uri.hpp>
+#include <libtorrent/torrent_info.hpp>
+#include <libtorrent/settings_pack.hpp>
+#include <libtorrent/session_params.hpp>
+#include <libtorrent/alert_types.hpp>
+#include <libtorrent/hex.hpp>
+
+#include <spdlog/spdlog.h>
+
+#include <fstream>
+
+namespace seekserve {
+
+TorrentSessionManager::TorrentSessionManager(const SessionConfig& config)
+    : config_(config)
+{
+    auto sp = make_settings(config);
+    session_ = std::make_unique<lt::session>(lt::session_params{sp});
+    dispatcher_.start(*session_);
+    spdlog::info("TorrentSessionManager: session created (save_path={})", config_.save_path);
+}
+
+TorrentSessionManager::~TorrentSessionManager() {
+    spdlog::info("TorrentSessionManager: shutting down");
+    dispatcher_.stop();
+    session_->abort();
+}
+
+lt::settings_pack TorrentSessionManager::make_settings(const SessionConfig& config) {
+    lt::settings_pack sp;
+
+    sp.set_int(lt::settings_pack::alert_mask,
+        lt::alert_category::status
+        | lt::alert_category::piece_progress
+        | lt::alert_category::error
+        | lt::alert_category::storage
+        | lt::alert_category::dht);
+
+    sp.set_str(lt::settings_pack::listen_interfaces,
+        "0.0.0.0:" + std::to_string(config.listen_port_start) +
+        ",[::0]:" + std::to_string(config.listen_port_start));
+
+    sp.set_int(lt::settings_pack::request_timeout, 10);
+    sp.set_int(lt::settings_pack::peer_timeout, 30);
+    sp.set_bool(lt::settings_pack::strict_end_game_mode, false);
+    sp.set_bool(lt::settings_pack::announce_to_all_tiers, true);
+    sp.set_bool(lt::settings_pack::announce_to_all_trackers, true);
+    sp.set_bool(lt::settings_pack::enable_dht, true);
+
+    sp.set_int(lt::settings_pack::alert_queue_size, config.alert_queue_size);
+
+    return sp;
+}
+
+Result<TorrentId> TorrentSessionManager::add_torrent(const AddTorrentParams& params) {
+    lt::add_torrent_params atp;
+    atp.save_path = params.save_path.empty() ? config_.save_path : params.save_path;
+
+    if (params.uri.substr(0, 7) == "magnet:") {
+        lt::error_code ec;
+        lt::parse_magnet_uri(params.uri, atp, ec);
+        if (ec) {
+            spdlog::error("Failed to parse magnet URI: {}", ec.message());
+            return make_error_code(errc::invalid_argument);
+        }
+    } else {
+        lt::error_code ec;
+        auto ti = std::make_shared<lt::torrent_info>(params.uri, ec);
+        if (ec) {
+            spdlog::error("Failed to load .torrent file '{}': {}", params.uri, ec.message());
+            return make_error_code(errc::invalid_argument);
+        }
+        atp.ti = ti;
+    }
+
+    for (const auto& tracker : config_.extra_trackers) {
+        atp.trackers.push_back(tracker);
+    }
+
+    lt::torrent_handle h = session_->add_torrent(std::move(atp));
+    auto id = torrent_id_from_handle(h);
+
+    {
+        std::lock_guard lock(mu_);
+        handles_[id] = h;
+    }
+
+    spdlog::info("TorrentSessionManager: added torrent {}", id);
+    return id;
+}
+
+Result<void> TorrentSessionManager::remove_torrent(const TorrentId& id, bool delete_files) {
+    std::lock_guard lock(mu_);
+    auto it = handles_.find(id);
+    if (it == handles_.end()) {
+        return make_error_code(errc::torrent_not_found);
+    }
+
+    lt::remove_flags_t flags{};
+    if (delete_files) {
+        flags = lt::session::delete_files;
+    }
+
+    session_->remove_torrent(it->second, flags);
+    handles_.erase(it);
+    spdlog::info("TorrentSessionManager: removed torrent {}", id);
+    return Result<void>{};
+}
+
+lt::torrent_handle TorrentSessionManager::get_handle(const TorrentId& id) const {
+    std::lock_guard lock(mu_);
+    auto it = handles_.find(id);
+    if (it == handles_.end()) {
+        return {};
+    }
+    return it->second;
+}
+
+bool TorrentSessionManager::has_torrent(const TorrentId& id) const {
+    std::lock_guard lock(mu_);
+    return handles_.count(id) > 0;
+}
+
+std::vector<TorrentId> TorrentSessionManager::list_torrents() const {
+    std::lock_guard lock(mu_);
+    std::vector<TorrentId> ids;
+    ids.reserve(handles_.size());
+    for (const auto& [id, _] : handles_) {
+        ids.push_back(id);
+    }
+    return ids;
+}
+
+TorrentId TorrentSessionManager::torrent_id_from_handle(const lt::torrent_handle& h) const {
+    auto status = h.status(lt::torrent_handle::query_name);
+    auto ih = status.info_hashes;
+    if (ih.has_v2()) {
+        return lt::aux::to_hex({ih.v2.data(), static_cast<ptrdiff_t>(ih.v2.size())});
+    }
+    return lt::aux::to_hex({ih.v1.data(), static_cast<ptrdiff_t>(ih.v1.size())});
+}
+
+} // namespace seekserve
