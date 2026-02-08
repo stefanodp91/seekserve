@@ -29,14 +29,20 @@ class _FileSelectionScreenState extends State<FileSelectionScreen> {
     final provider = context.watch<SeekServeProvider>();
     final files = provider.listFiles(widget.torrentId);
 
-    // DEV: Auto-play first video file.
+    // DEV: Auto-play smallest MP4 video file (ideal for testing).
     if (widget.autoPlay && !_autoPlayed && files.isNotEmpty) {
-      final videoFile = files.where((f) => f.isVideo).firstOrNull;
-      if (videoFile != null) {
+      final videoFiles = files.where((f) => f.isVideo).toList();
+      if (videoFiles.isNotEmpty) {
+        // Prefer smallest .mp4 for quick test
+        final mp4Files =
+            videoFiles.where((f) => f.name.endsWith('.mp4')).toList();
+        final target = mp4Files.isNotEmpty
+            ? (mp4Files..sort((a, b) => a.size.compareTo(b.size))).first
+            : videoFiles.first;
         _autoPlayed = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
-          _playFile(context, provider, videoFile);
+          _playFile(context, provider, target);
         });
       }
     }
