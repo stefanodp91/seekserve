@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as dev;
 import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
@@ -122,7 +123,16 @@ class SeekServeClient {
       final err = _bindings.ss_list_files(_engine, idPtr, outJson);
       checkError(err);
       final jsonStr = outJson.value.cast<Utf8>().toDartString();
-      final list = jsonDecode(jsonStr) as List<dynamic>;
+      final decoded = jsonDecode(jsonStr);
+      // C API wraps files in {"files": [...]}.
+      final List<dynamic> list;
+      if (decoded is Map<String, dynamic> && decoded.containsKey('files')) {
+        list = decoded['files'] as List<dynamic>;
+      } else if (decoded is List<dynamic>) {
+        list = decoded;
+      } else {
+        return [];
+      }
       return list
           .map((e) => FileInfo.fromJson(e as Map<String, dynamic>))
           .toList();
@@ -231,11 +241,20 @@ class SeekServeClient {
     if (_disposed) return;
     try {
       final jsonStr = eventJsonPtr.cast<Utf8>().toDartString();
+      // NOTE: The event string was heap-allocated on the C++ side. Calling
+      // ss_free_string or calloc.free here crashes on iOS (allocator mismatch
+      // between the static lib and the Dart runtime). We intentionally leak
+      // these small strings (~100 bytes each, bounded count) until a proper
+      // ring-buffer or Dart_Port approach replaces NativeCallable.listener.
+      if (jsonStr.isEmpty) return;
+      dev.log('SeekServe event: $jsonStr', name: 'SeekServe');
       final map = jsonDecode(jsonStr) as Map<String, dynamic>;
       final event = SeekServeEvent.fromJson(map);
       _eventController.add(event);
     } catch (e) {
-      _eventController.addError(e);
+      // Log but don't propagate parse errors — they would surface as
+      // error banners in the UI for transient issues.
+      dev.log('SeekServe event parse error: $e', name: 'SeekServe');
     }
   }
 

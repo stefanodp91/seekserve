@@ -5,23 +5,44 @@ import 'package:provider/provider.dart';
 import '../providers/seekserve_provider.dart';
 import 'player_screen.dart';
 
-class FileSelectionScreen extends StatelessWidget {
+class FileSelectionScreen extends StatefulWidget {
   final String torrentId;
   final String torrentName;
+  final bool autoPlay;
 
   const FileSelectionScreen({
     super.key,
     required this.torrentId,
     required this.torrentName,
+    this.autoPlay = false,
   });
+
+  @override
+  State<FileSelectionScreen> createState() => _FileSelectionScreenState();
+}
+
+class _FileSelectionScreenState extends State<FileSelectionScreen> {
+  bool _autoPlayed = false;
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SeekServeProvider>();
-    final files = provider.listFiles(torrentId);
+    final files = provider.listFiles(widget.torrentId);
+
+    // DEV: Auto-play first video file.
+    if (widget.autoPlay && !_autoPlayed && files.isNotEmpty) {
+      final videoFile = files.where((f) => f.isVideo).firstOrNull;
+      if (videoFile != null) {
+        _autoPlayed = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _playFile(context, provider, videoFile);
+        });
+      }
+    }
 
     return Scaffold(
-      appBar: AppBar(title: Text(torrentName)),
+      appBar: AppBar(title: Text(widget.torrentName)),
       body: files.isEmpty
           ? const Center(child: Text('Waiting for metadata...'))
           : ListView.builder(
@@ -41,7 +62,7 @@ class FileSelectionScreen extends StatelessWidget {
 
   void _playFile(
       BuildContext context, SeekServeProvider provider, FileInfo file) {
-    final url = provider.selectAndStream(torrentId, file.index);
+    final url = provider.selectAndStream(widget.torrentId, file.index);
     if (url == null) return;
 
     Navigator.push(
@@ -49,7 +70,7 @@ class FileSelectionScreen extends StatelessWidget {
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
           streamUrl: url,
-          torrentId: torrentId,
+          torrentId: widget.torrentId,
           fileName: file.name,
         ),
       ),

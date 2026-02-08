@@ -186,8 +186,14 @@ ss_error_t ss_set_event_callback(SeekServeEngine* engine,
         return SS_OK;
     }
 
+    // Heap-allocate the event string so it survives until the Dart side
+    // processes it (NativeCallable.listener dispatches asynchronously).
+    // The callee frees via ss_free_string().
     engine->set_event_callback([callback, user_data](const std::string& event_json) {
-        callback(event_json.c_str(), user_data);
+        char* buf = alloc_string(event_json);
+        if (buf) {
+            callback(buf, user_data);
+        }
     });
 
     return SS_OK;

@@ -15,6 +15,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _urlController = TextEditingController();
+  bool _autoNavigated = false;
 
   @override
   void dispose() {
@@ -39,6 +40,27 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<SeekServeProvider>();
+
+    // DEV: Auto-navigate to file selection when metadata arrives.
+    if (!_autoNavigated && provider.torrents.isNotEmpty) {
+      final entry = provider.torrents.first;
+      if (entry.metadataReceived && entry.files != null && entry.files!.isNotEmpty) {
+        _autoNavigated = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => FileSelectionScreen(
+                torrentId: entry.torrentId,
+                torrentName: entry.status?.name ?? entry.torrentId,
+                autoPlay: true,
+              ),
+            ),
+          );
+        });
+      }
+    }
 
     return Scaffold(
       appBar: AppBar(

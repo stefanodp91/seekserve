@@ -52,10 +52,12 @@ class SeekServeProvider extends ChangeNotifier {
           savePath: savePath,
           streamPort: 0,
           controlPort: 0,
+          logLevel: 'debug',
         ),
       );
 
       _serverPort = _client!.startServer();
+      debugPrint('SERVER: startServer returned port=$_serverPort');
 
       _eventSub = _client!.events.listen(_onEvent, onError: _onEventError);
 
@@ -128,8 +130,10 @@ class SeekServeProvider extends ChangeNotifier {
     if (_client == null) return null;
 
     try {
+      debugPrint('STREAM: selectFile($torrentId, $fileIndex)');
       _client!.selectFile(torrentId, fileIndex);
       final url = _client!.getStreamUrl(torrentId, fileIndex);
+      debugPrint('STREAM: getStreamUrl → $url');
       _errorMessage = null;
       notifyListeners();
       return url;
@@ -178,11 +182,25 @@ class SeekServeProvider extends ChangeNotifier {
     for (final entry in _torrents.values) {
       try {
         entry.status = _client!.getStatus(entry.torrentId);
+        // Update metadataReceived from status polling (in case the event
+        // callback failed or was delayed).
+        if (entry.status?.hasMetadata == true && !entry.metadataReceived) {
+          entry.metadataReceived = true;
+          entry.files ??= _tryListFiles(entry.torrentId);
+        }
       } catch (_) {
         // Ignore polling errors (torrent may have been removed).
       }
     }
     notifyListeners();
+  }
+
+  List<FileInfo>? _tryListFiles(String torrentId) {
+    try {
+      return _client!.listFiles(torrentId);
+    } catch (_) {
+      return null;
+    }
   }
 
   @override

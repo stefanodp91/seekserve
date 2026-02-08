@@ -15,14 +15,22 @@ fast seek, and offline caching via a C API wrapped with dart:ffi.
   s.dependency       'Flutter'
   s.swift_version    = '5.0'
 
+  # Trampoline file that references all ss_* symbols so the linker
+  # keeps them alive (Dart FFI uses dlsym at runtime).
+  s.source_files = 'Classes/**/*'
+
   # Pre-built static XCFramework (built by scripts/build-flutter-natives.sh)
   s.vendored_frameworks = 'Frameworks/seekserve.xcframework'
   s.static_framework = true
 
-  # Link C++ standard library (libtorrent is C++)
+  # System frameworks required by libtorrent / seekserve
+  s.frameworks = 'SystemConfiguration'
+
+  # Link C++ standard library and system libs (libtorrent is C++)
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
-    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
-    'OTHER_LDFLAGS' => '-lc++ -lsqlite3',
+    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386 x86_64',
+    'OTHER_LDFLAGS' => '-lc++ -lsqlite3 -lz',
   }
+
 end

@@ -58,7 +58,22 @@ class _InitWrapperState extends State<_InitWrapper> {
     await Directory(savePath).create(recursive: true);
 
     if (!mounted) return;
-    context.read<SeekServeProvider>().init(savePath);
+    final provider = context.read<SeekServeProvider>();
+    provider.init(savePath);
+    debugPrint('ENGINE: init done, serverPort=${provider.serverPort}, '
+        'isReady=${provider.isReady}, error=${provider.errorMessage}');
+
+    // Auto-add test torrent for development.
+    provider.addTorrent(
+      'magnet:?xt=urn:btih:88594aaacbde40ef3e2510c47374ec0aa396c08e'
+      '&dn=bbb_sunflower_1080p_30fps_normal.mp4'
+      '&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce'
+      '&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce'
+      '&tr=udp%3A%2F%2Ftracker.openbittorrent.com%3A6969%2Fannounce'
+      '&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce'
+      '&ws=http%3A%2F%2Fdistribution.bbb3d.renderfarming.net%2Fvideo%2Fmp4%2Fbbb_sunflower_1080p_30fps_normal.mp4',
+    );
+
     setState(() => _initialised = true);
   }
 
