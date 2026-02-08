@@ -1,8 +1,10 @@
 # SeekServe
 
-**Edge-first torrent streaming SDK with HTTP Range support, intelligent piece scheduling, and offline caching.**
+**Edge-first torrent streaming SDK with HTTP Range support, intelligent piece scheduling, offline caching, WebTorrent, and a Flutter plugin.**
 
 SeekServe is a C++17 library that downloads torrent content and serves it locally via an HTTP Range-compliant server on loopback. Video players like VLC can connect to it and play, seek, and scrub through torrent video as if it were a regular HTTP stream. An intelligent piece scheduler ensures the right pieces are downloaded first for instant playback and fast seek.
+
+The SDK includes a Flutter plugin (`flutter_seekserve`) with FFI bindings, pre-built native libraries for iOS and Android, a high-level Dart API with async events, and an example app with video playback.
 
 ---
 
@@ -17,19 +19,25 @@ SeekServe is a C++17 library that downloads torrent content and serves it locall
 - [Piece Scheduling Strategy](#piece-scheduling-strategy)
 - [Project Structure](#project-structure)
 - [Build & Run](#build--run)
+- [Flutter Plugin](#flutter-plugin)
 - [Usage](#usage)
 - [Testing the System](#testing-the-system)
 - [C API (FFI)](#c-api-ffi)
 - [REST Control API](#rest-control-api)
 - [Configuration](#configuration)
 - [Testing](#testing)
+- [Cross-Compilation](#cross-compilation)
+- [WebTorrent](#webtorrent)
 - [Documentation Index](#documentation-index)
+- [Dependencies](#dependencies)
+- [Milestone Status](#milestone-status)
 - [License](#license)
 
 ---
 
 ## Features
 
+### C++ SDK (Phase 1)
 - **HTTP Range streaming** (RFC 7233) — 200 OK, 206 Partial Content, 416 Range Not Satisfiable
 - **Intelligent piece scheduler** — hot window, lookahead, seek boost, adaptive mode switching
 - **Multi-file torrent support** — enumerate files, select one for streaming, correct per-file byte mapping
@@ -38,8 +46,22 @@ SeekServe is a C++17 library that downloads torrent content and serves it locall
 - **REST control API** — add/remove torrents, list files, select streams, monitor status via JSON
 - **Hardened servers** — connection limits, socket timeouts, body size limits, token auth, CORS
 - **Loopback-only binding** — secure by default, no network exposure
-- **Cross-platform** — macOS, Linux; cross-compile scripts for iOS (arm64) and Android (arm64-v8a)
 - **Sanitizer support** — ASan and TSan build presets out of the box
+- **189 tests** — 138 unit + 32 integration + 19 C API
+
+### Flutter Plugin (Phase 2)
+- **FFI bindings** — auto-generated via `ffigen` from `seekserve_c.h`
+- **Native builds** — pre-built XCFramework (iOS) and `.so` (Android arm64-v8a, armeabi-v7a, x86_64)
+- **Dart API** — `SeekServeClient` with async methods, `Stream<SeekServeEvent>` for real-time events
+- **Event system** — `NativeCallable.listener` bridges C callbacks to Dart isolate
+- **Example app** — torrent input, file selection, `media_kit` video player, live status display
+- **14 Dart unit tests** for model classes
+
+### WebTorrent (M13)
+- **WebRTC peer connections** via libdatachannel (libtorrent master branch)
+- **STUN server** configured automatically (`stun.l.google.com:19302`)
+- **WebTorrent trackers** supported via `extra_trackers` config (e.g. `wss://tracker.webtorrent.dev`)
+- **Compile-time toggle** — `SEEKSERVE_ENABLE_WEBTORRENT=ON/OFF`, graceful fallback to standard BitTorrent
 
 ---
 
@@ -96,6 +118,14 @@ SeekServe is a C++17 library that downloads torrent content and serves it locall
    | VLC / Player |                          | curl / UI    |
    | HTTP Range   |                          | REST JSON    |
    +-------------+                           +--------------+
+          ^
+          |
+   +------+----------+
+   | Flutter Plugin   |
+   | (dart:ffi)       |
+   | SeekServeClient  |
+   | media_kit player |
+   +-----------------+
 ```
 
 ---
@@ -103,7 +133,7 @@ SeekServe is a C++17 library that downloads torrent content and serves it locall
 ## High-Level Data Flow
 
 ```
-  .torrent file                        Video Player (VLC)
+  .torrent file                        Video Player (VLC / media_kit)
   or magnet URI                              |
        |                                     | GET /stream/{id}/{fi}
        v                                     | Range: bytes=X-Y
@@ -114,28 +144,27 @@ SeekServe is a C++17 library that downloads torrent content and serves it locall
        v                      |  parse range, find source   |
 +------+---------+            +---------+-------------------+
 | lt::session    |                      |
-| (BitTorrent)   |                      | notify scheduler
-|  downloads     |                      v
-|  pieces        |            +---------+-------------------+
-+------+---------+            |    StreamingScheduler       |
-       |                      |  set_piece_deadline() on    |
-       | piece_finished       |  hot window + lookahead     |
-       | alert                +---------+-------------------+
-       v                                |
-+------+---------+                      |
-| AlertDispatcher|                      v
-|  marks piece   |            +---------+-------------------+
-|  complete in   |            |       ByteSource            |
-|  availability  |  signals   |  read(offset, len)          |
-|  index         +----------->|  waits for pieces if needed |
-|  notifies      |    cv      |  reads from disk            |
-|  ByteSource    |            +---------+-------------------+
+| (BitTorrent    |                      | notify scheduler
+|  + WebTorrent) |                      v
+|  downloads     |            +---------+-------------------+
+|  pieces        |            |    StreamingScheduler       |
++------+---------+            |  set_piece_deadline() on    |
+       |                      |  hot window + lookahead     |
+       | piece_finished       +---------+-------------------+
+       | alert                          |
+       v                                v
++------+---------+            +---------+-------------------+
+| AlertDispatcher|            |       ByteSource            |
+|  marks piece   |  signals   |  read(offset, len)          |
+|  complete in   +----------->|  waits for pieces if needed |
+|  availability  |    cv      |  reads from disk            |
+|  index         |            +---------+-------------------+
 +----------------+                      |
                                         | 64KB chunks
                                         v
                               +---------+-------------------+
                               |   TCP socket (loopback)     |
-                              |   -> VLC renders video      |
+                              |   -> Player renders video   |
                               +-----------------------------+
 ```
 
@@ -144,22 +173,32 @@ SeekServe is a C++17 library that downloads torrent content and serves it locall
 ## Module Dependency Graph
 
 ```
-                    seekserve-capi  (shared lib, C API)
-                         |
-                         | links
-                         v
-                    seekserve-serve (static lib)
-                    /          \
-                   /            \
-                  v              v
-          seekserve-core    Boost.Beast
-          (static lib)      Boost.Asio
-               |
-               v
-          libtorrent (submodule)
-               |
-               v
-          Boost, OpenSSL
+              Flutter App (Dart)
+                    |
+                    | dart:ffi
+                    v
+              flutter_seekserve (plugin)
+                    |
+                    | NativeCallable.listener
+                    v
+              seekserve-capi  (shared/static lib, C API)
+                    |
+                    | links
+                    v
+              seekserve-serve (static lib)
+              /          \
+             /            \
+            v              v
+    seekserve-core    Boost.Beast
+    (static lib)      Boost.Asio
+         |
+         v
+    libtorrent (submodule, master branch)
+    /          \
+   v            v
+ Boost       libdatachannel (WebTorrent)
+ OpenSSL     /       |       \
+           libjuice usrsctp  plog
 ```
 
 Build targets:
@@ -168,6 +207,7 @@ Build targets:
 seekserve-core     -->  libseekserve-core.a
 seekserve-serve    -->  libseekserve-serve.a    (depends on core)
 seekserve-capi     -->  libseekserve.dylib/.so  (depends on serve)
+                   -->  libseekserve.a           (iOS static, with SEEKSERVE_CAPI_STATIC=ON)
 seekserve-demo     -->  seekserve-demo           (depends on serve)
 seekserve-*-tests  -->  test executables          (depends on serve + capi)
 ```
@@ -184,6 +224,7 @@ seekserve-*-tests  -->  test executables          (depends on serve + capi)
 |  [1] libtorrent internal          (network I/O, disk I/O)          |
 |      - never touched directly                                       |
 |      - managed by lt::session                                       |
+|      - includes WebRTC data channels when WebTorrent is ON         |
 |                                                                     |
 |  [2] AlertDispatcher              (dedicated thread)                |
 |      - pop_alerts() loop, 100ms poll                                |
@@ -201,7 +242,7 @@ seekserve-*-tests  -->  test executables          (depends on serve + capi)
 |      - tick timer (1s periodic)                                     |
 |      - thread-per-connection for streams (detached std::thread)     |
 |                                                                     |
-|  [4] Caller thread                (user's thread)                   |
+|  [4] Caller thread                (user's thread / Dart isolate)   |
 |      - creates SeekServeEngine                                      |
 |      - calls add_torrent, select_file, start_server, etc.          |
 |                                                                     |
@@ -221,10 +262,10 @@ Synchronization:
 
 ## Streaming Pipeline
 
-When VLC sends an HTTP Range request, the following pipeline executes:
+When a player sends an HTTP Range request, the following pipeline executes:
 
 ```
-  VLC Request: GET /stream/abc123/8?token=XXX  Range: bytes=1000000-1999999
+  Player Request: GET /stream/abc123/8?token=XXX  Range: bytes=1000000-1999999
          |
          v
   [1] HttpRangeServer::handle_connection()
@@ -307,89 +348,111 @@ seekserve/
 |
 |-- CMakeLists.txt              Root build: project options, subdirs, libtorrent
 |-- CMakePresets.json           Build presets: debug, release, asan, tsan
-|-- vcpkg.json                  Dependency manifest (Boost, spdlog, sqlite3, etc.)
+|-- vcpkg.json                  Dependency manifest (Boost, spdlog, sqlite3, OpenSSL, etc.)
 |-- setup.sh                    One-command bootstrap: vcpkg + submodules + build
-|-- .gitignore                  Build artifacts, SQLite DBs, IDE files
+|-- .gitmodules                 libtorrent submodule (master branch)
 |
 |-- extern/
 |   +-- libtorrent/             Git submodule (arvidn/libtorrent@master)
-|
-|-- fixtures/
-|   +-- Sintel_archive.torrent  Test torrent (CC BY 3.0, 12 files, 4 MP4s)
+|       +-- deps/
+|           +-- libdatachannel/ WebRTC Data Channels (WebTorrent)
+|           +-- libjuice/       ICE / NAT traversal
+|           +-- usrsctp/        SCTP protocol
+|           +-- plog/           Logging (header-only)
 |
 |-- seekserve-core/             STATIC LIB: torrent engine + scheduling
-|   |-- CMakeLists.txt
 |   |-- include/seekserve/
 |   |   |-- types.hpp               TorrentId, FileIndex, PieceSpan, ByteRange, FileInfo
-|   |   |-- error.hpp               errc enum, Result<T> (variant-based), error category
+|   |   |-- error.hpp               errc enum, Result<T>, error category
 |   |   |-- config.hpp              SessionConfig, SchedulerConfig, ServerConfig, CacheConfig
 |   |   |-- session_manager.hpp     lt::session lifecycle, add/remove, handle registry
 |   |   |-- alert_dispatcher.hpp    Dedicated thread, pop_alerts(), typed handler registry
-|   |   |-- metadata_catalog.hpp    Torrent -> file enumeration, file selection, priority
+|   |   |-- metadata_catalog.hpp    Torrent -> file list, file selection, priority
 |   |   |-- byte_range_mapper.hpp   HTTP byte ranges -> PieceSpan via file_storage::map_file()
-|   |   |-- piece_availability.hpp  Lock-free atomic bitfield, contiguous byte calculation
+|   |   |-- piece_availability.hpp  Lock-free atomic bitfield, contiguous byte calc
 |   |   |-- byte_source.hpp         read(offset, len) with cv wait, disk read, cancel
 |   |   |-- streaming_scheduler.hpp Hot window, lookahead, seek boost, mode switching
 |   |   +-- offline_cache.hpp       SQLite index, LRU eviction, quota, offline-ready
-|   +-- src/
-|       +-- *.cpp                   Implementations for all core modules
+|   +-- src/*.cpp
 |
 |-- seekserve-serve/            STATIC LIB: HTTP servers + engine facade
-|   |-- CMakeLists.txt
 |   |-- include/seekserve/
 |   |   |-- engine.hpp              SeekServeEngine facade (single entry point)
 |   |   |-- http_range_server.hpp   Beast HTTP, /stream/{id}/{fi}, Range/206
 |   |   |-- control_api_server.hpp  Beast HTTP, REST JSON API, CORS
 |   |   +-- range_parser.hpp        RFC 7233 Range header parser
-|   +-- src/
-|       |-- engine.cpp              Facade wiring: alerts -> modules, tick timer
-|       |-- http_range_server.cpp   Streaming, auth, connection limits, timeouts
-|       |-- control_api_server.cpp  REST endpoints, auth, body limits
-|       |-- range_parser.cpp        bytes=start-end, bytes=start-, bytes=-suffix
-|       +-- token_auth.cpp          Token generation + constant-time validation
+|   +-- src/*.cpp
 |
-|-- seekserve-capi/             SHARED LIB: C API for FFI (Flutter, Swift, etc.)
-|   |-- CMakeLists.txt
-|   |-- include/
-|   |   +-- seekserve_c.h          Opaque handle, extern "C", error codes, callbacks
-|   +-- src/
-|       +-- seekserve_c.cpp         Bridge: JSON config, map_error, alloc_string
+|-- seekserve-capi/             SHARED/STATIC LIB: C API for FFI
+|   |-- include/seekserve_c.h       Opaque handle, extern "C", error codes, callbacks
+|   +-- src/seekserve_c.cpp         Bridge: JSON config, map_error, alloc_string
 |
 |-- seekserve-demo/             EXECUTABLE: CLI demo
-|   |-- CMakeLists.txt
-|   +-- src/
-|       +-- main.cpp                Add torrent, list files, select, stream URL
+|   +-- src/main.cpp                Add torrent, list files, select, stream URL
 |
-|-- tests/
-|   |-- CMakeLists.txt              3 test targets: unit, integration, capi
-|   |-- unit/
-|   |   |-- test_byte_range_mapper.cpp     Byte-to-piece mapping, cross-piece, multi-file
-|   |   |-- test_piece_availability.cpp    Atomic bitfield, contiguous, progress, reset
-|   |   |-- test_metadata_catalog.cpp      File enumeration, selection, priorities
-|   |   |-- test_byte_source.cpp           Read, wait, cancel, timeout
-|   |   |-- test_streaming_scheduler.cpp   Deadlines, seek boost, mode switching
-|   |   |-- test_range_parser.cpp          RFC 7233 parsing (20+ cases)
-|   |   |-- test_offline_cache.cpp         SQLite CRUD, LRU eviction, quota
-|   |   +-- test_capi.cpp                  C API lifecycle, null guards, full lifecycle
-|   +-- integration/
-|       |-- test_session_lifecycle.cpp     lt::session + metadata + file selection
-|       |-- test_http_range_server.cpp     HTTP GET/HEAD, 200/206/403/404/416
-|       |-- test_end_to_end_stream.cpp     Control API + torrent + file selection
-|       +-- test_stress.cpp                Concurrent connections, rapid seek, limits
+|-- tests/                      189 tests (138 unit + 32 integration + 19 C API)
+|   |-- unit/                       ByteRangeMapper, PieceAvailability, Scheduler, etc.
+|   +-- integration/                HTTP server, session lifecycle, stress tests
 |
-|-- docs/                       Specification & design documents
-|   |-- ARCHITECTURE.md            Module overview, data flow, thread model
-|   |-- HTTP_RANGE_SPEC.md         Endpoint, range handling, response codes
-|   |-- SCHEDULER_POLICY.md        Hot/lookahead/seek boost, modes, parameters
-|   |-- STORAGE_POLICY.md          Piece storage, offline cache, SQLite schema
-|   |-- SECURITY.md                Loopback, auth, limits, logging safety
-|   +-- C_API.md                   Function reference, error codes, memory mgmt
+|-- flutter_seekserve/          FLUTTER PLUGIN: Dart API + native bindings
+|   |-- pubspec.yaml                ffiPlugin: true, dependencies
+|   |-- ffigen.yaml                 Config for dart run ffigen
+|   |-- native_header/
+|   |   +-- seekserve_c.h           Copy of C API header (ffigen input)
+|   |-- lib/
+|   |   |-- seekserve.dart          Public barrel export
+|   |   +-- src/
+|   |       |-- bindings_generated.dart  Auto-generated FFI bindings (DO NOT EDIT)
+|   |       |-- native_library.dart      Platform DynamicLibrary loader
+|   |       |-- seekserve_client.dart    High-level Dart API
+|   |       |-- seekserve_exception.dart Error code mapping
+|   |       +-- models/
+|   |           |-- file_info.dart       FileInfo with isVideo, extension
+|   |           |-- torrent_status.dart  TorrentStatus with all metrics
+|   |           |-- seekserve_config.dart Config -> JSON serialization
+|   |           +-- seekserve_event.dart  Sealed class: MetadataReceived, FileCompleted, etc.
+|   |-- ios/
+|   |   |-- flutter_seekserve.podspec    Vendored XCFramework, static_framework
+|   |   +-- Frameworks/                  Pre-built seekserve.xcframework (gitignored)
+|   |-- android/
+|   |   |-- build.gradle                 minSdk=28, abiFilters, jniLibs
+|   |   +-- src/main/jniLibs/            Pre-built .so files (gitignored)
+|   |       |-- arm64-v8a/libseekserve.so
+|   |       |-- armeabi-v7a/libseekserve.so
+|   |       +-- x86_64/libseekserve.so
+|   |-- test/
+|   |   +-- models_test.dart             14 unit tests for Dart models
+|   +-- example/                     EXAMPLE APP
+|       |-- lib/
+|       |   |-- main.dart                MediaKit init, Provider setup
+|       |   |-- providers/
+|       |   |   +-- seekserve_provider.dart  State management, polling, events
+|       |   |-- screens/
+|       |   |   |-- home_screen.dart     Torrent URL input, active torrent list
+|       |   |   |-- file_selection_screen.dart  File list, tap to stream
+|       |   |   +-- player_screen.dart   media_kit video player + status overlay
+|       |   +-- widgets/
+|       |       |-- torrent_card.dart    Progress bar, rates, peer count
+|       |       +-- status_bar.dart      Download/upload rates, mode badge
+|       |-- ios/                         Xcode project, Info.plist (ATS localhost)
+|       +-- android/                     Gradle, network_security_config.xml
 |
-|-- scripts/                    Cross-compilation
-|   |-- build-ios.sh               iOS arm64 via vcpkg arm64-ios triplet
-|   +-- build-android.sh           Android arm64-v8a via NDK toolchain
+|-- scripts/
+|   |-- build-ios.sh                 iOS arm64 (device + simulator) -> XCFramework
+|   |-- build-android.sh            Android 3 ABIs via NDK -> .so files
+|   +-- build-flutter-natives.sh    Orchestrator: build + copy to plugin
 |
-+-- PROGRESS.md                 Milestone checklist (M1-M8 complete)
+|-- triplets/
+|   +-- arm-neon-android.cmake       Custom vcpkg triplet (NDK 29 NEON=ON)
+|
+|-- docs/                            Specification & design documents
+|   |-- ARCHITECTURE.md, HTTP_RANGE_SPEC.md, SCHEDULER_POLICY.md
+|   |-- STORAGE_POLICY.md, SECURITY.md, C_API.md
+|
+|-- fixtures/
+|   +-- Sintel_archive.torrent       Test torrent (CC BY 3.0, 12 files, 4 MP4s)
+|
++-- PROGRESS.md                      Detailed milestone checklist (M1-M13)
 ```
 
 ---
@@ -412,9 +475,10 @@ seekserve/
 This will:
 1. Install missing tools via Homebrew (macOS) or check availability (Linux)
 2. Clone and bootstrap vcpkg at `~/vcpkg`
-3. Initialize the libtorrent git submodule
-4. Configure CMake with vcpkg toolchain
-5. Build all targets
+3. Initialize the libtorrent git submodule + recursive deps (libdatachannel for WebTorrent)
+4. Detect WebTorrent availability (libdatachannel present -> `WEBTORRENT=ON`)
+5. Configure CMake with vcpkg toolchain
+6. Build all targets (core, serve, capi, demo, tests)
 
 ### Build Variants
 
@@ -442,6 +506,132 @@ The demo will:
 1. Load the torrent and display all files
 2. Auto-select the smallest MP4
 3. Print a stream URL you can paste into VLC
+
+### Run Tests
+
+```bash
+cd build/debug && ctest    # All 189 tests
+```
+
+---
+
+## Flutter Plugin
+
+### Overview
+
+The `flutter_seekserve` plugin wraps the C API via `dart:ffi`, providing a high-level Dart API with async events. It supports iOS and Android with pre-built native libraries.
+
+### Building Native Libraries
+
+Native libraries are **not committed** to the repository (they are 200+ MB). Build them with:
+
+```bash
+# Build for all platforms
+scripts/build-flutter-natives.sh all
+
+# Or build individually
+scripts/build-flutter-natives.sh ios       # XCFramework (device + simulator)
+scripts/build-flutter-natives.sh android   # 3 ABIs (.so files, stripped)
+```
+
+This builds the C++ SDK with all dependencies (libtorrent, Boost, OpenSSL, libdatachannel) and copies the artifacts to the plugin directories:
+- iOS: `flutter_seekserve/ios/Frameworks/seekserve.xcframework`
+- Android: `flutter_seekserve/android/src/main/jniLibs/{abi}/libseekserve.so`
+
+### Library Sizes
+
+| Platform | Architecture | Size (stripped) |
+|----------|-------------|----------------|
+| iOS | arm64 (device) | ~85 MB (static, combined with all deps) |
+| iOS | arm64 (simulator) | ~85 MB |
+| Android | arm64-v8a | ~15 MB |
+| Android | armeabi-v7a | ~10 MB |
+| Android | x86_64 | ~15 MB |
+
+### Dart API
+
+```dart
+import 'package:flutter_seekserve/seekserve.dart';
+
+// Create client with config
+final client = SeekServeClient(config: SeekServeConfig(
+  savePath: '/path/to/downloads',
+  authToken: 'my_secret',
+  enableWebtorrent: true,
+  extraTrackers: ['wss://tracker.webtorrent.dev'],
+));
+
+// Start HTTP servers
+final port = await client.startServer();
+
+// Add torrent
+final torrentId = await client.addTorrent('magnet:?xt=urn:btih:...');
+
+// Listen for events
+client.events.listen((event) {
+  switch (event) {
+    case MetadataReceived(:final torrentId):
+      print('Metadata ready for $torrentId');
+    case FileCompleted(:final torrentId, :final fileIndex):
+      print('File $fileIndex completed');
+    case TorrentError(:final message):
+      print('Error: $message');
+  }
+});
+
+// List files and select one
+final files = await client.listFiles(torrentId);
+final videoFile = files.firstWhere((f) => f.isVideo);
+await client.selectFile(torrentId, videoFile.index);
+
+// Get stream URL for video player
+final url = await client.getStreamUrl(torrentId, videoFile.index);
+// -> http://127.0.0.1:54321/stream/{id}/{fi}?token=...
+
+// Monitor progress
+final status = await client.getStatus(torrentId);
+print('Progress: ${(status.progress * 100).toStringAsFixed(1)}%');
+print('Peers: ${status.numPeers}, Rate: ${status.downloadRate} B/s');
+
+// Cleanup
+client.dispose();
+```
+
+### Example App
+
+The example app demonstrates all plugin capabilities:
+
+```bash
+cd flutter_seekserve/example
+
+# iOS (requires native libs built first)
+flutter build ios --no-codesign
+
+# Android (requires native libs built first)
+flutter build apk
+```
+
+**Screens:**
+1. **Home** — paste torrent URL/magnet, see active torrents with progress, rates, peer count
+2. **File Selection** — browse all files, video files highlighted, tap to stream
+3. **Player** — `media_kit` video player with live status bar (progress, rates, peers, mode)
+
+### Flutter Tests
+
+```bash
+cd flutter_seekserve
+flutter test          # 14 Dart unit tests
+flutter analyze       # Static analysis
+```
+
+### Requirements
+
+| Platform | Minimum |
+|----------|---------|
+| iOS | 15.0 |
+| Android | API 28 (Android 9) |
+| Dart | 3.2+ |
+| Flutter | 3.19+ |
 
 ---
 
@@ -487,27 +677,17 @@ VLC will:
 
 SeekServe ships with a reference torrent for end-to-end testing:
 
-```
-fixtures/Sintel_archive.torrent
-```
-
-**Sintel** is an open-source short film by the [Blender Foundation](https://durian.blender.org/), released under the [Creative Commons Attribution 3.0](https://creativecommons.org/licenses/by/3.0/) license. This makes it freely distributable and ideal for development and testing of streaming applications.
+**Sintel** is an open-source short film by the [Blender Foundation](https://durian.blender.org/), released under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
 
 | Property | Value |
 |----------|-------|
-| Title | *Sintel* (2010) |
-| Author | Blender Foundation / Durian Open Movie Project |
-| License | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) |
-| Source | [archive.org/details/Sintel](https://archive.org/details/Sintel) |
 | Infohash | `e4d37e62d14ba96d29b9e760148803b458aee5b6` |
 | Files | 12 total (4 MP4, 1 MKV, 1 OGV, 1 AVI, subtitles, poster) |
 | Test target | Index 8 — `sintel-2048-stereo_512kb.mp4` (73.8 MB) |
 
-### Torrent File Contents
-
 ```
 Index  Size       File
-─────  ─────────  ──────────────────────────────────────────
+-----  ---------  ------------------------------------------
   0       483 B   Sintel.de.srt
   1       549 B   Sintel.en.srt
   2       471 B   Sintel.es.srt
@@ -522,63 +702,37 @@ Index  Size       File
  11   129.5 KB    poster.jpg
 ```
 
-The 512kb MP4 (index 8) is used as the primary test target because it is small enough for fast downloads while still being a fully playable H.264 video.
-
 ### Quick Functional Test
 
-**1. Build and run the demo:**
-
 ```bash
+# 1. Build and run the demo
 ./setup.sh debug
 ./build/debug/seekserve-demo/seekserve-demo fixtures/Sintel_archive.torrent
-```
 
-The demo will:
-- Load the torrent and display all 12 files
-- Auto-select index 8 (`sintel-2048-stereo_512kb.mp4`)
-- Start the HTTP Range server on a random loopback port
-- Print a stream URL with an auth token
+# 2. Open the stream URL in VLC
+vlc "http://127.0.0.1:PORT/stream/TORRENT_ID/8?token=TOKEN"
 
-**2. Open in VLC:**
-
-```bash
-# Copy the URL from the demo output, e.g.:
-vlc "http://127.0.0.1:54321/stream/e4d37e62d14ba96d29b9e760148803b458aee5b6/8?token=abc123"
-```
-
-**3. Verify streaming behavior:**
-
-```
-+-- Playback starts within seconds (streaming-first mode)
-+-- Seek forward/backward responds within 1-2s (seek boost activates)
-+-- No full-file download required before playback begins
-+-- Piece scheduler prioritizes hot window around playhead
+# 3. Verify:
+#    - Playback starts within seconds (streaming-first mode)
+#    - Seek forward/backward responds within 1-2s (seek boost activates)
+#    - Piece scheduler prioritizes hot window around playhead
 ```
 
 ### Manual HTTP Verification
 
-You can also test the HTTP Range server directly with `curl`:
-
 ```bash
-# HEAD request — verify Accept-Ranges and Content-Length
+# HEAD request
 curl -I "http://127.0.0.1:PORT/stream/TORRENT_ID/8?token=TOKEN"
+# -> 200 OK, Accept-Ranges: bytes, Content-Length: 77395579, Content-Type: video/mp4
 
-# Expected:
-#   HTTP/1.1 200 OK
-#   Accept-Ranges: bytes
-#   Content-Length: 77395579
-#   Content-Type: video/mp4
-
-# Range request — first 1KB
+# Range request (first 1KB)
 curl -r 0-1023 -o /dev/null -w "%{http_code}" \
   "http://127.0.0.1:PORT/stream/TORRENT_ID/8?token=TOKEN"
+# -> 206
 
-# Expected: 206
-
-# Invalid token — expect 403
+# Invalid token
 curl -I "http://127.0.0.1:PORT/stream/TORRENT_ID/8?token=wrong"
-
-# Expected: 403 Forbidden
+# -> 403 Forbidden
 ```
 
 ### Control API Verification
@@ -587,63 +741,10 @@ curl -I "http://127.0.0.1:PORT/stream/TORRENT_ID/8?token=wrong"
 TOKEN="your_auth_token"
 BASE="http://127.0.0.1:CONTROL_PORT"
 
-# List active torrents
 curl -H "Authorization: Bearer $TOKEN" "$BASE/api/torrents"
-
-# List files in a torrent
 curl -H "Authorization: Bearer $TOKEN" "$BASE/api/torrents/TORRENT_ID/files"
-
-# Get torrent status (download rate, peers, progress, scheduler mode)
 curl -H "Authorization: Bearer $TOKEN" "$BASE/api/torrents/TORRENT_ID/status"
-
-# Get stream URL for file index 8
 curl -H "Authorization: Bearer $TOKEN" "$BASE/api/torrents/TORRENT_ID/stream-url"
-```
-
-### Automated Test Suite
-
-```bash
-# Run all 189 tests (no network required)
-./build/debug/tests/seekserve-unit-tests          # 138 unit tests
-./build/debug/tests/seekserve-integration-tests    # 32 integration tests
-./build/debug/tests/seekserve-capi-tests           # 19 C API tests
-```
-
-Unit and integration tests use synthetic in-memory torrents — no actual BitTorrent network traffic is generated. The Sintel `.torrent` file is loaded for metadata parsing tests only (verifying file enumeration, piece mapping, and range calculations against known values).
-
-### Sanitizer Verification
-
-```bash
-# AddressSanitizer — detects memory errors (use-after-free, buffer overflow, leaks)
-./setup.sh asan
-./build/asan/tests/seekserve-unit-tests
-./build/asan/tests/seekserve-integration-tests
-./build/asan/tests/seekserve-capi-tests
-
-# ThreadSanitizer — detects data races and deadlocks
-./setup.sh tsan
-./build/tsan/tests/seekserve-unit-tests
-./build/tsan/tests/seekserve-integration-tests
-./build/tsan/tests/seekserve-capi-tests
-```
-
-### Stress Tests
-
-The integration suite includes stress tests that verify server robustness:
-
-```
-StressTest.ConcurrentHttpConnections   20 threads sending Range requests simultaneously
-StressTest.RapidSeekSimulation         50 sequential random-offset requests (simulates VLC scrubbing)
-StressTest.ConnectionLimitEnforced     Verifies max_concurrent_streams rejects excess connections
-```
-
-### Offline Playback Test
-
-```bash
-# 1. Start demo, let the full file download (progress reaches 100%)
-# 2. Disconnect from network (disable Wi-Fi / unplug ethernet)
-# 3. The stream URL continues to work — ByteSource reads directly from disk
-# 4. VLC can still play and seek through the complete file
 ```
 
 ---
@@ -686,8 +787,6 @@ See [docs/C_API.md](docs/C_API.md) for the full reference.
 
 ## REST Control API
 
-The Control API server provides JSON endpoints for remote control:
-
 ```
 POST   /api/torrents                      Add torrent (body: {"uri":"..."})
 GET    /api/torrents                      List all torrents
@@ -708,7 +807,7 @@ All responses include `Access-Control-Allow-Origin: *` for CORS.
 
 ## Configuration
 
-Engine configuration is passed as JSON to `ss_engine_create()`:
+Engine configuration is passed as JSON to `ss_engine_create()` (C API) or via `SeekServeConfig` (Dart):
 
 ```json
 {
@@ -719,9 +818,10 @@ Engine configuration is passed as JSON to `ss_engine_create()`:
     "max_storage_bytes": 0,
     "cache_db_path": "seekserve_cache.db",
     "log_level": "info",
-    "enable_webtorrent": false,
+    "enable_webtorrent": true,
     "extra_trackers": [
-        "udp://tracker.opentrackr.org:1337/announce"
+        "udp://tracker.opentrackr.org:1337/announce",
+        "wss://tracker.webtorrent.dev"
     ]
 }
 ```
@@ -735,8 +835,8 @@ Engine configuration is passed as JSON to `ss_engine_create()`:
 | `max_storage_bytes` | `0` (unlimited) | Offline cache quota |
 | `cache_db_path` | `seekserve_cache.db` | SQLite database path |
 | `log_level` | `info` | `debug`, `info`, `warn`, `error` |
-| `enable_webtorrent` | `false` | WebRTC-based peers (experimental) |
-| `extra_trackers` | `[]` | Additional tracker URLs |
+| `enable_webtorrent` | `false` | Enable WebRTC-based BitTorrent peers |
+| `extra_trackers` | `[]` | Additional tracker URLs (including `wss://` for WebTorrent) |
 
 ---
 
@@ -745,14 +845,12 @@ Engine configuration is passed as JSON to `ss_engine_create()`:
 ### Run All Tests
 
 ```bash
-# Unit tests (138 tests, no network)
-./build/debug/tests/seekserve-unit-tests
+cd build/debug && ctest          # All 189 tests at once
 
-# Integration tests (32 tests, local only)
-./build/debug/tests/seekserve-integration-tests
-
-# C API tests (19 tests)
-./build/debug/tests/seekserve-capi-tests
+# Or individually:
+./build/debug/tests/seekserve-unit-tests          # 138 unit tests
+./build/debug/tests/seekserve-integration-tests    # 32 integration tests
+./build/debug/tests/seekserve-capi-tests           # 19 C API tests
 ```
 
 ### Test Breakdown
@@ -783,12 +881,124 @@ Engine configuration is passed as JSON to `ss_engine_create()`:
 ### Sanitizer Builds
 
 ```bash
-./setup.sh asan    # Build with AddressSanitizer
+./setup.sh asan    # AddressSanitizer
 ./build/asan/tests/seekserve-unit-tests
 
-./setup.sh tsan    # Build with ThreadSanitizer
+./setup.sh tsan    # ThreadSanitizer
 ./build/tsan/tests/seekserve-unit-tests
 ```
+
+### Flutter Tests
+
+```bash
+cd flutter_seekserve
+flutter test          # 14 Dart unit tests for model classes
+flutter analyze       # Static analysis (0 issues)
+```
+
+---
+
+## Cross-Compilation
+
+### iOS (arm64 device + arm64 simulator)
+
+```bash
+scripts/build-ios.sh
+```
+
+Builds a static XCFramework combining 22+ static libraries (libtorrent, Boost, OpenSSL, libdatachannel, seekserve) per architecture slice. Output:
+
+```
+build/ios-xcframework/seekserve.xcframework
+```
+
+### Android (arm64-v8a, armeabi-v7a, x86_64)
+
+```bash
+export ANDROID_NDK_HOME=/path/to/ndk   # or auto-detected from ~/Library/Android/sdk/ndk/
+scripts/build-android.sh
+```
+
+Builds shared libraries for 3 ABIs. Output:
+
+```
+build/android-arm64-v8a/seekserve-capi/libseekserve.so
+build/android-armeabi-v7a/seekserve-capi/libseekserve.so
+build/android-x86_64/seekserve-capi/libseekserve.so
+```
+
+### Flutter Native Build (all-in-one)
+
+```bash
+scripts/build-flutter-natives.sh all     # iOS + Android
+scripts/build-flutter-natives.sh ios     # iOS only
+scripts/build-flutter-natives.sh android # Android only
+```
+
+Builds for all platforms, strips Android `.so` files (109 MB -> 6-15 MB), and copies artifacts into the Flutter plugin directories.
+
+### Cross-Compile Notes
+
+- **iOS**: uses vcpkg `arm64-ios` / `arm64-ios-simulator` triplets. Static library (`SEEKSERVE_CAPI_STATIC=ON`).
+- **Android**: uses vcpkg `arm64-android` / `arm-neon-android` / `x64-android` triplets. Shared library.
+- **Android NDK 29**: requires `ANDROID_ARM_NEON=ON` for armeabi-v7a (custom triplet `triplets/arm-neon-android.cmake`).
+- **Android minSdk 28**: required because Boost.Asio uses `std::aligned_alloc` (API 28+).
+- **WebTorrent ON**: both scripts pass `SEEKSERVE_ENABLE_WEBTORRENT=ON`. OpenSSL is in vcpkg.json for cross-compile.
+
+---
+
+## WebTorrent
+
+SeekServe supports WebTorrent (WebRTC-based BitTorrent) via libtorrent's master branch and libdatachannel.
+
+### How It Works
+
+When WebTorrent is enabled:
+1. libtorrent is compiled with `TORRENT_USE_RTC` define
+2. The STUN server (`stun.l.google.com:19302`) is configured for NAT traversal
+3. WebTorrent trackers (e.g. `wss://tracker.webtorrent.dev`) can be added via `extra_trackers`
+4. The SDK can connect to both standard BitTorrent peers AND WebRTC-based browser peers
+
+### Enabling WebTorrent
+
+**Build time** (CMake):
+```bash
+-DSEEKSERVE_ENABLE_WEBTORRENT=ON    # Default when libdatachannel is detected
+```
+
+**Runtime** (config JSON):
+```json
+{
+    "enable_webtorrent": true,
+    "extra_trackers": ["wss://tracker.webtorrent.dev"]
+}
+```
+
+**Dart API:**
+```dart
+SeekServeConfig(
+  enableWebtorrent: true,
+  extraTrackers: ['wss://tracker.webtorrent.dev'],
+)
+```
+
+### WebTorrent Build Requirements
+
+WebTorrent pulls additional dependencies via recursive git submodules:
+- **libdatachannel** — WebRTC Data Channels
+- **libjuice** — ICE / NAT traversal
+- **usrsctp** — SCTP protocol
+- **plog** — Logging (header-only)
+
+These are automatically initialized by `setup.sh` (`git submodule update --init --recursive --force`).
+
+### Disabling WebTorrent
+
+```bash
+-DSEEKSERVE_ENABLE_WEBTORRENT=OFF
+```
+
+The SDK falls back to standard BitTorrent only. Binary size decreases by ~30%.
 
 ---
 
@@ -796,12 +1006,13 @@ Engine configuration is passed as JSON to `ss_engine_create()`:
 
 | Document | Description |
 |----------|-------------|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module overview, data flow diagrams, thread model, design decisions |
-| [docs/HTTP_RANGE_SPEC.md](docs/HTTP_RANGE_SPEC.md) | HTTP endpoint format, Range handling (RFC 7233), response codes, MIME types, streaming behavior |
-| [docs/SCHEDULER_POLICY.md](docs/SCHEDULER_POLICY.md) | Hot window, lookahead, seek boost, deadline budget, adaptive mode switching, configuration |
-| [docs/STORAGE_POLICY.md](docs/STORAGE_POLICY.md) | Piece storage, file selection, SQLite cache schema, LRU eviction, quota, offline playback |
-| [docs/SECURITY.md](docs/SECURITY.md) | Loopback binding, token auth, connection limits, request limits, logging safety, thread safety |
-| [docs/C_API.md](docs/C_API.md) | Complete C function reference, error codes, config JSON, memory management, thread safety |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module overview, data flow, thread model, design decisions |
+| [docs/HTTP_RANGE_SPEC.md](docs/HTTP_RANGE_SPEC.md) | HTTP endpoint format, Range handling (RFC 7233), response codes, MIME types |
+| [docs/SCHEDULER_POLICY.md](docs/SCHEDULER_POLICY.md) | Hot window, lookahead, seek boost, deadline budget, mode switching |
+| [docs/STORAGE_POLICY.md](docs/STORAGE_POLICY.md) | Piece storage, file selection, SQLite cache, LRU eviction, quota |
+| [docs/SECURITY.md](docs/SECURITY.md) | Loopback binding, token auth, connection limits, logging safety |
+| [docs/C_API.md](docs/C_API.md) | C function reference, error codes, config JSON, memory management |
+| [PROGRESS.md](PROGRESS.md) | Detailed milestone checklist with every task (M1-M13) |
 
 ---
 
@@ -809,45 +1020,39 @@ Engine configuration is passed as JSON to `ss_engine_create()`:
 
 | Dependency | Source | Purpose |
 |------------|--------|---------|
-| [libtorrent](https://github.com/arvidn/libtorrent) | Git submodule (master) | BitTorrent protocol, piece management |
-| Boost (Asio, Beast, System) | vcpkg | HTTP server, async I/O |
-| [nlohmann/json](https://github.com/nlohmann/json) | vcpkg | JSON serialization |
+| [libtorrent](https://github.com/arvidn/libtorrent) | Git submodule (master) | BitTorrent protocol, piece management, WebTorrent |
+| [libdatachannel](https://github.com/nicknacknow/libdatachannel) | Nested submodule (via libtorrent) | WebRTC Data Channels for WebTorrent |
+| Boost (Asio, Beast, JSON, System) | vcpkg | HTTP server, async I/O, JSON parsing |
+| [OpenSSL](https://www.openssl.org/) | vcpkg | TLS for libtorrent + libdatachannel |
+| [nlohmann/json](https://github.com/nlohmann/json) | vcpkg | JSON serialization (C++ side) |
 | [spdlog](https://github.com/gabime/spdlog) | vcpkg | Structured logging |
 | [SQLite3](https://www.sqlite.org/) | vcpkg | Offline cache persistence |
 | [Google Test](https://github.com/google/googletest) | vcpkg | Unit and integration testing |
+| [media_kit](https://github.com/media-kit/media-kit) | pub.dev (example app) | Video player for Flutter (libmpv-based) |
 
 ---
 
-## Cross-Compilation
+## Milestone Status
 
-### iOS (arm64)
+| Milestone | Description | Status |
+|-----------|-------------|--------|
+| **M1** | Project skeleton + libtorrent integration | Complete |
+| **M2** | ByteRangeMapper + PieceAvailability + unit tests | Complete |
+| **M3** | ByteSource (read with cv wait, cancel) | Complete |
+| **M4** | HTTP Range Server (RFC 7233, Beast, multi-file) | Complete |
+| **M5** | Streaming Scheduler (hot window, seek boost, modes) | Complete |
+| **M6** | Control API + Offline Cache (REST, SQLite, LRU) | Complete |
+| **M7** | C API Layer (opaque handle, JSON, callbacks) | Complete |
+| **M8** | Hardening (timeouts, limits, sanitizers, docs) | Complete |
+| **M9** | Flutter plugin scaffold + FFI bindings | Complete |
+| **M10** | Native library builds (iOS XCFramework + Android 3 ABIs) | Complete |
+| **M11** | Dart API layer + NativeCallable event system | Complete |
+| **M12** | Example app (media_kit player, file selection, status) | Complete |
+| **M13** | WebTorrent support (libtorrent master, libdatachannel) | Complete |
 
-```bash
-./scripts/build-ios.sh
-# Output: build/ios-arm64/seekserve-capi/libseekserve.dylib
-```
+**189 C++ tests** (138 unit + 32 integration + 19 C API) + **14 Dart tests** = **203 total tests**.
 
-### Android (arm64-v8a)
-
-```bash
-export ANDROID_NDK_HOME=/path/to/ndk
-./scripts/build-android.sh
-# Output: build/android-arm64/seekserve-capi/libseekserve.so
-```
-
-Both scripts build only the C API shared library (no tests, no demo).
-
----
-
-## Roadmap
-
-- **Phase 1 (Complete)**: C++ SDK with all 8 milestones (M1-M8)
-- **Phase 2 (Planned)**: Flutter plugin via FFI (`dart:ffi` + `ffigen`)
-  - M9: Flutter plugin structure
-  - M10: iOS integration (Podspec, static framework)
-  - M11: Android integration (NDK, Gradle)
-  - M12: Dart API layer (Streams, async/await)
-  - M13: WebTorrent support (libdatachannel)
+See [PROGRESS.md](PROGRESS.md) for the detailed task-by-task checklist.
 
 ---
 
