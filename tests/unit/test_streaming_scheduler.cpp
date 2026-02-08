@@ -28,15 +28,15 @@ protected:
     static constexpr int kPieceLength = 256 * 1024;               // 256 KB
     static constexpr std::int64_t kFileSize = 10 * 1024 * 1024;   // 10 MB → 40 pieces
 
-    static std::shared_ptr<lt::torrent_info> s_ti;
+    static std::shared_ptr<const lt::torrent_info> s_ti;
     static std::unique_ptr<lt::session> s_session;
     static lt::torrent_handle s_handle;
 
     static void SetUpTestSuite() {
-        lt::file_storage fs;
-        fs.add_file("test.mp4", kFileSize);
+        std::vector<lt::create_file_entry> files;
+        files.emplace_back("test.mp4", kFileSize);
 
-        lt::create_torrent ct(fs, kPieceLength, lt::create_torrent::v1_only);
+        lt::create_torrent ct(std::move(files), kPieceLength, lt::create_torrent::v1_only);
         int np = ct.num_pieces();
         lt::sha1_hash dummy;
         std::memset(dummy.data(), 0x42, dummy.size());
@@ -74,7 +74,7 @@ protected:
         int last = static_cast<int>(
             kFileSize - static_cast<std::int64_t>(np - 1) * kPieceLength);
         avail_ = std::make_unique<PieceAvailabilityIndex>(np, kPieceLength, last);
-        mapper_ = std::make_unique<ByteRangeMapper>(s_ti->files(), 0);
+        mapper_ = std::make_unique<ByteRangeMapper>(s_ti->layout(), 0);
     }
 
     StreamingScheduler make_scheduler(SchedulerConfig cfg = {}) {
@@ -89,7 +89,7 @@ protected:
     std::unique_ptr<ByteRangeMapper> mapper_;
 };
 
-std::shared_ptr<lt::torrent_info> StreamingSchedulerTest::s_ti;
+std::shared_ptr<const lt::torrent_info> StreamingSchedulerTest::s_ti;
 std::unique_ptr<lt::session> StreamingSchedulerTest::s_session;
 lt::torrent_handle StreamingSchedulerTest::s_handle;
 
@@ -459,7 +459,7 @@ protected:
     static constexpr PieceIndex kExpectedFirstPiece = 1253;
     static constexpr PieceIndex kExpectedEndPiece = 1328;         // 75 pieces
 
-    static std::shared_ptr<lt::torrent_info> s_ti;
+    static std::shared_ptr<const lt::torrent_info> s_ti;
     static std::unique_ptr<lt::session> s_session;
     static lt::torrent_handle s_handle;
 
@@ -496,7 +496,7 @@ protected:
         int last = static_cast<int>(
             s_ti->total_size() - static_cast<std::int64_t>(np - 1) * pl);
         avail_ = std::make_unique<PieceAvailabilityIndex>(np, pl, last);
-        mapper_ = std::make_unique<ByteRangeMapper>(s_ti->files(), kFileIdx);
+        mapper_ = std::make_unique<ByteRangeMapper>(s_ti->layout(), kFileIdx);
     }
 
     StreamingScheduler make_scheduler(SchedulerConfig cfg = {}) {
@@ -507,7 +507,7 @@ protected:
     std::unique_ptr<ByteRangeMapper> mapper_;
 };
 
-std::shared_ptr<lt::torrent_info> StreamingSchedulerSintelTest::s_ti;
+std::shared_ptr<const lt::torrent_info> StreamingSchedulerSintelTest::s_ti;
 std::unique_ptr<lt::session> StreamingSchedulerSintelTest::s_session;
 lt::torrent_handle StreamingSchedulerSintelTest::s_handle;
 

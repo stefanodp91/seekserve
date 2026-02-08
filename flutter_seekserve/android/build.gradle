@@ -1,0 +1,48 @@
+// SeekServe Flutter plugin — Android configuration.
+// Pre-built .so files are placed in src/main/jniLibs/ by scripts/build-flutter-natives.sh.
+
+group = "com.example.flutter_seekserve"
+version = "1.0"
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.11.1")
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: "com.android.library"
+
+android {
+    namespace = "com.example.flutter_seekserve"
+    compileSdk = 36
+
+    defaultConfig {
+        minSdk = 28
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86_64'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    // Pre-built native libraries in jniLibs (no CMake build needed)
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+}

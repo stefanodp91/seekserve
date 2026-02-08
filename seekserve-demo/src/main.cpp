@@ -334,7 +334,7 @@ int main(int argc, char* argv[]) {
         });
 
     // Set up ByteRangeMapper for display
-    seekserve::ByteRangeMapper mapper(ti->files(), file_idx);
+    seekserve::ByteRangeMapper mapper(ti->layout(), file_idx);
     int file_pieces = mapper.end_piece() - mapper.first_piece();
 
     // Build the file path on disk (save_path + torrent file path)

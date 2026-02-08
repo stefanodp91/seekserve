@@ -1,7 +1,7 @@
 #include "seekserve/session_manager.hpp"
 
 #include <libtorrent/magnet_uri.hpp>
-#include <libtorrent/torrent_info.hpp>
+#include <libtorrent/load_torrent.hpp>
 #include <libtorrent/settings_pack.hpp>
 #include <libtorrent/session_params.hpp>
 #include <libtorrent/alert_types.hpp>
@@ -51,12 +51,18 @@ lt::settings_pack TorrentSessionManager::make_settings(const SessionConfig& conf
 
     sp.set_int(lt::settings_pack::alert_queue_size, config.alert_queue_size);
 
+#ifdef TORRENT_USE_RTC
+    if (config.enable_webtorrent) {
+        sp.set_str(lt::settings_pack::webtorrent_stun_server, "stun.l.google.com:19302");
+        spdlog::info("WebTorrent enabled (STUN: stun.l.google.com:19302)");
+    }
+#endif
+
     return sp;
 }
 
 Result<TorrentId> TorrentSessionManager::add_torrent(const AddTorrentParams& params) {
     lt::add_torrent_params atp;
-    atp.save_path = params.save_path.empty() ? config_.save_path : params.save_path;
 
     if (params.uri.substr(0, 7) == "magnet:") {
         lt::error_code ec;
@@ -67,13 +73,14 @@ Result<TorrentId> TorrentSessionManager::add_torrent(const AddTorrentParams& par
         }
     } else {
         lt::error_code ec;
-        auto ti = std::make_shared<lt::torrent_info>(params.uri, ec);
+        atp = lt::load_torrent_file(params.uri, ec, lt::load_torrent_limits{});
         if (ec) {
             spdlog::error("Failed to load .torrent file '{}': {}", params.uri, ec.message());
             return make_error_code(errc::invalid_argument);
         }
-        atp.ti = ti;
     }
+
+    atp.save_path = params.save_path.empty() ? config_.save_path : params.save_path;
 
     for (const auto& tracker : config_.extra_trackers) {
         atp.trackers.push_back(tracker);

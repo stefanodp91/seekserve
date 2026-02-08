@@ -1,0 +1,66 @@
+/// Status information for an active torrent.
+class TorrentStatus {
+  final String torrentId;
+  final String name;
+  final double progress;
+  final double downloadRate;
+  final double uploadRate;
+  final int numPeers;
+  final int numSeeds;
+  final String state;
+  final bool hasMetadata;
+  final int? selectedFile;
+  final String? streamMode;
+  final int? playheadPiece;
+  final int? activeDeadlines;
+
+  const TorrentStatus({
+    required this.torrentId,
+    required this.name,
+    required this.progress,
+    required this.downloadRate,
+    required this.uploadRate,
+    required this.numPeers,
+    required this.numSeeds,
+    required this.state,
+    required this.hasMetadata,
+    this.selectedFile,
+    this.streamMode,
+    this.playheadPiece,
+    this.activeDeadlines,
+  });
+
+  factory TorrentStatus.fromJson(Map<String, dynamic> json) {
+    return TorrentStatus(
+      torrentId: json['torrent_id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      progress: (json['progress'] as num?)?.toDouble() ?? 0.0,
+      downloadRate: (json['download_rate'] as num?)?.toDouble() ?? 0.0,
+      uploadRate: (json['upload_rate'] as num?)?.toDouble() ?? 0.0,
+      numPeers: json['num_peers'] as int? ?? 0,
+      numSeeds: json['num_seeds'] as int? ?? 0,
+      state: json['state'] as String? ?? 'unknown',
+      hasMetadata: json['has_metadata'] as bool? ?? false,
+      selectedFile: json['selected_file'] as int?,
+      streamMode: json['stream_mode'] as String?,
+      playheadPiece: json['playhead_piece'] as int?,
+      activeDeadlines: json['active_deadlines'] as int?,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'torrent_id': torrentId,
+    'name': name,
+    'progress': progress,
+    'download_rate': downloadRate,
+    'upload_rate': uploadRate,
+    'num_peers': numPeers,
+    'num_seeds': numSeeds,
+    'state': state,
+    'has_metadata': hasMetadata,
+    if (selectedFile != null) 'selected_file': selectedFile,
+    if (streamMode != null) 'stream_mode': streamMode,
+    if (playheadPiece != null) 'playhead_piece': playheadPiece,
+    if (activeDeadlines != null) 'active_deadlines': activeDeadlines,
+  };
+}

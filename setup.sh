@@ -54,15 +54,16 @@ else
 fi
 export VCPKG_ROOT="$VCPKG_DIR"
 
-# --- 3. Git submodules ---
+# --- 3. Git submodules (libtorrent master + all deps) ---
 echo ""
 echo "[3/6] Initializing git submodules..."
 cd "$SCRIPT_DIR"
-if [ ! -f "extern/libtorrent/CMakeLists.txt" ]; then
-    git submodule update --init --recursive --depth 1
-else
-    echo "  Submodules already initialized."
-fi
+git submodule update --init
+# libtorrent's own submodules (libdatachannel, json, try_signal, asio-gnutls)
+# --force ensures working trees are restored even if .git files already exist
+cd extern/libtorrent
+git submodule update --init --recursive --force
+cd "$SCRIPT_DIR"
 
 # --- 4. WebTorrent deps (libdatachannel) ---
 echo ""
@@ -73,7 +74,7 @@ if [ -f "extern/libtorrent/deps/libdatachannel/CMakeLists.txt" ]; then
     WEBTORRENT="ON"
 else
     echo "  libdatachannel NOT found. WebTorrent: OFF"
-    echo "  To enable WebTorrent, run:"
+    echo "  Nested submodule init may have failed. Try:"
     echo "    cd extern/libtorrent && git submodule update --init --recursive"
 fi
 

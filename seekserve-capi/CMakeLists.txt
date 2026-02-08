@@ -1,6 +1,12 @@
-add_library(seekserve-capi SHARED
-    src/seekserve_c.cpp
-)
+if(SEEKSERVE_CAPI_STATIC)
+    add_library(seekserve-capi STATIC
+        src/seekserve_c.cpp
+    )
+else()
+    add_library(seekserve-capi SHARED
+        src/seekserve_c.cpp
+    )
+endif()
 
 target_include_directories(seekserve-capi
     PUBLIC

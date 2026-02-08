@@ -1,0 +1,35 @@
+# Run with `dart run ffigen --config ffigen.yaml`.
+name: SeekServeBindings
+description: |
+  Bindings for SeekServe C API (`seekserve_c.h`).
+
+  Regenerate bindings with `dart run ffigen --config ffigen.yaml`.
+output: 'lib/src/bindings_generated.dart'
+headers:
+  entry-points:
+    - 'native_header/seekserve_c.h'
+  include-directives:
+    - 'native_header/seekserve_c.h'
+preamble: |
+  // ignore_for_file: always_specify_types
+  // ignore_for_file: camel_case_types
+  // ignore_for_file: non_constant_identifier_names
+  // AUTO-GENERATED — do not edit. Regenerate with `dart run ffigen`.
+comments:
+  style: any
+  length: full
+functions:
+  include:
+    - 'ss_.*'
+structs:
+  include:
+    - 'SeekServeEngine'
+typedefs:
+  include:
+    - 'ss_.*'
+globals:
+  include:
+    - 'SS_.*'
+macros:
+  include:
+    - 'SS_.*'

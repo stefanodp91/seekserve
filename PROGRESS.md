@@ -20,7 +20,7 @@
 #### Dipendenze
 - [x] Aggiungere libtorrent come git submodule da `master` branch
 - [x] Init submodules ricorsivi (deps/try_signal, deps/asio-gnutls)
-- [ ] Abilitare WebTorrent (richiede `libdatachannel` recursive submodule — disabilitato per ora)
+- [x] Abilitare WebTorrent (M13: switched to master, recursive submodules init, WEBTORRENT=ON)
 - [x] vcpkg: installare boost (asio, beast, config, crc, date-time, functional, intrusive, logic, multi-index, multiprecision, optional, pool, predef, range, smart-ptr, system, utility, variant)
 - [x] vcpkg: installare nlohmann-json, spdlog, sqlite3, gtest
 
@@ -409,14 +409,14 @@
 - [x] FullLifecycle — create → start_server → add_torrent → list_files → get_status → stop_server → destroy
 
 #### Proof-of-concept FFI
-- [ ] Eseguire `ffigen` su `seekserve_c.h` → generare Dart bindings
-- [ ] Verificare che i bindings Dart compilano
+- [x] Eseguire `ffigen` su `seekserve_c.h` → generare Dart bindings (completato in M9)
+- [x] Verificare che i bindings Dart compilano (completato in M9)
 
 #### Verifica M7
 - [x] C API test (GTest) completa lifecycle senza crash — 19/19 tests pass
 - [x] Nessun tipo C++ leak attraverso l'header `seekserve_c.h`
 - [x] 186 tests totali (138 unit + 29 integration + 19 C API) — tutti verdi
-- [ ] Dart bindings generati e compilabili (FFI PoC — futuro)
+- [x] Dart bindings generati e compilabili (completato in M9: `dart run ffigen` + `flutter analyze` pass)
 
 ---
 
@@ -474,35 +474,281 @@
 
 ---
 
-## Fase 2: Flutter Plugin (futuro)
+## Phase 2: Flutter Plugin
 
-### M9: Flutter plugin structure
-- [ ] Creare plugin con template `plugin_ffi`
-- [ ] Struttura: `flutter_seekserve/` con `android/`, `ios/`, `lib/`, `src/`
-- [ ] Copiare `seekserve_c.h` come header FFI target
-- [ ] Configurare `ffigen` per generare Dart bindings automaticamente
+### M9: Flutter Plugin Scaffold + FFI Bindings
 
-### M10: iOS integration
-- [ ] Podspec con vendored framework (seekserve static lib)
-- [ ] Link libtorrent + boost + OpenSSL come static libs
-- [ ] Info.plist: NSAppTransportSecurity per HTTP loopback
-- [ ] Build e test su iOS simulator
+#### Plugin creation
+- [x] Create plugin: `flutter create --template=plugin_ffi --platforms=ios,android flutter_seekserve`
+- [x] Clean up generated boilerplate (removed `src/flutter_seekserve.c/.h`, old `lib/flutter_seekserve.dart`, old bindings)
+- [x] Copy `seekserve-capi/include/seekserve_c.h` → `flutter_seekserve/native_header/seekserve_c.h`
 
-### M11: Android integration
-- [ ] CMakeLists.txt per NDK build
-- [ ] Gradle configuration con externalNativeBuild
-- [ ] Build seekserve + libtorrent per arm64-v8a, armeabi-v7a, x86_64
-- [ ] Test su Android emulator
+#### ffigen configuration
+- [x] Create `ffigen.yaml` with input `native_header/seekserve_c.h`, output `lib/src/bindings_generated.dart`
+- [x] Include all `ss_*` functions, `SS_*` error code defines, `ss_event_callback_t` typedef
+- [x] Run `dart run ffigen` — generated bindings compile (warning: `SeekServeEngine` opaque struct expected)
+- [x] Verify generated Dart file has all 12 functions: `ss_engine_create`, `ss_engine_destroy`, `ss_add_torrent`, `ss_remove_torrent`, `ss_list_files`, `ss_select_file`, `ss_get_stream_url`, `ss_get_status`, `ss_set_event_callback`, `ss_start_server`, `ss_stop_server`, `ss_free_string`
 
-### M12: Dart API layer
-- [ ] Classe `SeekServe` Dart con API high-level
-- [ ] Stream-based event handling (Dart Streams da callback C)
-- [ ] Async/await per operazioni lunghe (add torrent, wait metadata)
-- [ ] Integration con video_player o flutter_vlc_player
+#### Platform DynamicLibrary loader
+- [x] Create `lib/src/native_library.dart`:
+  - iOS/macOS: `DynamicLibrary.process()` (statically linked via framework)
+  - Android/Linux: `DynamicLibrary.open('libseekserve.so')`
+  - Singleton `nativeBindings` instance
 
-### M13: WebTorrent support
-- [ ] Abilitare libdatachannel recursive submodule
-- [ ] Build libtorrent con `webtorrent=ON`
-- [ ] Configurare WebTorrent trackers (wss://)
-- [ ] Test connessione con peer WebTorrent (browser)
-- [ ] Verificare su iOS e Android
+#### Model classes
+- [x] `lib/src/models/file_info.dart` — `FileInfo` with `index`, `path`, `size`, `name`, `extension`, `isVideo`, `fromJson()`, `toJson()`
+- [x] `lib/src/models/torrent_status.dart` — `TorrentStatus` with all fields, `fromJson()`, `toJson()`
+- [x] `lib/src/models/seekserve_config.dart` — `SeekServeConfig` with all config fields, `toJsonString()`
+- [x] `lib/src/models/seekserve_event.dart` — `SeekServeEvent` sealed class: `MetadataReceived`, `FileCompleted`, `TorrentError`, `UnknownEvent`
+
+#### pubspec.yaml
+- [x] Add `ffi: ^2.1.3` dependency
+- [x] Add `ffigen: ^13.0.0` dev dependency
+- [x] Set `flutter: ffiPlugin: true` for android + ios platforms
+
+#### Verification M9
+- [x] `dart run ffigen` generates bindings without errors
+- [x] `flutter analyze` passes — 0 issues
+- [x] Generated `bindings_generated.dart` contains all 12 `ss_*` functions + `SeekServeEngine` opaque class + `SS_OK`/`SS_ERR_*` constants
+- [x] Model classes compile and have `fromJson()` constructors
+- [x] 14 unit tests pass (`flutter test`)
+
+---
+
+### M10: Native Library Builds (iOS + Android) ✅
+
+#### iOS build
+- [x] Update `scripts/build-ios.sh`:
+  - Build static library (`.a`) not dynamic (`.dylib`) — App Store requires static
+  - Build for `arm64` device (iphoneos SDK, `CMAKE_OSX_SYSROOT=iphoneos`)
+  - Build for `arm64` simulator (iphonesimulator SDK, `CMAKE_OSX_SYSROOT=iphonesimulator`)
+  - Combine 22 static libraries per slice with `libtool -static`
+- [x] Added `SEEKSERVE_CAPI_STATIC` CMake option to root CMakeLists.txt + seekserve-capi/CMakeLists.txt
+- [x] Create XCFramework: `xcodebuild -create-xcframework` from device + simulator combined `.a` libraries
+- [x] Copy XCFramework to `flutter_seekserve/ios/Frameworks/seekserve.xcframework` (65 MB)
+- [x] Write `ios/seekserve.podspec`:
+  - `s.vendored_frameworks = 'Frameworks/seekserve.xcframework'`
+  - `s.static_framework = true`
+  - `s.platform = :ios, '15.0'`
+  - `s.pod_target_xcconfig = { 'OTHER_LDFLAGS' => '-lc++ -lsqlite3' }` (link C++ stdlib + sqlite3)
+- [x] `flutter build ios --no-codesign` succeeds — **Built Runner.app (37.9 MB)**
+
+#### Android build
+- [x] Update `scripts/build-android.sh` to build all 3 ABIs:
+  - `arm64-v8a` (arm64-android triplet)
+  - `armeabi-v7a` (custom `arm-neon-android` triplet — NDK 29 requires NEON=ON)
+  - `x86_64` (x64-android triplet)
+- [x] Custom vcpkg triplet `triplets/arm-neon-android.cmake` (NDK 29 dropped NEON=OFF support)
+- [x] Export `ANDROID_NDK_HOME` for vcpkg's android toolchain detection
+- [x] `ANDROID_PLATFORM=android-28` (Boost.Asio 1.90 requires `aligned_alloc` → API 28+)
+- [x] Copy `.so` files to `flutter_seekserve/android/src/main/jniLibs/{abi}/libseekserve.so`
+- [x] Strip with `llvm-strip`: 109 MB → 6.4 MB (arm64-v8a), 89 MB → 4.4 MB (armeabi-v7a), 105 MB → 6.5 MB (x86_64)
+- [x] Configure `android/build.gradle`:
+  - `minSdk = 28` (required for `aligned_alloc` compatibility)
+  - `compileSdk = 36`
+  - `ndk { abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86_64' }`
+  - `jniLibs.srcDirs = ['src/main/jniLibs']` (pre-built, no CMake)
+- [x] `flutter build apk` succeeds — **Built app-release.apk (108.1 MB)**
+
+#### Build automation
+- [x] Create `scripts/build-flutter-natives.sh` orchestrator:
+  1. Build iOS (device + simulator) → create XCFramework → copy to plugin
+  2. Build Android (3 ABIs) → strip → copy `.so` to plugin jniLibs
+  3. Print summary with library file sizes
+  - Supports `ios`, `android`, or `all` argument
+
+#### Platform config (example app)
+- [x] iOS `Info.plist`: `NSAllowsLocalNetworking = true` (allow HTTP localhost)
+- [x] iOS `Podfile`: `platform :ios, '15.0'`
+- [x] Android `AndroidManifest.xml`: `<uses-permission android:name="android.permission.INTERNET"/>` + `android:networkSecurityConfig`
+- [x] Android `res/xml/network_security_config.xml`: cleartext traffic allowed only for `127.0.0.1` + `localhost`
+- [x] Android example app `minSdk = 28` in `build.gradle.kts`
+
+#### Verification M10
+- [x] `scripts/build-flutter-natives.sh` produces XCFramework + 3 `.so` files without errors
+- [x] `cd flutter_seekserve/example && flutter build ios --no-codesign` succeeds (37.9 MB)
+- [x] `cd flutter_seekserve/example && flutter build apk` succeeds (108.1 MB)
+- [x] Library sizes (stripped): arm64-v8a 6.4 MB, armeabi-v7a 4.4 MB, x86_64 6.5 MB — all < 10 MB
+
+---
+
+### M11: Dart API Layer + Event System
+
+#### SeekServeClient implementation
+- [x] `lib/src/seekserve_client.dart` — main Dart wrapper class:
+  - Constructor: `ss_engine_create()` with JSON config from `SeekServeConfig`
+  - `dispose()`: `ss_engine_destroy()`, close `NativeCallable`, close `StreamController`
+  - All FFI calls: check `ss_error_t` return, throw `SeekServeException` on error
+  - Memory: `ss_free_string()` in `finally` blocks for every `char**` output
+- [x] `startServer({int port = 0})` → returns assigned port via `Pointer<Uint16>` out param
+- [x] `stopServer()` → calls `ss_stop_server()`
+- [x] `addTorrent(String uri)` → returns `String` torrent ID (64-byte buffer, 40 hex chars + null)
+- [x] `removeTorrent(String torrentId, {bool deleteFiles = false})`
+- [x] `listFiles(String torrentId)` → returns `List<FileInfo>` (parsed from JSON via `ss_free_string`)
+- [x] `selectFile(String torrentId, int fileIndex)`
+- [x] `getStreamUrl(String torrentId, int fileIndex)` → returns `String` URL
+- [x] `getStatus(String torrentId)` → returns `TorrentStatus` (parsed from JSON)
+
+#### Event system (NativeCallable.listener)
+- [x] `ss_set_event_callback` via `NativeCallable<ss_event_callback_tFunction>.listener`
+- [x] Instance method `_handleNativeEvent` captures `this` — dispatches to Dart event loop
+- [x] Events dispatched to `StreamController<SeekServeEvent>.broadcast().add()`
+- [x] `Stream<SeekServeEvent> get events` — public broadcast stream
+- [x] Event types (sealed class with `fromJson` factory):
+  - `MetadataReceived` (torrent_id)
+  - `FileCompleted` (torrent_id, file_index)
+  - `TorrentError` (torrent_id, message)
+  - `UnknownEvent` (type, data) — forward compatibility
+- [x] `NativeCallable.close()` in `dispose()` — prevents dangling pointer
+- [x] Guard: `_handleNativeEvent` checks `_disposed` before dispatching
+
+#### Model JSON deserialization
+- [x] `FileInfo.fromJson(Map<String, dynamic>)`: index, path, size + getters: name, extension, isVideo
+- [x] `TorrentStatus.fromJson(Map<String, dynamic>)`: all status fields with null-safe parsing
+- [x] `SeekServeConfig.toJsonString()`: serializes only non-null fields to JSON for `ss_engine_create()`
+
+#### Error handling
+- [x] `lib/src/seekserve_exception.dart`:
+  - `SeekServeException` with error code + human-readable message
+  - `checkError(int code)` utility: throws if code != SS_OK
+  - All 7 error codes mapped: INVALID_ARG, NOT_FOUND, METADATA_PENDING, TIMEOUT, IO, ALREADY_RUNNING, CANCELLED
+- [x] `_ensureNotDisposed()` guard on all public methods → throws `StateError`
+
+#### Barrel export
+- [x] `lib/seekserve.dart` exports: `SeekServeClient`, `SeekServeException`, `FileInfo`, `TorrentStatus`, `SeekServeConfig`, `SeekServeEvent`
+
+#### Unit tests (14 tests in `test/models_test.dart`)
+- [x] FileInfo: fromJson, name extraction, extension, isVideo, toJson roundtrip (6 tests)
+- [x] TorrentStatus: fromJson all fields, fromJson missing optionals (2 tests)
+- [x] SeekServeConfig: toJsonString non-null fields, empty config (2 tests)
+- [x] SeekServeEvent: metadata_received, file_completed, error, unknown type (4 tests)
+
+#### Verification M11
+- [x] `flutter analyze` — 0 issues
+- [x] `flutter test` — 14/14 pass
+- [ ] Integration test with native library on device (requires M10 native builds)
+
+---
+
+### M12: Example App
+
+#### App structure
+- [x] `flutter_seekserve/example/` — standalone Flutter app
+- [x] Dependencies (`example/pubspec.yaml`):
+  - `flutter_seekserve` (path: `../`)
+  - `media_kit: ^1.1.11` + `media_kit_video: ^1.2.5`
+  - `media_kit_libs_ios_video: ^1.1.4` + `media_kit_libs_android_video: ^1.3.6`
+  - `provider: ^6.1.2` (state management)
+  - `path_provider: ^2.1.4` (platform save path)
+- [x] `MediaKit.ensureInitialized()` in `main()`
+
+#### State management
+- [x] `lib/providers/seekserve_provider.dart` — `ChangeNotifier`:
+  - Holds `SeekServeClient` instance + `Map<String, TorrentEntry>` state
+  - `init(String savePath)`: create client with config, start server, listen to events, start 1s poll timer
+  - `addTorrent(String uri)`: call client, add entry to map
+  - `removeTorrent(String id)`: call client, remove from map
+  - `listFiles(String id)`: delegate to client, cache in entry
+  - `selectAndStream(String torrentId, int fileIndex)`: select file + get stream URL
+  - `_onEvent()`: handles `MetadataReceived` (fetch files), `FileCompleted`, `TorrentError`
+  - `_pollStatus()`: 1-second `Timer.periodic` polling `getStatus()` on all active torrents
+  - `dispose()`: cancel timer, cancel event subscription, dispose client
+
+#### Home Screen (`lib/screens/home_screen.dart`)
+- [x] AppBar with title "SeekServe Demo" + server port display
+- [x] `TextField` + "Add" `FilledButton`
+- [x] Paste from clipboard `IconButton`
+- [x] Error banner with `MaterialBanner` when errors occur
+- [x] `ListView.builder` of active torrents:
+  - `TorrentCard` widget with name, progress bar, download rate, peer count, state badge
+  - Tap → navigate to File Selection screen
+  - `Dismissible` swipe-to-delete with red background
+- [x] Empty state message when no torrents added
+
+#### File Selection Screen (`lib/screens/file_selection_screen.dart`)
+- [x] AppBar with torrent name
+- [x] `ListView.builder` of files from `provider.listFiles(torrentId)`:
+  - File icon based on extension (movie, audiotrack, subtitles, image, file icons)
+  - File name (basename from path)
+  - Formatted file size (B/KB/MB/GB)
+  - Video files: enabled with play arrow, primary color icon
+  - Non-video files: greyed out, disabled
+- [x] "Waiting for metadata..." when files not yet available
+- [x] On tap video file:
+  1. `provider.selectAndStream(torrentId, fileIndex)` → get URL
+  2. Navigate to Player Screen with URL
+
+#### Player Screen (`lib/screens/player_screen.dart`)
+- [x] `media_kit` `Video` widget for video playback
+- [x] Initialize `Player` with stream URL, auto-play on open
+- [x] Player controls: built-in media_kit controls (play/pause, seek bar, fullscreen)
+- [x] Below player — `StatusBar` widget:
+  - `LinearProgressIndicator` with download progress
+  - Download rate + upload rate (formatted)
+  - Peer count
+  - Stream mode badge (when available)
+- [x] Auto-refresh via provider's 1s polling timer
+- [x] `dispose()`: player disposed
+
+#### Utility widgets
+- [x] `lib/widgets/torrent_card.dart` — reusable torrent card with progress, rate, peers, state badge, metadata hint
+- [x] `lib/widgets/status_bar.dart` — download/upload rates, peer count, stream mode chip
+
+#### Platform configuration
+- [x] iOS `Runner/Info.plist`: `NSAllowsLocalNetworking = true`
+- [x] Android `AndroidManifest.xml`: `INTERNET` permission + `networkSecurityConfig` reference
+- [x] Android `res/xml/network_security_config.xml`: cleartext for `127.0.0.1` + `localhost` only
+
+#### Verification M12
+- [x] `flutter analyze` — 0 issues (plugin + example)
+- [x] `flutter test` — 14/14 pass
+- [ ] App launches on iOS simulator (requires M10 native builds)
+- [ ] App launches on Android emulator (requires M10 native builds)
+- [ ] End-to-end: paste Sintel magnet → metadata → file list → tap video → playback
+- [ ] Seek works with scheduler boost
+- [ ] Status bar updates in real-time
+- [ ] Swipe-to-delete, back navigation, empty state all functional
+
+---
+
+### M13: WebTorrent Support
+
+#### libtorrent branch switch (RC_2_0 → master)
+- [x] Switch libtorrent submodule from `RC_2_0` to `master` branch (commit `24a3adf35`)
+- [x] Update `.gitmodules` to track `master` branch
+- [x] Init recursive submodules: `libdatachannel`, `libjuice`, `usrsctp`, `plog`, `json`, `try_signal`, `asio-gnutls`
+- [x] Fix `setup.sh`: use `--force` flag on nested submodule init (prevents corrupted working trees)
+
+#### libtorrent master API migration (ABI v100 breaking changes)
+- [x] `torrent_info::files()` → `torrent_info::layout()` (7 files: metadata_catalog, engine, main, 4 test files)
+- [x] `torrent_info(filename, ec)` constructor removed → `lt::load_torrent_file(filename, ec, lt::load_torrent_limits{})` (3 files)
+- [x] `shared_ptr<lt::torrent_info>` → `shared_ptr<const lt::torrent_info>` (`atp.ti` is const on master) (3 test files)
+- [x] `create_torrent(file_storage&, piece_size, flags)` → `create_torrent(vector<create_file_entry>, piece_size, flags)` (test_streaming_scheduler)
+
+#### Build system updates
+- [x] Add `boost-json` to `vcpkg.json` (required by libtorrent master)
+- [x] Add `openssl` to `vcpkg.json` (required by libdatachannel for cross-compile)
+- [x] Enable WebTorrent in `scripts/build-ios.sh`: `SEEKSERVE_ENABLE_WEBTORRENT=ON`
+- [x] Enable WebTorrent in `scripts/build-android.sh`: `SEEKSERVE_ENABLE_WEBTORRENT=ON`
+
+#### Runtime WebTorrent config
+- [x] Wire `enable_webtorrent` in `session_manager.cpp`:
+  ```cpp
+  #ifdef TORRENT_USE_RTC
+  if (config.enable_webtorrent) {
+      sp.set_str(lt::settings_pack::webtorrent_stun_server, "stun.l.google.com:19302");
+  }
+  #endif
+  ```
+- [x] WebTorrent trackers supported via existing `extra_trackers` config (e.g. `wss://tracker.webtorrent.dev`)
+
+#### Verification M13
+- [x] `./setup.sh debug` completes with `WebTorrent: ON` in output
+- [x] `ctest` — 189/189 tests pass (macOS debug with WebTorrent ON)
+- [x] `scripts/build-flutter-natives.sh ios` — XCFramework built with WebTorrent
+- [x] `scripts/build-flutter-natives.sh android` — 3 ABIs `.so` built with WebTorrent
+- [ ] `flutter build ios --no-codesign` with WebTorrent natives
+- [ ] `flutter build apk` with WebTorrent natives
+- [ ] Test WebRTC peer connections from mobile (browser peers)
+- [ ] Verify on iOS device
+- [ ] Verify on Android device

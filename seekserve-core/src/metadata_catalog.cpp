@@ -15,7 +15,7 @@ void MetadataCatalog::on_metadata_received(const TorrentId& id,
     TorrentEntry entry;
     entry.info = ti;
 
-    const auto& fs = ti->files();
+    const auto& fs = ti->layout();
     entry.files.reserve(fs.num_files());
 
     for (lt::file_index_t i{0}; static_cast<int>(i) < fs.num_files(); ++i) {

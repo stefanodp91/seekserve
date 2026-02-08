@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <libtorrent/torrent_info.hpp>
+#include <libtorrent/load_torrent.hpp>
 
 #include "seekserve/metadata_catalog.hpp"
 #include "seekserve/types.hpp"
@@ -13,13 +14,14 @@ class MetadataCatalogTest : public ::testing::Test {
 protected:
     void SetUp() override {
         lt::error_code ec;
-        ti_ = std::make_shared<lt::torrent_info>(
-            std::string(SEEKSERVE_FIXTURE_DIR) + "/Sintel_archive.torrent", ec);
+        auto atp = lt::load_torrent_file(
+            std::string(SEEKSERVE_FIXTURE_DIR) + "/Sintel_archive.torrent", ec, lt::load_torrent_limits{});
         ASSERT_FALSE(ec) << "Failed to load Sintel torrent: " << ec.message();
+        ti_ = atp.ti;
     }
 
     MetadataCatalog catalog_;
-    std::shared_ptr<lt::torrent_info> ti_;
+    std::shared_ptr<const lt::torrent_info> ti_;
     const TorrentId kTestId = "e4d37e62d14ba96d29b9e760148803b458aee5b6";
 };
 
@@ -41,7 +43,7 @@ TEST_F(MetadataCatalogTest, ListFilesReturnsAllFiles) {
 
     const auto& files = result.value();
     EXPECT_GE(files.size(), 10u);
-    EXPECT_EQ(static_cast<int>(files.size()), ti_->files().num_files());
+    EXPECT_EQ(static_cast<int>(files.size()), ti_->layout().num_files());
 }
 
 TEST_F(MetadataCatalogTest, ListFilesNotReady) {

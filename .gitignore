@@ -11,3 +11,22 @@ downloads/
 *.db
 *.db-wal
 *.db-shm
+
+# Flutter / Dart generated
+.dart_tool/
+.flutter-plugins-dependencies
+**/GeneratedPluginRegistrant.*
+**/local.properties
+.gradle/
+Pods/
+Podfile.lock
+
+# Compiled native artifacts (built via scripts/build-flutter-natives.sh)
+flutter_seekserve/ios/Frameworks/
+flutter_seekserve/android/src/main/jniLibs/
+
+# Flutter build output
+flutter_seekserve/**/build/
+flutter_seekserve/example/pubspec.lock
+flutter_seekserve/example/.flutter-plugins
+flutter_seekserve/example/.flutter-plugins-dependencies

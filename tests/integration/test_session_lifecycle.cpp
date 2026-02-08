@@ -92,7 +92,7 @@ TEST_F(SintelIntegrationTest, FileSelection) {
     // Verify file priorities on the handle
     auto priorities = handle_.get_file_priorities();
     auto ti = handle_.torrent_file();
-    ASSERT_EQ(static_cast<int>(priorities.size()), ti->files().num_files());
+    ASSERT_EQ(static_cast<int>(priorities.size()), ti->layout().num_files());
 
     for (int i = 0; i < static_cast<int>(priorities.size()); ++i) {
         if (i == 8) {
@@ -123,7 +123,7 @@ TEST_F(SintelIntegrationTest, RangeMappingMultifile) {
     auto file_info = file_result.value();
 
     auto ti = handle_.torrent_file();
-    ByteRangeMapper mapper(ti->files(), 8);
+    ByteRangeMapper mapper(ti->layout(), 8);
 
     // Verify consistency with catalog
     EXPECT_EQ(mapper.file_size(), file_info.size);

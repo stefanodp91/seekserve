@@ -10,7 +10,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(SEEKSERVE_ENABLE_WEBTORRENT "Build libtorrent with WebTorrent (WebRTC)" ON)
 option(SEEKSERVE_BUILD_TESTS "Build tests" ON)
 option(SEEKSERVE_BUILD_DEMO "Build demo CLI" ON)
-option(SEEKSERVE_BUILD_CAPI "Build C API shared library" ON)
+option(SEEKSERVE_BUILD_CAPI "Build C API library" ON)
+option(SEEKSERVE_CAPI_STATIC "Build C API as static library (for iOS XCFramework)" OFF)
 
 # --- libtorrent (submodule) ---
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)

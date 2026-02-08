@@ -168,7 +168,7 @@ Result<void> SeekServeEngine::select_file(const TorrentId& id, FileIndex fi) {
         ti->total_size() - static_cast<std::int64_t>(num_pieces - 1) * piece_length);
 
     state->avail.reset(num_pieces, piece_length, last_piece_size);
-    state->mapper = std::make_unique<ByteRangeMapper>(ti->files(), fi);
+    state->mapper = std::make_unique<ByteRangeMapper>(ti->layout(), fi);
     state->selected_file = fi;
 
     // Build file path on disk

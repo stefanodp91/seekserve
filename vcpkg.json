@@ -20,7 +20,9 @@
     "boost-system",
     "boost-utility",
     "boost-variant",
+    "boost-json",
     "nlohmann-json",
+    "openssl",
     "spdlog",
     "sqlite3",
     "gtest"

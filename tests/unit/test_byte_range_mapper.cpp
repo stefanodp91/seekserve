@@ -2,6 +2,7 @@
 
 #include <libtorrent/file_storage.hpp>
 #include <libtorrent/torrent_info.hpp>
+#include <libtorrent/load_torrent.hpp>
 
 #include "seekserve/byte_range_mapper.hpp"
 #include "seekserve/types.hpp"
@@ -177,16 +178,17 @@ class ByteRangeMapperSintelTest : public ::testing::Test {
 protected:
     void SetUp() override {
         lt::error_code ec;
-        ti_ = std::make_shared<lt::torrent_info>(
-            std::string(SEEKSERVE_FIXTURE_DIR) + "/Sintel_archive.torrent", ec);
+        auto atp = lt::load_torrent_file(
+            std::string(SEEKSERVE_FIXTURE_DIR) + "/Sintel_archive.torrent", ec, lt::load_torrent_limits{});
         ASSERT_FALSE(ec) << "Failed to load Sintel torrent: " << ec.message();
+        ti_ = atp.ti;
     }
 
-    std::shared_ptr<lt::torrent_info> ti_;
+    std::shared_ptr<const lt::torrent_info> ti_;
 };
 
 TEST_F(ByteRangeMapperSintelTest, SintelMp4FileSize) {
-    const auto& fs = ti_->files();
+    const auto& fs = ti_->layout();
     ASSERT_GT(fs.num_files(), 8);
 
     ByteRangeMapper mapper(fs, 8);
@@ -197,7 +199,7 @@ TEST_F(ByteRangeMapperSintelTest, SintelMp4FileSize) {
 }
 
 TEST_F(ByteRangeMapperSintelTest, SintelFirstAndLastByte) {
-    ByteRangeMapper mapper(ti_->files(), 8);
+    ByteRangeMapper mapper(ti_->layout(), 8);
 
     auto span_first = mapper.map(ByteRange{0, 0});
     EXPECT_EQ(span_first.first, mapper.first_piece());
@@ -208,7 +210,7 @@ TEST_F(ByteRangeMapperSintelTest, SintelFirstAndLastByte) {
 }
 
 TEST_F(ByteRangeMapperSintelTest, SintelEntireFileSpansPieces) {
-    ByteRangeMapper mapper(ti_->files(), 8);
+    ByteRangeMapper mapper(ti_->layout(), 8);
 
     auto span = mapper.map(ByteRange{0, mapper.file_size() - 1});
     EXPECT_EQ(span.first, mapper.first_piece());
@@ -221,7 +223,7 @@ TEST_F(ByteRangeMapperSintelTest, SintelEntireFileSpansPieces) {
 }
 
 TEST_F(ByteRangeMapperSintelTest, SintelCrossPieceBoundary) {
-    ByteRangeMapper mapper(ti_->files(), 8);
+    ByteRangeMapper mapper(ti_->layout(), 8);
     int pl = mapper.piece_length();
 
     // Range crossing from first piece into second piece of this file
@@ -233,7 +235,7 @@ TEST_F(ByteRangeMapperSintelTest, SintelCrossPieceBoundary) {
 }
 
 TEST_F(ByteRangeMapperSintelTest, SintelMidFileMegabyteRange) {
-    ByteRangeMapper mapper(ti_->files(), 8);
+    ByteRangeMapper mapper(ti_->layout(), 8);
 
     // 1 MB range starting at 1 MB
     std::int64_t start = 1024 * 1024;
