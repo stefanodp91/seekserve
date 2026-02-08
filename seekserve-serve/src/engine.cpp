@@ -164,7 +164,15 @@ Result<void> SeekServeEngine::remove_torrent(const TorrentId& id, bool delete_fi
 }
 
 std::vector<TorrentId> SeekServeEngine::list_torrents() const {
-    return sessions_->list_torrents();
+    // Return from DB (ordered by added_at) rather than the session's
+    // unordered_map so the UI shows torrents in insertion order.
+    auto saved = cache_->list_torrent_uris();
+    std::vector<TorrentId> ids;
+    ids.reserve(saved.size());
+    for (auto& [id, uri] : saved) {
+        ids.push_back(std::move(id));
+    }
+    return ids;
 }
 
 Result<std::vector<FileInfo>> SeekServeEngine::list_files(const TorrentId& id) {
