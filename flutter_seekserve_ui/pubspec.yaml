@@ -12,8 +12,8 @@ dependencies:
     sdk: flutter
   flutter_seekserve:
     path: ../flutter_seekserve
-  media_kit: ^1.1.11
-  media_kit_video: ^1.2.5
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
 
 dev_dependencies:
   flutter_test:

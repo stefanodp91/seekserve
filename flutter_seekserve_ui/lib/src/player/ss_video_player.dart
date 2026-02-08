@@ -32,7 +32,6 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
   Player? _player;
   VideoController? _videoController;
   String _error = '';
-  bool _buffering = true;
   bool _noVideoFrames = false;
 
   @override
@@ -52,7 +51,6 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
   Future<void> _probeAndPlay() async {
     setState(() {
       _error = '';
-      _buffering = true;
     });
 
     try {
@@ -71,14 +69,12 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
       } else {
         setState(() {
           _error = 'Stream server returned HTTP $statusCode';
-          _buffering = false;
         });
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _error = 'Cannot reach stream: $e';
-        _buffering = false;
       });
     }
   }
@@ -93,28 +89,55 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
     _player!.stream.error.listen((err) {
       if (mounted) setState(() => _error = err);
     });
-    _player!.stream.buffering.listen((b) {
-      if (mounted) setState(() => _buffering = b);
-    });
-
-    // Detect missing video frames (iOS simulator limitation).
-    // If no video width is reported within 4 seconds of playback starting,
-    // show a warning instead of a black screen.
     _player!.stream.width.listen((w) {
       if (w != null && w > 0 && _noVideoFrames && mounted) {
         setState(() => _noVideoFrames = false);
       }
     });
-    Future.delayed(const Duration(seconds: 4), () {
-      if (!mounted || _player == null) return;
-      final w = _player!.state.width;
-      if (w == null || w == 0) {
-        setState(() => _noVideoFrames = true);
-      }
-    });
+    // iOS simulator: detect missing video frames after 4s.
+    if (Platform.isIOS) {
+      Future.delayed(const Duration(seconds: 4), () {
+        if (!mounted || _player == null) return;
+        final w = _player!.state.width;
+        if (w == null || w == 0) {
+          setState(() => _noVideoFrames = true);
+        }
+      });
+    }
 
     _player!.open(Media(url));
     if (mounted) setState(() {});
+  }
+
+  /// Buffering indicator rendered inside the [Video] widget's own
+  /// compositing pipeline via the `controls` parameter.  This avoids
+  /// placing sibling widgets in the Stack next to the Video, which
+  /// breaks Android texture compositing and causes a black screen.
+  static Widget _bufferingControls(VideoState state) {
+    return StreamBuilder<bool>(
+      stream: state.widget.controller.player.stream.buffering,
+      initialData: true,
+      builder: (ctx, snap) {
+        final buffering = snap.data ?? false;
+        if (!buffering) return const SizedBox.shrink();
+        return const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SsSpinner(),
+              SizedBox(height: 8),
+              Text(
+                'Buffering...',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Color(0xCCFFFFFF),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -129,19 +152,15 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
 
     return Column(
       children: [
-        // Video area
+        // Video area — no sibling widgets in the Stack when Video is
+        // present, otherwise Android texture compositing breaks.
         Expanded(
-          child: Stack(
-            children: [
-              if (_videoController != null)
-                Positioned.fill(
-                  child: Video(
-                    controller: _videoController!,
-                    controls: NoVideoControls,
-                  ),
+          child: _videoController != null
+              ? Video(
+                  controller: _videoController!,
+                  controls: _bufferingControls,
                 )
-              else
-                Center(
+              : Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Column(
@@ -150,7 +169,8 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
                         if (_error.isNotEmpty) ...[
                           Text(
                             _error,
-                            style: theme.bodyStyle.copyWith(color: theme.error),
+                            style:
+                                theme.bodyStyle.copyWith(color: theme.error),
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 8),
@@ -161,7 +181,14 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
                             maxLines: 3,
                             overflow: TextOverflow.ellipsis,
                           ),
-                        ] else
+                        ] else if (_noVideoFrames)
+                          Text(
+                            'Video rendering not available on iOS Simulator.\n'
+                            'Audio and seek work — test on a real device.',
+                            style: theme.captionStyle,
+                            textAlign: TextAlign.center,
+                          )
+                        else
                           Text(
                             'Connecting...',
                             style: theme.captionStyle,
@@ -170,30 +197,6 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
                     ),
                   ),
                 ),
-              SsBufferingOverlay(
-                  isBuffering: _buffering && _error.isEmpty),
-              // Simulator warning: video frames not available.
-              if (_noVideoFrames)
-                Center(
-                  child: Container(
-                    margin: const EdgeInsets.all(32),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: theme.surface.withValues(alpha: 0.9),
-                      borderRadius:
-                          BorderRadius.circular(theme.borderRadius),
-                    ),
-                    child: Text(
-                      'Video rendering not available on iOS Simulator.\n'
-                      'Audio and seek work — test on a real device to see video.',
-                      style: theme.captionStyle,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-            ],
-          ),
         ),
 
         // Seek controls
@@ -205,7 +208,8 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             color: theme.error.withValues(alpha: 0.15),
-            child: Text(_error, style: theme.captionStyle.copyWith(color: theme.error)),
+            child: Text(_error,
+                style: theme.captionStyle.copyWith(color: theme.error)),
           ),
 
         // Torrent status bar

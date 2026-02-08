@@ -2,55 +2,19 @@ import 'package:flutter/widgets.dart';
 
 import '../theme/ss_theme.dart';
 
-/// Semi-transparent overlay shown while the player is buffering.
-class SsBufferingOverlay extends StatelessWidget {
-  final bool isBuffering;
-
-  const SsBufferingOverlay({super.key, required this.isBuffering});
-
-  @override
-  Widget build(BuildContext context) {
-    if (!isBuffering) return const SizedBox.shrink();
-
-    final theme = SsTheme.of(context);
-
-    return Positioned.fill(
-      child: Container(
-        color: const Color(0x80000000),
-        alignment: Alignment.center,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 32,
-              height: 32,
-              child: _SpinningIndicator(color: theme.primary),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Buffering...',
-              style: TextStyle(
-                fontSize: 13,
-                color: theme.onSurface.withValues(alpha: 0.8),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// A simple spinning arc indicator with no Material dependency.
-class _SpinningIndicator extends StatefulWidget {
-  final Color color;
-  const _SpinningIndicator({required this.color});
+///
+/// Used inside the [Video] widget's `controls` callback to show a
+/// buffering indicator without breaking Android texture compositing.
+class SsSpinner extends StatefulWidget {
+  final double size;
+  const SsSpinner({super.key, this.size = 32});
 
   @override
-  State<_SpinningIndicator> createState() => _SpinningIndicatorState();
+  State<SsSpinner> createState() => _SsSpinnerState();
 }
 
-class _SpinningIndicatorState extends State<_SpinningIndicator>
+class _SsSpinnerState extends State<SsSpinner>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
 
@@ -71,16 +35,18 @@ class _SpinningIndicatorState extends State<_SpinningIndicator>
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _ctrl,
-      builder: (ctx, _) {
-        return CustomPaint(
-          painter: _ArcPainter(
-            progress: _ctrl.value,
-            color: widget.color,
-          ),
-        );
-      },
+    final color = SsTheme.of(context).primary;
+    return SizedBox(
+      width: widget.size,
+      height: widget.size,
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (ctx, _) {
+          return CustomPaint(
+            painter: _ArcPainter(progress: _ctrl.value, color: color),
+          );
+        },
+      ),
     );
   }
 }
