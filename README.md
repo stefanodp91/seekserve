@@ -7,7 +7,27 @@ SeekServe is a C++17 library that downloads torrent content and serves it locall
 The SDK ships with three Flutter packages:
 - **`flutter_seekserve`** — FFI plugin: Dart bindings to the C++ engine
 - **`flutter_seekserve_ui`** — UI widget library: theme system, atoms, composites, player, torrent manager (no Material dependency)
-- **`flutter_seekserve_app`** — Standalone app: ready-to-run torrent streaming application
+- **`flutter_seekserve_app`** — Example app: demonstrates how to integrate the SDK into a complete application
+
+### Screenshots
+
+<table>
+  <tr>
+    <td align="center"><b>Torrent List</b></td>
+    <td align="center"><b>Torrent Detail</b></td>
+    <td align="center"><b>Video Player</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/list.jpeg" width="250" alt="Home screen with torrent list, status badges, and add button"/></td>
+    <td><img src="docs/images/item.jpeg" width="250" alt="Torrent detail with metadata, progress, and file tree with play button"/></td>
+    <td><img src="docs/images/video.jpeg" width="250" alt="Video player with seek controls, buffering overlay, and live torrent status bar"/></td>
+  </tr>
+  <tr>
+    <td>Home screen: active torrents with progress, download/upload rates, peer count, and state badge (SEED). The purple FAB adds new torrents via magnet URI or .torrent path.</td>
+    <td>Torrent detail: full metadata panel (infohash, total size, file count), progress bar, transfer stats. File tree with tap-to-play button for instant streaming.</td>
+    <td>Built-in video player (media_kit/mpv) streaming directly from torrent peers. Seek bar, skip ±10s, play/pause controls. Live status bar shows DL/UL rates, peer count, and STREAM mode.</td>
+  </tr>
+</table>
 
 ---
 
@@ -27,7 +47,7 @@ The SDK ships with three Flutter packages:
 - [Build Commands Reference](#build-commands-reference)
 - [Flutter Plugin](#flutter-plugin)
 - [Flutter UI Package](#flutter-ui-package)
-- [Flutter App](#flutter-app)
+- [Flutter App (Example)](#flutter-app-example)
 - [Usage](#usage)
 - [Testing the System](#testing-the-system)
 - [C API (FFI)](#c-api-ffi)
@@ -38,14 +58,13 @@ The SDK ships with three Flutter packages:
 - [WebTorrent](#webtorrent)
 - [Documentation Index](#documentation-index)
 - [Dependencies](#dependencies)
-- [Milestone Status](#milestone-status)
 - [License](#license)
 
 ---
 
 ## Features
 
-### C++ SDK (Phase 1)
+### C++ SDK
 - **HTTP Range streaming** (RFC 7233) — 200 OK, 206 Partial Content, 416 Range Not Satisfiable
 - **Intelligent piece scheduler** — hot window, lookahead, seek boost, adaptive mode switching
 - **Multi-file torrent support** — enumerate files, select one for streaming, correct per-file byte mapping
@@ -57,7 +76,7 @@ The SDK ships with three Flutter packages:
 - **Sanitizer support** — ASan and TSan build presets out of the box
 - **189 tests** — 138 unit + 32 integration + 19 C API
 
-### Flutter Plugin (Phase 2)
+### Flutter Plugin
 - **FFI bindings** — auto-generated via `ffigen` from `seekserve_c.h`
 - **Native builds** — pre-built XCFramework (iOS) and `.so` (Android arm64-v8a, armeabi-v7a, x86_64)
 - **Dart API** — `SeekServeClient` with async methods, `Stream<SeekServeEvent>` for real-time events
@@ -65,7 +84,7 @@ The SDK ships with three Flutter packages:
 - **Example app** — torrent input, file selection, `media_kit` video player, live status display
 - **15 Dart unit tests** for model classes
 
-### Flutter UI Package (Phase 3)
+### Flutter UI Package
 - **No Material/Cupertino dependency** — only `flutter/widgets.dart`, `painting.dart`, `gestures.dart`
 - **Theme system** — `SsThemeData` + `SsTheme` (InheritedWidget), dark/light presets, torrent-semantic colours, `copyWith()` customization
 - **9 atom widgets** — `SsButton`, `SsIconButton`, `SsTextField`, `SsProgressBar`, `SsBadge`, `SsChip`, `SsSlider`, `SsCard`, `SsDialog`
@@ -74,14 +93,14 @@ The SDK ships with three Flutter packages:
 - **1 controller** — `SsTorrentManager` (ChangeNotifier wrapping `SeekServeClient`)
 - **32 Dart unit tests** for theme, atoms, utils
 
-### Flutter App (Phase 3)
-- **Standalone app** — `WidgetsApp` (no MaterialApp), 3 screens, full torrent management
+### Flutter App (Example)
+- **Example application** — demonstrates SDK integration with `WidgetsApp` (no MaterialApp), 3 screens, full torrent management
 - **Home screen** — add torrent bar, torrent list with swipe-to-delete, status badges, error banner
 - **Torrent detail screen** — full metadata panel, file tree with folder navigation, tap-to-stream
 - **Player screen** — `SsVideoPlayer` with seek controls, buffering overlay, torrent status bar
 - **ManagerScope** — InheritedWidget providing `SsTorrentManager` to the entire widget tree
 
-### WebTorrent (M13)
+### WebTorrent
 - **WebRTC peer connections** via libdatachannel (libtorrent master branch)
 - **STUN server** configured automatically (`stun.l.google.com:19302`)
 - **WebTorrent trackers** supported via `extra_trackers` config (e.g. `wss://tracker.webtorrent.dev`)
@@ -168,7 +187,7 @@ Three Flutter packages form a layered architecture. Each layer depends only on t
 ```
 +-----------------------------------------------------------------------+
 |                     flutter_seekserve_app                              |
-|                     (standalone app)                                   |
+|                     (example app)                                      |
 |                                                                       |
 |   main.dart          router.dart         screens/                     |
 |   SeekServeApp       AppRouter           HomeScreen                   |
@@ -510,7 +529,7 @@ The status bar updates every second showing progress, download rate, peer count,
 ## Module Dependency Graph
 
 ```
-              flutter_seekserve_app (standalone Dart app)
+              flutter_seekserve_app (example Dart app)
                     |
                     | depends on
                     v
@@ -822,7 +841,7 @@ seekserve/
 |       |-- format_test.dart                   Bytes, rate, duration, file categories
 |       +-- atoms_test.dart                    Button, badge, progress, card, chip
 |
-|-- flutter_seekserve_app/             FLUTTER APP: standalone torrent streaming
+|-- flutter_seekserve_app/             FLUTTER APP: example / SDK integration reference
 |   |-- pubspec.yaml                   Depends on flutter_seekserve + flutter_seekserve_ui
 |   |-- lib/
 |   |   |-- main.dart                  WidgetsApp, SsTheme, ManagerScope, engine init
@@ -1336,9 +1355,9 @@ flutter analyze       # 0 errors
 
 ---
 
-## Flutter App
+## Flutter App (Example)
 
-The `flutter_seekserve_app` is a standalone torrent streaming application built entirely with `flutter_seekserve_ui` widgets. It uses `WidgetsApp` (not `MaterialApp`) and demonstrates the full widget library.
+The `flutter_seekserve_app` is an **example application** that demonstrates how to integrate the SeekServe SDK into a real Flutter project. It serves as a reference implementation showing the recommended patterns for torrent management, file browsing, and video playback using `flutter_seekserve` and `flutter_seekserve_ui`. Built entirely with `WidgetsApp` (not `MaterialApp`) to showcase the Material-free widget library.
 
 ### Screens
 
@@ -1771,29 +1790,6 @@ The SDK falls back to standard BitTorrent only. Binary size decreases by ~30%.
 | [Google Test](https://github.com/google/googletest) | vcpkg | Unit and integration testing |
 | [media_kit](https://github.com/media-kit/media-kit) | pub.dev (UI + app) | Video player for Flutter (libmpv-based) |
 | [path_provider](https://pub.dev/packages/path_provider) | pub.dev (app) | Platform-specific document directory |
-
----
-
-## Milestone Status
-
-| Milestone | Description | Status |
-|-----------|-------------|--------|
-| **M1** | Project skeleton + libtorrent integration | Complete |
-| **M2** | ByteRangeMapper + PieceAvailability + unit tests | Complete |
-| **M3** | ByteSource (read with cv wait, cancel) | Complete |
-| **M4** | HTTP Range Server (RFC 7233, Beast, multi-file) | Complete |
-| **M5** | Streaming Scheduler (hot window, seek boost, modes) | Complete |
-| **M6** | Control API + Offline Cache (REST, SQLite, LRU) | Complete |
-| **M7** | C API Layer (opaque handle, JSON, callbacks) | Complete |
-| **M8** | Hardening (timeouts, limits, sanitizers, docs) | Complete |
-| **M9** | Flutter plugin scaffold + FFI bindings | Complete |
-| **M10** | Native library builds (iOS XCFramework + Android 3 ABIs) | Complete |
-| **M11** | Dart API layer + NativeCallable event system | Complete |
-| **M12** | Example app (media_kit player, file selection, status) | Complete |
-| **M13** | WebTorrent support (libtorrent master, libdatachannel) | Complete |
-| **M14** | UI widget package + standalone app (theme, atoms, composites, player, controller) | Complete |
-
-**189 C++ tests** (138 unit + 32 integration + 19 C API) + **15 Dart plugin tests** + **32 UI package tests** = **236 total tests**.
 
 ---
 
