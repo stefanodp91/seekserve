@@ -80,6 +80,39 @@ void main() {
       expect(status.activeDeadlines, 10);
     });
 
+    test('fromJson maps integer state_t values (1-based libtorrent enum)', () {
+      // libtorrent state_t: checking_files=1, downloading_metadata=2,
+      // downloading=3, finished=4, seeding=5, checking_resume_data=7
+      expect(
+        TorrentStatus.fromJson({'torrent_id': '', 'state': 1}).state,
+        'checking_files',
+      );
+      expect(
+        TorrentStatus.fromJson({'torrent_id': '', 'state': 2}).state,
+        'downloading_metadata',
+      );
+      expect(
+        TorrentStatus.fromJson({'torrent_id': '', 'state': 3}).state,
+        'downloading',
+      );
+      expect(
+        TorrentStatus.fromJson({'torrent_id': '', 'state': 4}).state,
+        'finished',
+      );
+      expect(
+        TorrentStatus.fromJson({'torrent_id': '', 'state': 5}).state,
+        'seeding',
+      );
+      expect(
+        TorrentStatus.fromJson({'torrent_id': '', 'state': 7}).state,
+        'checking_resume_data',
+      );
+      expect(
+        TorrentStatus.fromJson({'torrent_id': '', 'state': 99}).state,
+        'unknown',
+      );
+    });
+
     test('fromJson handles missing optional fields', () {
       final status = TorrentStatus.fromJson({
         'torrent_id': 'def456',

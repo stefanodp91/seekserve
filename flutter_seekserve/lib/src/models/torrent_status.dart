@@ -49,18 +49,22 @@ class TorrentStatus {
   }
 
   /// Maps libtorrent state_t int values to human-readable strings.
+  ///
+  /// libtorrent's `state_t` enum is 1-based:
+  ///   checking_files=1, downloading_metadata=2, downloading=3,
+  ///   finished=4, seeding=5, (allocating=6 deprecated), checking_resume_data=7
   static String _parseState(Object? value) {
     if (value is String) return value;
     if (value is int) {
-      const states = [
-        'checking_files',       // 0
-        'downloading_metadata', // 1
-        'downloading',          // 2
-        'finished',             // 3
-        'seeding',              // 4
-        'checking_resume_data', // 5
-      ];
-      return (value >= 0 && value < states.length) ? states[value] : 'unknown';
+      const states = {
+        1: 'checking_files',
+        2: 'downloading_metadata',
+        3: 'downloading',
+        4: 'finished',
+        5: 'seeding',
+        7: 'checking_resume_data',
+      };
+      return states[value] ?? 'unknown';
     }
     return 'unknown';
   }

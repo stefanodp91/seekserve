@@ -1,10 +1,13 @@
 # SeekServe
 
-**Edge-first torrent streaming SDK with HTTP Range support, intelligent piece scheduling, offline caching, WebTorrent, and a Flutter plugin.**
+**Edge-first torrent streaming SDK with HTTP Range support, intelligent piece scheduling, offline caching, WebTorrent, and a full Flutter toolkit.**
 
 SeekServe is a C++17 library that downloads torrent content and serves it locally via an HTTP Range-compliant server on loopback. Video players like VLC can connect to it and play, seek, and scrub through torrent video as if it were a regular HTTP stream. An intelligent piece scheduler ensures the right pieces are downloaded first for instant playback and fast seek.
 
-The SDK includes a Flutter plugin (`flutter_seekserve`) with FFI bindings, pre-built native libraries for iOS and Android, a high-level Dart API with async events, and an example app with video playback.
+The SDK ships with three Flutter packages:
+- **`flutter_seekserve`** — FFI plugin: Dart bindings to the C++ engine
+- **`flutter_seekserve_ui`** — UI widget library: theme system, atoms, composites, player, torrent manager (no Material dependency)
+- **`flutter_seekserve_app`** — Standalone app: ready-to-run torrent streaming application
 
 ---
 
@@ -12,7 +15,9 @@ The SDK includes a Flutter plugin (`flutter_seekserve`) with FFI bindings, pre-b
 
 - [Features](#features)
 - [Architecture Overview](#architecture-overview)
+- [Flutter Package Architecture](#flutter-package-architecture)
 - [High-Level Data Flow](#high-level-data-flow)
+- [End-to-End User Flow](#end-to-end-user-flow)
 - [Module Dependency Graph](#module-dependency-graph)
 - [Thread Model](#thread-model)
 - [Streaming Pipeline](#streaming-pipeline)
@@ -20,6 +25,8 @@ The SDK includes a Flutter plugin (`flutter_seekserve`) with FFI bindings, pre-b
 - [Project Structure](#project-structure)
 - [Build & Run](#build--run)
 - [Flutter Plugin](#flutter-plugin)
+- [Flutter UI Package](#flutter-ui-package)
+- [Flutter App](#flutter-app)
 - [Usage](#usage)
 - [Testing the System](#testing-the-system)
 - [C API (FFI)](#c-api-ffi)
@@ -56,6 +63,22 @@ The SDK includes a Flutter plugin (`flutter_seekserve`) with FFI bindings, pre-b
 - **Event system** — `NativeCallable.listener` bridges C callbacks to Dart isolate
 - **Example app** — torrent input, file selection, `media_kit` video player, live status display
 - **14 Dart unit tests** for model classes
+
+### Flutter UI Package (Phase 3)
+- **No Material/Cupertino dependency** — only `flutter/widgets.dart`, `painting.dart`, `gestures.dart`
+- **Theme system** — `SsThemeData` + `SsTheme` (InheritedWidget), dark/light presets, torrent-semantic colours, `copyWith()` customization
+- **9 atom widgets** — `SsButton`, `SsIconButton`, `SsTextField`, `SsProgressBar`, `SsBadge`, `SsChip`, `SsSlider`, `SsCard`, `SsDialog`
+- **9 composite widgets** — `SsTorrentTile`, `SsFileTile`, `SsFileTree`, `SsTransferStats`, `SsStreamModeBadge`, `SsAddTorrentBar`, `SsTorrentList`, `SsTorrentDetail`, `SsDeleteConfirm`
+- **4 player widgets** — `SsSeekControls`, `SsBufferingOverlay`, `SsPlayerStatusBar`, `SsVideoPlayer`
+- **1 controller** — `SsTorrentManager` (ChangeNotifier wrapping `SeekServeClient`)
+- **32 Dart unit tests** for theme, atoms, utils
+
+### Flutter App (Phase 3)
+- **Standalone app** — `WidgetsApp` (no MaterialApp), 3 screens, full torrent management
+- **Home screen** — add torrent bar, torrent list with swipe-to-delete, status badges, error banner
+- **Torrent detail screen** — full metadata panel, file tree with folder navigation, tap-to-stream
+- **Player screen** — `SsVideoPlayer` with seek controls, buffering overlay, torrent status bar
+- **ManagerScope** — InheritedWidget providing `SsTorrentManager` to the entire widget tree
 
 ### WebTorrent (M13)
 - **WebRTC peer connections** via libdatachannel (libtorrent master branch)
@@ -120,12 +143,245 @@ The SDK includes a Flutter plugin (`flutter_seekserve`) with FFI bindings, pre-b
    +-------------+                           +--------------+
           ^
           |
-   +------+----------+
-   | Flutter Plugin   |
-   | (dart:ffi)       |
-   | SeekServeClient  |
-   | media_kit player |
-   +-----------------+
+   +------+-----------+
+   | Flutter Packages  |
+   |                   |
+   | flutter_seekserve |    flutter_seekserve_ui    flutter_seekserve_app
+   | (dart:ffi)        |<----(widgets, theme)  <----(screens, routing)
+   | SeekServeClient   |    SsTorrentManager        HomeScreen
+   | native bindings   |    SsVideoPlayer           TorrentDetailScreen
+   +-------------------+    SsSeekControls          AppPlayerScreen
+                            SsTorrentList
+                            SsFileTree
+                            SsTheme (dark/light)
+```
+
+---
+
+## Flutter Package Architecture
+
+Three Flutter packages form a layered architecture. Each layer depends only on the layer below, never sideways or upward.
+
+### Package Dependency Graph
+
+```
++-----------------------------------------------------------------------+
+|                     flutter_seekserve_app                              |
+|                     (standalone app)                                   |
+|                                                                       |
+|   main.dart          router.dart         screens/                     |
+|   SeekServeApp       AppRouter           HomeScreen                   |
+|   ManagerScope       /  |  \             TorrentDetailScreen          |
+|   (InheritedWidget)  /detail /player     AppPlayerScreen              |
++----------+--------------------+-----------------------------------+---+
+           |                    |
+           | depends on         | depends on
+           v                    v
++----------+--------------------+-----------------------------------+---+
+|                     flutter_seekserve_ui                              |
+|                     (UI widget library)                               |
+|                                                                       |
+|   THEME                     ATOMS                                     |
+|   +-------------------+    +---------+---------+---------+            |
+|   | SsThemeData       |    | SsButton| SsSlider|SsDialog |            |
+|   |  .dark() .light() |    | SsIcon  |SsProgBar|SsCard   |            |
+|   |  .copyWith()      |    | SsField |SsBadge  |SsChip   |            |
+|   | SsTheme (Inherit) |    +---------+---------+---------+            |
+|   +-------------------+                                               |
+|                                                                       |
+|   COMPOSITES                            PLAYER                        |
+|   +-------------------+  +----------+  +---------------------------+  |
+|   | SsTorrentTile     |  |SsTransfer|  | SsVideoPlayer             |  |
+|   | SsTorrentList     |  |  Stats   |  |  +-- SsSeekControls       |  |
+|   | SsTorrentDetail   |  +----------+  |  +-- SsBufferingOverlay   |  |
+|   | SsAddTorrentBar   |  |SsStream  |  |  +-- SsPlayerStatusBar   |  |
+|   | SsFileTile        |  |ModeBadge |  +---------------------------+  |
+|   | SsFileTree        |  +----------+                                 |
+|   | SsDeleteConfirm   |                                               |
+|   +-------------------+                                               |
+|                                                                       |
+|   CONTROLLER                           UTILS                          |
+|   +-------------------+               +---------------------------+   |
+|   | SsTorrentManager  |               | formatBytes/Rate/Duration |   |
+|   |  (ChangeNotifier) |               | fileCategoryFromExtension |   |
+|   |  entries, statuses|               +---------------------------+   |
+|   |  addTorrent()     |                                               |
+|   |  removeTorrent()  |                                               |
+|   |  selectAndStream()|                                               |
+|   |  poll + events    |                                               |
+|   +--------+----------+                                               |
++------------|----------------------------------------------------------+
+             |
+             | depends on
+             v
++-----------------------------------------------------------------------+
+|                     flutter_seekserve                                  |
+|                     (FFI plugin)                                       |
+|                                                                       |
+|   +-------------------+    +------------------------------------------+
+|   | SeekServeClient   |    | Models                                   |
+|   |  addTorrent()     |    |  TorrentStatus  (progress, rates, peers) |
+|   |  removeTorrent()  |    |  FileInfo        (path, size, isVideo)   |
+|   |  listFiles()      |    |  SeekServeConfig (savePath, auth, etc.)  |
+|   |  selectFile()     |    |  SeekServeEvent  (sealed class)          |
+|   |  getStreamUrl()   |    |    MetadataReceived                      |
+|   |  getStatus()      |    |    FileCompleted                         |
+|   |  startServer()    |    |    TorrentError                          |
+|   |  events (Stream)  |    |    UnknownEvent                          |
+|   +--------+----------+    +------------------------------------------+
+             |
+             | dart:ffi (NativeCallable.listener)
+             v
++-----------------------------------------------------------------------+
+|                     seekserve-capi (C API)                             |
+|                     libseekserve.dylib / .so / .a                     |
++-----------------------------------------------------------------------+
+             |
+             | links
+             v
++-----------------------------------------------------------------------+
+|              C++ SDK  (seekserve-serve + seekserve-core)              |
+|              libtorrent + Boost.Beast + SQLite + WebTorrent           |
++-----------------------------------------------------------------------+
+```
+
+### Data Flow Through the Flutter Layers
+
+```
+  User pastes magnet URI
+       |
+       v
+  [flutter_seekserve_app]
+  HomeScreen
+    +-- SsAddTorrentBar (ui)  ---- onAdd(uri) ---->  ManagerScope.manager
+       |                                                    |
+       |                                                    v
+       |                                           [flutter_seekserve_ui]
+       |                                           SsTorrentManager
+       |                                             .addTorrent(uri)
+       |                                                    |
+       |                                                    v
+       |                                           [flutter_seekserve]
+       |                                           SeekServeClient
+       |                                             .addTorrent(uri)
+       |                                                    |
+       |                                                    | dart:ffi
+       |                                                    v
+       |                                           [seekserve-capi]
+       |                                           ss_add_torrent()
+       |                                                    |
+       |                                                    v
+       |                                           [C++ Engine]
+       |                                           libtorrent -> peers -> download
+       |
+       |   <---- notifyListeners() ----+
+       |                               |
+       v                               |
+  SsTorrentList (ui)                   |
+    +-- SsTorrentTile (ui)             |  1-second poll timer
+         progress, rates, peers        |  SsTorrentManager._pollStatus()
+                                       |       |
+  User taps torrent                    |       v
+       |                               |  SeekServeClient.getStatus()
+       v                               |       |
+  TorrentDetailScreen                  |       | dart:ffi
+    +-- SsTorrentDetail (ui)           |       v
+    +-- SsFileTree (ui)                |  ss_get_status() -> JSON
+         |                             |
+         | User taps video file        |
+         v                             |
+  SsTorrentManager                     |
+    .selectAndStream(id, fileIdx)      |
+       |                               |
+       v                               |
+  SeekServeClient                      |
+    .selectFile() + .getStreamUrl()    |
+       |                               |
+       | returns http://127.0.0.1:PORT/stream/...
+       v
+  AppPlayerScreen
+    +-- SsVideoPlayer (ui)
+         |
+         +-- HTTP HEAD probe
+         +-- media_kit Player.open(url)
+         +-- SsSeekControls
+         |    +-- SsSlider (atom)
+         |    +-- SsIconButton (atom) x3
+         +-- SsBufferingOverlay
+         +-- SsPlayerStatusBar
+              +-- SsProgressBar (atom)
+              +-- SsTransferStats (composite)
+              +-- SsStreamModeBadge (composite)
+```
+
+### Widget Hierarchy (Atomic Design)
+
+```
+ATOMS (basic building blocks, no business logic)
+  SsButton ─────────── GestureDetector + Container + Text
+  SsIconButton ──────── GestureDetector + Opacity + Icon
+  SsTextField ───────── Container + EditableText
+  SsProgressBar ─────── ClipRRect + CustomPaint (_ProgressPainter)
+  SsBadge ───────────── Container + Text (pill shape)
+  SsChip ────────────── Row + Icon + Text
+  SsSlider ──────────── GestureDetector + CustomPaint (_SliderPainter)
+  SsCard ────────────── GestureDetector + Container (rounded, themed)
+  SsDialog ──────────── PageRouteBuilder + Center + Container
+
+COMPOSITES (combine atoms + business data)
+  SsTorrentTile ─────── SsBadge + SsProgressBar + Text (rates, peers)
+  SsTorrentList ─────── ListView + Dismissible + SsTorrentTile
+  SsTorrentDetail ───── SsBadge + SsProgressBar + SsTransferStats + _DetailRow
+  SsFileTile ────────── Row + Icon + Text (file name, size, type icon)
+  SsFileTree ────────── ListView + _FolderRow + SsFileTile (recursive tree)
+  SsTransferStats ───── Wrap + SsChip (DL rate, UL rate, peers)
+  SsStreamModeBadge ─── SsBadge (STREAM / ASSIST / DOWNLOAD)
+  SsAddTorrentBar ───── SsIconButton (paste, add) + EditableText
+  SsDeleteConfirm ───── SsDialog (Cancel / Keep files / Delete all)
+
+PLAYER (media_kit + streaming widgets)
+  SsVideoPlayer ─────── Column + Stack
+    SsSeekControls ──── Row + SsSlider + SsIconButton (skip±10s, play/pause)
+    SsBufferingOverlay ─ Positioned.fill + _SpinningIndicator
+    SsPlayerStatusBar ── SsProgressBar + SsTransferStats + SsStreamModeBadge
+
+CONTROLLER (business logic, ChangeNotifier)
+  SsTorrentManager ──── wraps SeekServeClient
+    entries ──────────── Map<String, SsTorrentEntry>
+    addTorrent() ─────── client.addTorrent() + track entry
+    removeTorrent() ──── client.removeTorrent() + remove entry
+    selectAndStream() ── client.selectFile() + getStreamUrl()
+    _pollStatus() ────── Timer.periodic(1s) -> getStatus() for each entry
+    _onEvent() ───────── Stream<SeekServeEvent> -> metadata/file/error
+```
+
+### Theme System
+
+```
+SsThemeData
+  |
+  +-- Base colours:     primary, onPrimary, surface, onSurface,
+  |                     background, onBackground, error, onError
+  |
+  +-- Torrent colours:  downloading (blue), seeding (green), paused (grey),
+  |                     checking (yellow), buffering (orange), completed (dk green)
+  |
+  +-- Text styles:      headingStyle (18, w600), bodyStyle (14),
+  |                     captionStyle (11, grey), monoStyle (12, monospace)
+  |
+  +-- Dimensions:       borderRadius (8), cardPadding (12), iconSize (24)
+  |
+  +-- Presets:
+  |     SsThemeData.dark()   -- bg:#121212, surface:#1E1E1E, primary:#7C4DFF
+  |     SsThemeData.light()  -- bg:#F5F5F5, surface:#FFFFFF, primary:#6200EA
+  |
+  +-- Customization:
+        theme.copyWith(primary: Color(0xFFFF5722), borderRadius: 16.0)
+
+SsTheme (InheritedWidget)
+  |
+  +-- SsTheme(data: SsThemeData.dark(), child: ...)
+  +-- SsTheme.of(context) -> SsThemeData  (fallback: dark)
 ```
 
 ---
@@ -170,16 +426,97 @@ The SDK includes a Flutter plugin (`flutter_seekserve`) with FFI bindings, pre-b
 
 ---
 
+## End-to-End User Flow
+
+What happens when a user pastes a magnet link and hits play:
+
+### 1. Add torrent
+
+The user provides a magnet URI (or `.torrent` file path). The app calls `addTorrent()` which passes through Dart FFI -> C API -> `SeekServeEngine::add_torrent()`. libtorrent creates a torrent handle and starts peer discovery via **DHT**, **UDP/HTTP trackers**, and **Local Peer Discovery** (LAN multicast). At this point only the infohash is known -- no file names or sizes yet.
+
+### 2. Metadata arrives
+
+Once a peer is found, libtorrent downloads the torrent metadata (the `.torrent` info dictionary). The `AlertDispatcher` catches `metadata_received_alert` and:
+- `MetadataCatalog` stores the file list (names, sizes, piece layout)
+- A `MetadataReceived` event fires through the FFI callback to Dart
+- The provider calls `listFiles()` to cache the file list
+
+Typical time: 5-30 seconds depending on tracker/DHT speed.
+
+### 3. File selection
+
+The UI displays all files with icons, sizes, and a play button for video files. The user taps a video file (e.g. `sintel-2048-stereo_512kb.mp4`).
+
+### 4. Stream setup
+
+`selectFile(torrentId, fileIndex)` triggers the C++ engine to:
+- Create a **ByteSource** — maps byte offsets to torrent pieces for this specific file
+- Create a **StreamingScheduler** — sets piece deadlines so libtorrent downloads pieces in playback order
+- Register the ByteSource in the **HttpRangeServer** under the route `/stream/{infohash}/{fileIndex}`
+
+`getStreamUrl()` returns the local URL: `http://127.0.0.1:{port}/{infohash}/{fileIndex}?token={auth}`
+
+### 5. Player opens stream
+
+The video player (media_kit/mpv on mobile, VLC on desktop) opens the URL as a standard HTTP video stream. It sends an initial `Range: bytes=0-` request.
+
+### 6. HTTP Range serving loop
+
+For each Range request:
+
+```
+Player: GET /stream/{id}/{fi}  Range: bytes=1000000-
+   |
+   v
+HttpRangeServer: parse range, look up ByteSource
+   |
+   v
+StreamingScheduler: set_piece_deadline() on pieces near the read position
+   |                (hot window = immediate, lookahead = 2s+)
+   v
+ByteSource::read(offset, 65536):
+   |
+   +-- piece available on disk?  --> read and return 64KB chunk
+   +-- piece not yet downloaded? --> wait (condition_variable, up to 30s)
+   |                                  AlertDispatcher signals on piece_finished
+   v
+Server: 206 Partial Content, streams 64KB chunks until range complete
+```
+
+The player decodes and renders the video as chunks arrive. Playback typically starts within 2-5 seconds of buffering.
+
+### 7. Seek
+
+When the user scrubs to a new position, the player sends a new Range request at the new byte offset. The StreamingScheduler activates **seek boost** — downloading extra pieces around the new position with aggressive deadlines — so playback resumes quickly (1-2 seconds).
+
+### 8. Continuous download
+
+While the video plays, libtorrent keeps downloading in the background. The scheduler adapts its strategy based on conditions:
+
+| Mode | Condition | Behavior |
+|------|-----------|----------|
+| `STREAMING_FIRST` | Default | Prioritize pieces near playhead |
+| `DOWNLOAD_ASSIST` | Frequent stalls (>3) | Widen download window |
+| `DOWNLOAD_FIRST` | Very slow connection (<500 KB/s) | Maximize overall download rate |
+
+The status bar updates every second showing progress, download rate, peer count, and current scheduling mode.
+
+---
+
 ## Module Dependency Graph
 
 ```
-              Flutter App (Dart)
+              flutter_seekserve_app (standalone Dart app)
                     |
-                    | dart:ffi
+                    | depends on
                     v
-              flutter_seekserve (plugin)
+              flutter_seekserve_ui (widget library)
+              /     |
+  media_kit  /      | depends on
+  (video)   /       v
+              flutter_seekserve (FFI plugin)
                     |
-                    | NativeCallable.listener
+                    | dart:ffi + NativeCallable.listener
                     v
               seekserve-capi  (shared/static lib, C API)
                     |
@@ -437,6 +774,60 @@ seekserve/
 |       |-- ios/                         Xcode project, Info.plist (ATS localhost)
 |       +-- android/                     Gradle, network_security_config.xml
 |
+|-- flutter_seekserve_ui/           FLUTTER PACKAGE: UI widget library
+|   |-- pubspec.yaml                No Material dependency, depends on flutter_seekserve
+|   |-- lib/
+|   |   |-- flutter_seekserve_ui.dart  Public barrel export (all widgets)
+|   |   +-- src/
+|   |       |-- theme/
+|   |       |   |-- ss_theme_data.dart     SsThemeData: colours, text styles, dimensions
+|   |       |   +-- ss_theme.dart          SsTheme: InheritedWidget + dark/light presets
+|   |       |-- atoms/
+|   |       |   |-- ss_button.dart         Primary/secondary/danger button
+|   |       |   |-- ss_icon_button.dart    Icon button with press feedback
+|   |       |   |-- ss_text_field.dart     Themed text input
+|   |       |   |-- ss_progress_bar.dart   Linear progress (CustomPaint)
+|   |       |   |-- ss_badge.dart          Pill-shaped status badge
+|   |       |   |-- ss_chip.dart           Icon + label info chip
+|   |       |   |-- ss_slider.dart         Drag slider (CustomPaint)
+|   |       |   |-- ss_card.dart           Themed container card
+|   |       |   +-- ss_dialog.dart         Overlay confirmation dialog
+|   |       |-- composites/
+|   |       |   |-- ss_torrent_tile.dart   Torrent row: name, progress, rates, badge
+|   |       |   |-- ss_torrent_list.dart   Scrollable list + swipe-to-delete
+|   |       |   |-- ss_torrent_detail.dart Full metadata panel
+|   |       |   |-- ss_file_tile.dart      File row with type icon
+|   |       |   |-- ss_file_tree.dart      Expandable folder tree
+|   |       |   |-- ss_transfer_stats.dart DL/UL rates + peer chips
+|   |       |   |-- ss_stream_mode_badge.dart  Stream mode indicator
+|   |       |   |-- ss_add_torrent_bar.dart    URI input + paste + add
+|   |       |   +-- ss_delete_confirm.dart     3-option remove dialog
+|   |       |-- player/
+|   |       |   |-- ss_seek_controls.dart      Slider + skip±10s + play/pause
+|   |       |   |-- ss_buffering_overlay.dart  Animated spinner overlay
+|   |       |   |-- ss_player_status_bar.dart  Progress + stats + mode badge
+|   |       |   +-- ss_video_player.dart       Complete player (probe + media_kit)
+|   |       |-- controllers/
+|   |       |   +-- ss_torrent_manager.dart    ChangeNotifier: poll, events, CRUD
+|   |       +-- utils/
+|   |           +-- format.dart                formatBytes, formatRate, formatDuration
+|   +-- test/
+|       |-- theme_test.dart                    Dark/light, copyWith, InheritedWidget
+|       |-- format_test.dart                   Bytes, rate, duration, file categories
+|       +-- atoms_test.dart                    Button, badge, progress, card, chip
+|
+|-- flutter_seekserve_app/             FLUTTER APP: standalone torrent streaming
+|   |-- pubspec.yaml                   Depends on flutter_seekserve + flutter_seekserve_ui
+|   |-- lib/
+|   |   |-- main.dart                  WidgetsApp, SsTheme, ManagerScope, engine init
+|   |   |-- router.dart                3 routes: /, /detail, /player
+|   |   +-- screens/
+|   |       |-- home_screen.dart       Add torrent bar + torrent list + error banner
+|   |       |-- torrent_detail_screen.dart  Metadata panel + file tree
+|   |       +-- player_screen.dart     SsVideoPlayer + top bar
+|   +-- test/
+|       +-- widget_test.dart           App startup smoke test
+|
 |-- scripts/
 |   |-- build-ios.sh                 iOS arm64 (device + simulator) -> XCFramework
 |   |-- build-android.sh            Android 3 ABIs via NDK -> .so files
@@ -632,6 +1023,132 @@ flutter analyze       # Static analysis
 | Android | API 28 (Android 9) |
 | Dart | 3.2+ |
 | Flutter | 3.19+ |
+
+---
+
+## Flutter UI Package
+
+The `flutter_seekserve_ui` package provides a complete set of themed widgets for torrent management and video playback. It has **zero Material/Cupertino dependency** — all widgets are built from `flutter/widgets.dart` only.
+
+### Design Principles
+
+- **Atomic Design** — atoms (buttons, badges) compose into composites (torrent tiles, file trees), which compose into player and screen-level widgets
+- **Theme-driven** — every widget reads colours and styles from `SsTheme.of(context)`, no hardcoded values
+- **No Material** — uses `WidgetsApp` instead of `MaterialApp`, `EditableText` instead of `TextField`, `GestureDetector` instead of `InkWell`
+- **Custom painting** — `SsProgressBar` and `SsSlider` use `CustomPaint` for full control
+
+### Widget Inventory
+
+| Category | Widget | Purpose |
+|----------|--------|---------|
+| **Atom** | `SsButton` | Primary / secondary / danger button with press feedback |
+| **Atom** | `SsIconButton` | Icon button with opacity feedback |
+| **Atom** | `SsTextField` | Themed text input field |
+| **Atom** | `SsProgressBar` | Linear progress bar (CustomPaint) |
+| **Atom** | `SsBadge` | Pill-shaped coloured status badge |
+| **Atom** | `SsChip` | Icon + label info chip |
+| **Atom** | `SsSlider` | Horizontal drag slider (CustomPaint) |
+| **Atom** | `SsCard` | Themed container card with optional tap |
+| **Atom** | `SsDialog` | Overlay confirmation dialog (PageRouteBuilder) |
+| **Composite** | `SsTorrentTile` | Torrent row: name, progress bar, DL/UL rates, peer count, state badge |
+| **Composite** | `SsTorrentList` | Scrollable list with swipe-to-delete via `Dismissible` |
+| **Composite** | `SsTorrentDetail` | Full metadata panel: infohash, size, files, playhead, deadlines |
+| **Composite** | `SsFileTile` | File row with type icon (video/audio/subtitle/image/doc) |
+| **Composite** | `SsFileTree` | Expandable folder tree, auto-skips single root dir |
+| **Composite** | `SsTransferStats` | DL rate, UL rate, peer/seed count as `SsChip` widgets |
+| **Composite** | `SsStreamModeBadge` | STREAM / ASSIST / DOWNLOAD badge with mode colour |
+| **Composite** | `SsAddTorrentBar` | URI text input + paste from clipboard + add button |
+| **Composite** | `SsDeleteConfirm` | 3-option dialog: Cancel / Keep files / Delete all |
+| **Player** | `SsSeekControls` | Slider + skip ±10s + play/pause via `media_kit` streams |
+| **Player** | `SsBufferingOverlay` | Animated spinning arc overlay |
+| **Player** | `SsPlayerStatusBar` | Download progress + transfer stats + stream mode |
+| **Player** | `SsVideoPlayer` | Complete video player with HTTP probe, `media_kit`, all sub-widgets |
+| **Controller** | `SsTorrentManager` | `ChangeNotifier` wrapping `SeekServeClient`, poll + events |
+
+### Usage
+
+```dart
+import 'package:flutter_seekserve_ui/flutter_seekserve_ui.dart';
+
+// Wrap your app with the theme
+SsTheme(
+  data: SsThemeData.dark(),
+  child: MyApp(),
+);
+
+// Custom theme
+SsTheme(
+  data: SsThemeData.dark().copyWith(
+    primary: Color(0xFFFF5722),
+    downloading: Color(0xFF00BCD4),
+  ),
+  child: MyApp(),
+);
+
+// Use widgets anywhere
+SsTorrentList(
+  torrents: manager.statuses,
+  onTap: (status) => navigateToDetail(status.torrentId),
+  onDelete: (status) => manager.removeTorrent(status.torrentId),
+);
+
+// File tree with auto-play
+SsFileTree(
+  files: fileList,
+  onFileTap: (file) => manager.selectAndStream(torrentId, file.index),
+);
+
+// Complete video player
+SsVideoPlayer(
+  streamUrl: 'http://127.0.0.1:54321/stream/abc.../8?token=xxx',
+  torrentStatus: currentStatus,  // optional, shows status bar
+);
+```
+
+### Tests
+
+```bash
+cd flutter_seekserve_ui
+flutter test          # 32 unit tests (theme, format, atoms)
+flutter analyze       # 0 errors
+```
+
+---
+
+## Flutter App
+
+The `flutter_seekserve_app` is a standalone torrent streaming application built entirely with `flutter_seekserve_ui` widgets. It uses `WidgetsApp` (not `MaterialApp`) and demonstrates the full widget library.
+
+### Screens
+
+| Screen | Route | Widgets Used |
+|--------|-------|-------------|
+| **Home** | `/` | `SsAddTorrentBar`, `SsTorrentList`, `SsBadge`, `SsDeleteConfirm` |
+| **Torrent Detail** | `/detail` | `SsTorrentDetail`, `SsFileTree`, `SsIconButton` |
+| **Player** | `/player` | `SsVideoPlayer`, `SsSeekControls`, `SsBufferingOverlay`, `SsPlayerStatusBar` |
+
+### State Management
+
+The app uses `SsTorrentManager` (from the UI package) as a `ChangeNotifier`, injected via `ManagerScope` (`InheritedWidget`):
+
+```dart
+// Access from any widget
+final manager = context.manager;
+manager.addTorrent('magnet:?xt=urn:btih:...');
+manager.selectAndStream(torrentId, fileIndex);
+```
+
+### Running
+
+```bash
+cd flutter_seekserve_app
+
+# iOS (requires native libs built first)
+flutter run --device-id <simulator_or_device>
+
+# Android
+flutter run
+```
 
 ---
 
@@ -894,6 +1411,10 @@ cd build/debug && ctest          # All 189 tests at once
 cd flutter_seekserve
 flutter test          # 14 Dart unit tests for model classes
 flutter analyze       # Static analysis (0 issues)
+
+cd flutter_seekserve_ui
+flutter test          # 32 Dart unit tests for theme, atoms, utils
+flutter analyze       # Static analysis (0 errors)
 ```
 
 ---
@@ -1028,7 +1549,8 @@ The SDK falls back to standard BitTorrent only. Binary size decreases by ~30%.
 | [spdlog](https://github.com/gabime/spdlog) | vcpkg | Structured logging |
 | [SQLite3](https://www.sqlite.org/) | vcpkg | Offline cache persistence |
 | [Google Test](https://github.com/google/googletest) | vcpkg | Unit and integration testing |
-| [media_kit](https://github.com/media-kit/media-kit) | pub.dev (example app) | Video player for Flutter (libmpv-based) |
+| [media_kit](https://github.com/media-kit/media-kit) | pub.dev (UI + app) | Video player for Flutter (libmpv-based) |
+| [path_provider](https://pub.dev/packages/path_provider) | pub.dev (app) | Platform-specific document directory |
 
 ---
 
@@ -1049,8 +1571,9 @@ The SDK falls back to standard BitTorrent only. Binary size decreases by ~30%.
 | **M11** | Dart API layer + NativeCallable event system | Complete |
 | **M12** | Example app (media_kit player, file selection, status) | Complete |
 | **M13** | WebTorrent support (libtorrent master, libdatachannel) | Complete |
+| **M14** | UI widget package + standalone app (theme, atoms, composites, player, controller) | Complete |
 
-**189 C++ tests** (138 unit + 32 integration + 19 C API) + **14 Dart tests** = **203 total tests**.
+**189 C++ tests** (138 unit + 32 integration + 19 C API) + **14 Dart plugin tests** + **32 UI package tests** = **235 total tests**.
 
 See [PROGRESS.md](PROGRESS.md) for the detailed task-by-task checklist.
 

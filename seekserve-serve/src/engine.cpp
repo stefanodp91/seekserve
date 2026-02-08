@@ -168,6 +168,20 @@ Result<void> SeekServeEngine::select_file(const TorrentId& id, FileIndex fi) {
         ti->total_size() - static_cast<std::int64_t>(num_pieces - 1) * piece_length);
 
     state->avail.reset(num_pieces, piece_length, last_piece_size);
+
+    // Pre-populate availability with already-downloaded pieces.
+    // Without this, ByteSource::read() would block waiting for pieces
+    // that are already on disk, since piece_finished_alert only fires
+    // for NEW completions after this point.
+    {
+        auto st = handle.status(lt::torrent_handle::query_pieces);
+        for (int p = 0; p < num_pieces; ++p) {
+            if (st.pieces.get_bit(lt::piece_index_t{p})) {
+                state->avail.mark_complete(static_cast<PieceIndex>(p));
+            }
+        }
+    }
+
     state->mapper = std::make_unique<ByteRangeMapper>(ti->layout(), fi);
     state->selected_file = fi;
 

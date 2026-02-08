@@ -1,0 +1,21 @@
+name: flutter_seekserve_ui
+description: "Reusable UI widgets for SeekServe torrent streaming. No Material/Cupertino dependency."
+version: 0.1.0
+homepage: https://github.com/mapo80/seekserve
+
+environment:
+  sdk: ^3.10.8
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_seekserve:
+    path: ../flutter_seekserve
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0

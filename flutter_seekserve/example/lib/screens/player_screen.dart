@@ -118,6 +118,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 : const Center(child: CircularProgressIndicator()),
           ),
 
+          // Seek controls
+          if (_player != null) _SeekControls(player: _player!),
+
           // Debug info panel
           Container(
             color: Colors.black87,
@@ -170,6 +173,115 @@ class _PlayerScreenState extends State<PlayerScreen> {
               child: StatusBar(status: status),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _SeekControls extends StatelessWidget {
+  final Player player;
+
+  const _SeekControls({required this.player});
+
+  String _formatDuration(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black87,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: StreamBuilder<Duration>(
+        stream: player.stream.position,
+        builder: (context, posSnap) {
+          return StreamBuilder<Duration>(
+            stream: player.stream.duration,
+            builder: (context, durSnap) {
+              final position = posSnap.data ?? Duration.zero;
+              final duration = durSnap.data ?? Duration.zero;
+              final maxMs = duration.inMilliseconds.toDouble();
+              final posMs = position.inMilliseconds
+                  .toDouble()
+                  .clamp(0.0, maxMs > 0 ? maxMs : 1.0);
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Seek slider
+                  Row(
+                    children: [
+                      Text(
+                        _formatDuration(position),
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.white70),
+                      ),
+                      Expanded(
+                        child: Slider(
+                          value: posMs,
+                          max: maxMs > 0 ? maxMs : 1.0,
+                          onChanged: (value) {
+                            player
+                                .seek(Duration(milliseconds: value.toInt()));
+                          },
+                        ),
+                      ),
+                      Text(
+                        _formatDuration(duration),
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                  // Transport buttons
+                  StreamBuilder<bool>(
+                    stream: player.stream.playing,
+                    builder: (context, playSnap) {
+                      final playing = playSnap.data ?? false;
+                      return Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.replay_10),
+                            color: Colors.white,
+                            onPressed: () {
+                              final target =
+                                  position - const Duration(seconds: 10);
+                              player.seek(
+                                  target < Duration.zero
+                                      ? Duration.zero
+                                      : target);
+                            },
+                          ),
+                          IconButton(
+                            icon: Icon(
+                                playing ? Icons.pause : Icons.play_arrow),
+                            color: Colors.white,
+                            iconSize: 36,
+                            onPressed: () => player.playOrPause(),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.forward_10),
+                            color: Colors.white,
+                            onPressed: () {
+                              final target =
+                                  position + const Duration(seconds: 10);
+                              player.seek(
+                                  target > duration ? duration : target);
+                            },
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ],
+              );
+            },
+          );
+        },
       ),
     );
   }
