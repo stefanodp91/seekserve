@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_seekserve_ui/flutter_seekserve_ui.dart';
 
@@ -21,7 +22,9 @@ class AppPlayerScreen extends StatefulWidget {
 }
 
 class _AppPlayerScreenState extends State<AppPlayerScreen> {
+  final _playerKey = GlobalKey();
   SsTorrentManager? _manager;
+  bool _isFullscreen = false;
 
   @override
   void didChangeDependencies() {
@@ -36,6 +39,11 @@ class _AppPlayerScreenState extends State<AppPlayerScreen> {
 
   @override
   void dispose() {
+    // Restore system UI when leaving the screen
+    if (_isFullscreen) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    }
     _manager?.removeListener(_onChange);
     super.dispose();
   }
@@ -44,11 +52,42 @@ class _AppPlayerScreenState extends State<AppPlayerScreen> {
     if (mounted) setState(() {});
   }
 
+  void _toggleFullscreen() {
+    setState(() => _isFullscreen = !_isFullscreen);
+    if (_isFullscreen) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = SsTheme.of(context);
     final status = context.manager.getStatus(widget.torrentId);
 
+    final player = SsVideoPlayer(
+      key: _playerKey,
+      streamUrl: widget.streamUrl,
+      torrentStatus: status,
+      isFullscreen: _isFullscreen,
+      onFullscreenToggle: _toggleFullscreen,
+    );
+
+    // Fullscreen: only the video player, no top bar
+    if (_isFullscreen) {
+      return ColoredBox(
+        color: const Color(0xFF000000),
+        child: player,
+      );
+    }
+
+    // Normal: top bar + player
     return ColoredBox(
       color: theme.background,
       child: Column(
@@ -81,12 +120,7 @@ class _AppPlayerScreenState extends State<AppPlayerScreen> {
             ),
           ),
           // Player
-          Expanded(
-            child: SsVideoPlayer(
-              streamUrl: widget.streamUrl,
-              torrentStatus: status,
-            ),
-          ),
+          Expanded(child: player),
         ],
       ),
     );

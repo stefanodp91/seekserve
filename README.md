@@ -24,6 +24,7 @@ The SDK ships with three Flutter packages:
 - [Piece Scheduling Strategy](#piece-scheduling-strategy)
 - [Project Structure](#project-structure)
 - [Build & Run](#build--run)
+- [Build Commands Reference](#build-commands-reference)
 - [Flutter Plugin](#flutter-plugin)
 - [Flutter UI Package](#flutter-ui-package)
 - [Flutter App](#flutter-app)
@@ -62,13 +63,13 @@ The SDK ships with three Flutter packages:
 - **Dart API** — `SeekServeClient` with async methods, `Stream<SeekServeEvent>` for real-time events
 - **Event system** — `NativeCallable.listener` bridges C callbacks to Dart isolate
 - **Example app** — torrent input, file selection, `media_kit` video player, live status display
-- **14 Dart unit tests** for model classes
+- **15 Dart unit tests** for model classes
 
 ### Flutter UI Package (Phase 3)
 - **No Material/Cupertino dependency** — only `flutter/widgets.dart`, `painting.dart`, `gestures.dart`
 - **Theme system** — `SsThemeData` + `SsTheme` (InheritedWidget), dark/light presets, torrent-semantic colours, `copyWith()` customization
 - **9 atom widgets** — `SsButton`, `SsIconButton`, `SsTextField`, `SsProgressBar`, `SsBadge`, `SsChip`, `SsSlider`, `SsCard`, `SsDialog`
-- **9 composite widgets** — `SsTorrentTile`, `SsFileTile`, `SsFileTree`, `SsTransferStats`, `SsStreamModeBadge`, `SsAddTorrentBar`, `SsTorrentList`, `SsTorrentDetail`, `SsDeleteConfirm`
+- **11 composite widgets** — `SsTorrentTile`, `SsFileTile`, `SsFileTree`, `SsTransferStats`, `SsStreamModeBadge`, `SsAddTorrentBar`, `SsAddTorrentDialog`, `SsTorrentList`, `SsTorrentDetail`, `SsDeleteConfirm`, `SsServerStatusPanel`
 - **4 player widgets** — `SsSeekControls`, `SsBufferingOverlay`, `SsPlayerStatusBar`, `SsVideoPlayer`
 - **1 controller** — `SsTorrentManager` (ChangeNotifier wrapping `SeekServeClient`)
 - **32 Dart unit tests** for theme, atoms, utils
@@ -195,10 +196,11 @@ Three Flutter packages form a layered architecture. Each layer depends only on t
 |   | SsTorrentList     |  |  Stats   |  |  +-- SsSeekControls       |  |
 |   | SsTorrentDetail   |  +----------+  |  +-- SsBufferingOverlay   |  |
 |   | SsAddTorrentBar   |  |SsStream  |  |  +-- SsPlayerStatusBar   |  |
-|   | SsFileTile        |  |ModeBadge |  +---------------------------+  |
-|   | SsFileTree        |  +----------+                                 |
-|   | SsDeleteConfirm   |                                               |
-|   +-------------------+                                               |
+|   | SsAddTorrentDialog|  |ModeBadge |  +---------------------------+  |
+|   | SsFileTile        |  +----------+                                 |
+|   | SsFileTree        |  |SsServer  |                                 |
+|   | SsDeleteConfirm   |  |StatusPnl |                                 |
+|   +-------------------+  +----------+                                 |
 |                                                                       |
 |   CONTROLLER                           UTILS                          |
 |   +-------------------+               +---------------------------+   |
@@ -329,15 +331,17 @@ ATOMS (basic building blocks, no business logic)
   SsDialog ──────────── PageRouteBuilder + Center + Container
 
 COMPOSITES (combine atoms + business data)
-  SsTorrentTile ─────── SsBadge + SsProgressBar + Text (rates, peers)
-  SsTorrentList ─────── ListView + Dismissible + SsTorrentTile
-  SsTorrentDetail ───── SsBadge + SsProgressBar + SsTransferStats + _DetailRow
-  SsFileTile ────────── Row + Icon + Text (file name, size, type icon)
-  SsFileTree ────────── ListView + _FolderRow + SsFileTile (recursive tree)
-  SsTransferStats ───── Wrap + SsChip (DL rate, UL rate, peers)
-  SsStreamModeBadge ─── SsBadge (STREAM / ASSIST / DOWNLOAD)
-  SsAddTorrentBar ───── SsIconButton (paste, add) + EditableText
-  SsDeleteConfirm ───── SsDialog (Cancel / Keep files / Delete all)
+  SsTorrentTile ──────── SsBadge + SsProgressBar + Text (rates, peers)
+  SsTorrentList ──────── ListView + Dismissible + SsTorrentTile
+  SsTorrentDetail ────── SsBadge + SsProgressBar + SsTransferStats + _DetailRow
+  SsFileTile ─────────── Row + Icon + Text (file name, size, type icon)
+  SsFileTree ─────────── ListView + _FolderRow + SsFileTile (recursive tree)
+  SsTransferStats ────── Wrap + SsChip (DL rate, UL rate, peers)
+  SsStreamModeBadge ──── SsBadge (STREAM / ASSIST / DOWNLOAD)
+  SsAddTorrentBar ────── SsIconButton (paste, add) + EditableText
+  SsAddTorrentDialog ─── PageRouteBuilder overlay, URI input + paste + submit
+  SsDeleteConfirm ────── SsDialog (Cancel / Keep files / Delete all)
+  SsServerStatusPanel ── Server health, ports, auth, rates, endpoint list
 
 PLAYER (media_kit + streaming widgets)
   SsVideoPlayer ─────── Column + Stack
@@ -758,7 +762,7 @@ seekserve/
 |   |       |-- armeabi-v7a/libseekserve.so
 |   |       +-- x86_64/libseekserve.so
 |   |-- test/
-|   |   +-- models_test.dart             14 unit tests for Dart models
+|   |   +-- models_test.dart             15 unit tests for Dart models
 |   +-- example/                     EXAMPLE APP
 |       |-- lib/
 |       |   |-- main.dart                MediaKit init, Provider setup
@@ -793,15 +797,17 @@ seekserve/
 |   |       |   |-- ss_card.dart           Themed container card
 |   |       |   +-- ss_dialog.dart         Overlay confirmation dialog
 |   |       |-- composites/
-|   |       |   |-- ss_torrent_tile.dart   Torrent row: name, progress, rates, badge
-|   |       |   |-- ss_torrent_list.dart   Scrollable list + swipe-to-delete
-|   |       |   |-- ss_torrent_detail.dart Full metadata panel
-|   |       |   |-- ss_file_tile.dart      File row with type icon
-|   |       |   |-- ss_file_tree.dart      Expandable folder tree
-|   |       |   |-- ss_transfer_stats.dart DL/UL rates + peer chips
-|   |       |   |-- ss_stream_mode_badge.dart  Stream mode indicator
-|   |       |   |-- ss_add_torrent_bar.dart    URI input + paste + add
-|   |       |   +-- ss_delete_confirm.dart     3-option remove dialog
+|   |       |   |-- ss_torrent_tile.dart     Torrent row: name, progress, rates, badge
+|   |       |   |-- ss_torrent_list.dart     Scrollable list + swipe-to-delete
+|   |       |   |-- ss_torrent_detail.dart   Full metadata panel
+|   |       |   |-- ss_file_tile.dart        File row with type icon
+|   |       |   |-- ss_file_tree.dart        Expandable folder tree
+|   |       |   |-- ss_transfer_stats.dart   DL/UL rates + peer chips
+|   |       |   |-- ss_stream_mode_badge.dart    Stream mode indicator
+|   |       |   |-- ss_add_torrent_bar.dart      URI input + paste + add
+|   |       |   |-- ss_add_torrent_dialog.dart   Full-screen overlay for magnet/path input
+|   |       |   |-- ss_server_status_panel.dart  Server health + diagnostics panel
+|   |       |   +-- ss_delete_confirm.dart       3-option remove dialog
 |   |       |-- player/
 |   |       |   |-- ss_seek_controls.dart      Slider + skip±10s + play/pause
 |   |       |   |-- ss_buffering_overlay.dart  Animated spinner overlay
@@ -831,7 +837,8 @@ seekserve/
 |-- scripts/
 |   |-- build-ios.sh                 iOS arm64 (device + simulator) -> XCFramework
 |   |-- build-android.sh            Android 3 ABIs via NDK -> .so files
-|   +-- build-flutter-natives.sh    Orchestrator: build + copy to plugin
+|   |-- build-flutter-natives.sh    Orchestrator: build + copy to plugin
+|   +-- dev-ios-sim.sh              Incremental build + run on iOS Simulator
 |
 |-- triplets/
 |   +-- arm-neon-android.cmake       Custom vcpkg triplet (NDK 29 NEON=ON)
@@ -840,10 +847,8 @@ seekserve/
 |   |-- ARCHITECTURE.md, HTTP_RANGE_SPEC.md, SCHEDULER_POLICY.md
 |   |-- STORAGE_POLICY.md, SECURITY.md, C_API.md
 |
-|-- fixtures/
-|   +-- Sintel_archive.torrent       Test torrent (CC BY 3.0, 12 files, 4 MP4s)
-|
-+-- PROGRESS.md                      Detailed milestone checklist (M1-M13)
++-- fixtures/
+    +-- Sintel_archive.torrent       Test torrent (CC BY 3.0, 12 files, 4 MP4s)
 ```
 
 ---
@@ -902,6 +907,220 @@ The demo will:
 
 ```bash
 cd build/debug && ctest    # All 189 tests
+```
+
+---
+
+## Build Commands Reference
+
+All build scripts are in the project root (`setup.sh`) or in the `scripts/` directory. Below is a complete reference of which commands to run for each scenario.
+
+### Quick Reference
+
+| Scenario | Command |
+|----------|---------|
+| First-time C++ SDK build | `./setup.sh debug` |
+| Release build (optimized) | `./setup.sh release` |
+| Run C++ tests | `cd build/debug && ctest` |
+| Build iOS native libs | `scripts/build-flutter-natives.sh ios` |
+| Build Android native libs | `scripts/build-flutter-natives.sh android` |
+| Build all native libs | `scripts/build-flutter-natives.sh all` |
+| Dev loop on iOS Simulator | `scripts/dev-ios-sim.sh` |
+| Run Flutter plugin tests | `cd flutter_seekserve && flutter test` |
+| Run Flutter UI tests | `cd flutter_seekserve_ui && flutter test` |
+| Build Flutter app (iOS) | `cd flutter_seekserve_app && flutter build ios` |
+| Build Flutter app (Android) | `cd flutter_seekserve_app && flutter build apk` |
+
+### `setup.sh` -- C++ SDK Bootstrap
+
+The main entry point for building the C++ SDK from scratch. It handles all dependencies (vcpkg, git submodules, CMake configure, and compile).
+
+```bash
+./setup.sh debug       # Debug build with tests + demo + WebTorrent auto-detect
+./setup.sh release     # Optimized release build (no tests)
+./setup.sh asan        # Debug + AddressSanitizer (memory errors)
+./setup.sh tsan        # Debug + ThreadSanitizer (data races)
+```
+
+**When to use:** First-time setup, after pulling changes, or when you need a clean rebuild of the native C++ SDK for desktop (macOS/Linux).
+
+**What it does (6 steps):**
+1. Checks system dependencies (cmake, ninja, git) -- installs via Homebrew on macOS
+2. Clones and bootstraps vcpkg at `~/vcpkg` (full clone, not shallow)
+3. Initializes libtorrent submodule + recursive deps (libdatachannel for WebTorrent)
+4. Detects WebTorrent availability (auto-enables if libdatachannel found)
+5. Configures CMake with vcpkg toolchain
+6. Builds all targets (core, serve, capi, demo, tests)
+
+**Output:**
+```
+build/{debug|release|asan|tsan}/
+  seekserve-demo/seekserve-demo           # CLI demo executable
+  tests/seekserve-unit-tests              # 138 unit tests
+  tests/seekserve-integration-tests       # 32 integration tests
+  tests/seekserve-capi-tests              # 19 C API tests
+  seekserve-capi/libseekserve.dylib       # Shared library (macOS)
+```
+
+**Note:** `setup.sh` auto-detects WebTorrent and enables it (`WEBTORRENT=ON`) if libdatachannel is present. The CMake presets in `CMakePresets.json` have `WEBTORRENT=OFF` by default -- use `setup.sh` or pass `-DSEEKSERVE_ENABLE_WEBTORRENT=ON` manually.
+
+### `scripts/build-ios.sh` -- iOS Cross-Compilation
+
+Builds the C++ SDK as a static XCFramework for iOS (device arm64 + simulator arm64).
+
+```bash
+scripts/build-ios.sh
+```
+
+**When to use:** When you need to rebuild native libraries for the iOS Flutter plugin.
+
+**Prerequisites:** Xcode command-line tools, vcpkg at `~/vcpkg`.
+
+**What it does:**
+1. Builds for `iphoneos` (arm64-ios vcpkg triplet, `SEEKSERVE_CAPI_STATIC=ON`)
+2. Builds for `iphonesimulator` (arm64-ios-simulator vcpkg triplet)
+3. Combines 22+ static libraries per slice via `libtool -static`
+4. Wraps each in a `.framework` bundle with module map and header
+5. Creates XCFramework via `xcodebuild -create-xcframework`
+
+**Output:**
+```
+build/ios-xcframework/seekserve.xcframework
+```
+
+**Build details:**
+- Deployment target: iOS 15.0
+- Build type: Release
+- WebTorrent: ON
+- Each slice: ~85 MB (static, all deps combined)
+
+### `scripts/build-android.sh` -- Android Cross-Compilation
+
+Builds the C++ SDK as shared libraries for 3 Android ABIs.
+
+```bash
+export ANDROID_NDK_HOME=/path/to/ndk    # optional, auto-detected from ~/Library/Android/sdk/ndk/
+scripts/build-android.sh
+```
+
+**When to use:** When you need to rebuild native libraries for the Android Flutter plugin.
+
+**Prerequisites:** Android NDK (auto-detected from `ANDROID_NDK_HOME`, `ANDROID_HOME`, or `~/Library/Android/sdk/ndk/`), vcpkg at `~/vcpkg`.
+
+**What it does:**
+For each ABI (`arm64-v8a`, `armeabi-v7a`, `x86_64`):
+1. Configures CMake with NDK toolchain + vcpkg
+2. Builds shared library (`SEEKSERVE_CAPI_STATIC=OFF`)
+3. Uses custom triplet `arm-neon-android` for armeabi-v7a (NDK 29 compatibility)
+
+**Output:**
+```
+build/android-arm64-v8a/seekserve-capi/libseekserve.so
+build/android-armeabi-v7a/seekserve-capi/libseekserve.so
+build/android-x86_64/seekserve-capi/libseekserve.so
+```
+
+**Build details:**
+- Android platform: API 28 (required for `std::aligned_alloc` in Boost.Asio)
+- Build type: Release
+- WebTorrent: ON
+- Libraries are ~100 MB unstripped
+
+### `scripts/build-flutter-natives.sh` -- All-in-One Plugin Build
+
+Orchestrator script that builds native libraries and copies them to the Flutter plugin directories.
+
+```bash
+scripts/build-flutter-natives.sh all       # iOS + Android
+scripts/build-flutter-natives.sh ios       # iOS only
+scripts/build-flutter-natives.sh android   # Android only
+```
+
+**When to use:** The primary command for preparing the Flutter plugin for deployment. Run this before `flutter build` or `flutter run`.
+
+**What it does:**
+1. Calls `build-ios.sh` and/or `build-android.sh`
+2. Copies XCFramework to `flutter_seekserve/ios/Frameworks/seekserve.xcframework`
+3. Copies `.so` files to `flutter_seekserve/android/src/main/jniLibs/{abi}/libseekserve.so`
+4. Strips Android `.so` debug symbols via `llvm-strip` (~109 MB -> 6-15 MB)
+
+**Output after build:**
+```
+flutter_seekserve/
+  ios/Frameworks/seekserve.xcframework          # ~170 MB (2 slices)
+  android/src/main/jniLibs/
+    arm64-v8a/libseekserve.so                   # ~15 MB (stripped)
+    armeabi-v7a/libseekserve.so                 # ~10 MB (stripped)
+    x86_64/libseekserve.so                      # ~15 MB (stripped)
+```
+
+### `scripts/dev-ios-sim.sh` -- iOS Simulator Dev Loop
+
+Fast incremental development script for testing on the iOS Simulator.
+
+```bash
+./scripts/dev-ios-sim.sh              # Incremental build + run
+./scripts/dev-ios-sim.sh --full       # Clean rebuild of native libs
+./scripts/dev-ios-sim.sh --native     # Rebuild native libs only (no Flutter)
+./scripts/dev-ios-sim.sh --flutter    # Flutter build + install only (skip native)
+./scripts/dev-ios-sim.sh --run        # Install + launch only (skip build)
+```
+
+**When to use:** During active development to quickly iterate on changes and test on the simulator. Much faster than a full `build-flutter-natives.sh` because it does incremental builds and only targets the simulator.
+
+**Prerequisites:** Booted iOS Simulator, Xcode CLI tools, vcpkg, Flutter SDK.
+
+**What it does (4 steps):**
+1. Builds native library for simulator arm64 (incremental, Debug)
+2. Packages XCFramework (builds device slice if needed, one-time cost)
+3. Builds Flutter example app (`flutter build ios --simulator --debug`)
+4. Installs and launches on the booted simulator
+
+### Typical Build Workflows
+
+**First-time setup (from clean clone):**
+```bash
+# 1. Build C++ SDK (desktop)
+./setup.sh debug
+
+# 2. Run C++ tests to verify
+cd build/debug && ctest && cd ../..
+
+# 3. Build native libs for mobile
+scripts/build-flutter-natives.sh all
+
+# 4. Run Flutter app
+cd flutter_seekserve_app
+flutter pub get
+flutter run
+```
+
+**After C++ code changes (iterating on iOS Simulator):**
+```bash
+scripts/dev-ios-sim.sh
+```
+
+**After C++ code changes (full rebuild for both platforms):**
+```bash
+scripts/build-flutter-natives.sh all
+cd flutter_seekserve_app && flutter run
+```
+
+**After Dart-only changes (no native rebuild needed):**
+```bash
+cd flutter_seekserve_app && flutter run
+```
+
+**Running all tests:**
+```bash
+# C++ tests
+cd build/debug && ctest && cd ../..
+
+# Dart plugin tests
+cd flutter_seekserve && flutter test && cd ..
+
+# Dart UI tests
+cd flutter_seekserve_ui && flutter test && cd ..
 ```
 
 ---
@@ -1011,7 +1230,7 @@ flutter build apk
 
 ```bash
 cd flutter_seekserve
-flutter test          # 14 Dart unit tests
+flutter test          # 15 Dart unit tests
 flutter analyze       # Static analysis
 ```
 
@@ -1058,7 +1277,9 @@ The `flutter_seekserve_ui` package provides a complete set of themed widgets for
 | **Composite** | `SsTransferStats` | DL rate, UL rate, peer/seed count as `SsChip` widgets |
 | **Composite** | `SsStreamModeBadge` | STREAM / ASSIST / DOWNLOAD badge with mode colour |
 | **Composite** | `SsAddTorrentBar` | URI text input + paste from clipboard + add button |
+| **Composite** | `SsAddTorrentDialog` | Full-screen overlay dialog for magnet URI / .torrent path input |
 | **Composite** | `SsDeleteConfirm` | 3-option dialog: Cancel / Keep files / Delete all |
+| **Composite** | `SsServerStatusPanel` | Server health diagnostics: ports, auth, rates, endpoints |
 | **Player** | `SsSeekControls` | Slider + skip ±10s + play/pause via `media_kit` streams |
 | **Player** | `SsBufferingOverlay` | Animated spinning arc overlay |
 | **Player** | `SsPlayerStatusBar` | Download progress + transfer stats + stream mode |
@@ -1409,7 +1630,7 @@ cd build/debug && ctest          # All 189 tests at once
 
 ```bash
 cd flutter_seekserve
-flutter test          # 14 Dart unit tests for model classes
+flutter test          # 15 Dart unit tests for model classes
 flutter analyze       # Static analysis (0 issues)
 
 cd flutter_seekserve_ui
@@ -1533,7 +1754,6 @@ The SDK falls back to standard BitTorrent only. Binary size decreases by ~30%.
 | [docs/STORAGE_POLICY.md](docs/STORAGE_POLICY.md) | Piece storage, file selection, SQLite cache, LRU eviction, quota |
 | [docs/SECURITY.md](docs/SECURITY.md) | Loopback binding, token auth, connection limits, logging safety |
 | [docs/C_API.md](docs/C_API.md) | C function reference, error codes, config JSON, memory management |
-| [PROGRESS.md](PROGRESS.md) | Detailed milestone checklist with every task (M1-M13) |
 
 ---
 
@@ -1573,9 +1793,7 @@ The SDK falls back to standard BitTorrent only. Binary size decreases by ~30%.
 | **M13** | WebTorrent support (libtorrent master, libdatachannel) | Complete |
 | **M14** | UI widget package + standalone app (theme, atoms, composites, player, controller) | Complete |
 
-**189 C++ tests** (138 unit + 32 integration + 19 C API) + **14 Dart plugin tests** + **32 UI package tests** = **235 total tests**.
-
-See [PROGRESS.md](PROGRESS.md) for the detailed task-by-task checklist.
+**189 C++ tests** (138 unit + 32 integration + 19 C API) + **15 Dart plugin tests** + **32 UI package tests** = **236 total tests**.
 
 ---
 
