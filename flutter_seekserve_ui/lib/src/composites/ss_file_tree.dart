@@ -88,14 +88,16 @@ class _SsFileTreeState extends State<SsFileTree> {
     }
 
     // Files (sorted by index).
+    final canTap = widget.onFileTap != null;
     final sortedFiles = node.files.toList()..sort((a, b) => a.index - b.index);
     for (final f in sortedFiles) {
+      final tappable = f.isVideo && canTap;
       widgets.add(Padding(
         padding: EdgeInsets.only(left: depth * 16.0),
         child: SsFileTile(
           file: f,
-          enabled: f.isVideo,
-          onTap: f.isVideo ? () => widget.onFileTap?.call(f) : null,
+          enabled: tappable,
+          onTap: tappable ? () => widget.onFileTap!.call(f) : null,
         ),
       ));
     }

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter_seekserve/seekserve.dart';
 import 'package:flutter_seekserve_ui/flutter_seekserve_ui.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path_provider/path_provider.dart';
@@ -35,7 +36,17 @@ class _SeekServeAppState extends State<SeekServeApp> {
     final savePath = '${dir.path}${Platform.pathSeparator}seekserve';
     await Directory(savePath).create(recursive: true);
 
-    _manager.init(savePath);
+    final dbPath = '$savePath${Platform.pathSeparator}seekserve_cache.db';
+    _manager.init(
+      savePath,
+      config: SeekServeConfig(
+        savePath: savePath,
+        cacheDbPath: dbPath,
+        streamPort: 0,
+        controlPort: 0,
+        logLevel: 'debug',
+      ),
+    );
     setState(() => _initialised = true);
   }
 

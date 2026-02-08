@@ -164,8 +164,17 @@ class SsTorrentManager extends ChangeNotifier {
   }
 
   /// Selects a file for streaming and returns its stream URL.
+  ///
+  /// Returns null (with [errorMessage] set) if metadata is not yet available.
   String? selectAndStream(String torrentId, int fileIndex) {
     if (_client == null) return null;
+
+    final entry = _torrents[torrentId];
+    if (entry?.status?.hasMetadata != true) {
+      _errorMessage = 'Metadata not ready yet — please wait';
+      notifyListeners();
+      return null;
+    }
 
     try {
       _client!.selectFile(torrentId, fileIndex);

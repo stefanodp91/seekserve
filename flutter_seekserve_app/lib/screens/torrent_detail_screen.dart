@@ -59,6 +59,8 @@ class _TorrentDetailScreenState extends State<TorrentDetailScreen> {
     final manager = context.manager;
     final status = manager.getStatus(widget.torrentId);
     final files = manager.listFiles(widget.torrentId);
+    final error = manager.errorMessage;
+    final metadataReady = status?.hasMetadata == true;
 
     return ColoredBox(
       color: theme.background,
@@ -91,6 +93,19 @@ class _TorrentDetailScreenState extends State<TorrentDetailScreen> {
               ],
             ),
           ),
+          // Error banner
+          if (error != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: const Color(0xFF4A1111),
+              child: Text(
+                error,
+                style: const TextStyle(color: Color(0xFFFF8A80), fontSize: 13),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           // Content
           Expanded(
             child: status == null
@@ -105,11 +120,19 @@ class _TorrentDetailScreenState extends State<TorrentDetailScreen> {
                           padding: const EdgeInsets.only(left: 16, top: 8),
                           child: Text('Files', style: theme.headingStyle),
                         ),
+                        if (!metadataReady)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                            child: Text(
+                              'Waiting for metadata before streaming...',
+                              style: theme.captionStyle,
+                            ),
+                          ),
                         SizedBox(
                           height: files.length * 52.0 + 16,
                           child: SsFileTree(
                             files: files,
-                            onFileTap: _onFileTap,
+                            onFileTap: metadataReady ? _onFileTap : null,
                           ),
                         ),
                       ],
