@@ -40,6 +40,11 @@ public:
     bool is_offline_ready(const TorrentId& id, FileIndex fi) const;
     void enforce_quota();
 
+    // Torrent URI persistence
+    void save_torrent_uri(const TorrentId& id, const std::string& uri);
+    void remove_torrent_uri(const TorrentId& id);
+    std::vector<std::pair<TorrentId, std::string>> list_torrent_uris() const;
+
 private:
     void init_db();
 

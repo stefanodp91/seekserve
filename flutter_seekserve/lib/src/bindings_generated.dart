@@ -108,6 +108,30 @@ class SeekServeBindings {
         int Function(ffi.Pointer<SeekServeEngine>, ffi.Pointer<ffi.Char>, bool)
       >();
 
+  int ss_list_torrents(
+    ffi.Pointer<SeekServeEngine> engine,
+    ffi.Pointer<ffi.Pointer<ffi.Char>> out_json,
+  ) {
+    return _ss_list_torrents(engine, out_json);
+  }
+
+  late final _ss_list_torrentsPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ss_error_t Function(
+            ffi.Pointer<SeekServeEngine>,
+            ffi.Pointer<ffi.Pointer<ffi.Char>>,
+          )
+        >
+      >('ss_list_torrents');
+  late final _ss_list_torrents = _ss_list_torrentsPtr
+      .asFunction<
+        int Function(
+          ffi.Pointer<SeekServeEngine>,
+          ffi.Pointer<ffi.Pointer<ffi.Char>>,
+        )
+      >();
+
   int ss_list_files(
     ffi.Pointer<SeekServeEngine> engine,
     ffi.Pointer<ffi.Char> torrent_id,

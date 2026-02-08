@@ -98,6 +98,24 @@ class SeekServeClient {
     }
   }
 
+  /// Returns the list of active torrent IDs in the session.
+  List<String> listTorrents() {
+    _ensureNotDisposed();
+    final outJson = calloc<Pointer<Char>>();
+    try {
+      final err = _bindings.ss_list_torrents(_engine, outJson);
+      checkError(err);
+      final jsonStr = outJson.value.cast<Utf8>().toDartString();
+      final decoded = jsonDecode(jsonStr) as List<dynamic>;
+      return decoded.cast<String>();
+    } finally {
+      if (outJson.value != nullptr) {
+        _bindings.ss_free_string(outJson.value);
+      }
+      calloc.free(outJson);
+    }
+  }
+
   /// Removes a torrent. If [deleteFiles] is true, also deletes downloaded data.
   void removeTorrent(String torrentId, {bool deleteFiles = false}) {
     _ensureNotDisposed();

@@ -126,6 +126,19 @@ ss_error_t ss_remove_torrent(SeekServeEngine* engine, const char* torrent_id,
     return result ? SS_OK : map_error(result.error());
 }
 
+ss_error_t ss_list_torrents(SeekServeEngine* engine, char** out_json) {
+    if (!engine || !out_json) return SS_ERR_INVALID_ARG;
+
+    auto ids = engine->list_torrents();
+    json arr = json::array();
+    for (const auto& id : ids) {
+        arr.push_back(id);
+    }
+
+    *out_json = alloc_string(arr.dump());
+    return *out_json ? SS_OK : SS_ERR_IO;
+}
+
 ss_error_t ss_list_files(SeekServeEngine* engine, const char* torrent_id,
                          char** out_json) {
     if (!engine || !torrent_id || !out_json) return SS_ERR_INVALID_ARG;

@@ -43,7 +43,12 @@ ss_error_t ss_add_torrent(SeekServeEngine* engine, const char* uri,
 // Remove torrent (optionally delete downloaded files)
 ss_error_t ss_remove_torrent(SeekServeEngine* engine, const char* torrent_id,
                               bool delete_files);
+
+// List active torrent IDs (returns JSON array: ["id1","id2",...])
+ss_error_t ss_list_torrents(SeekServeEngine* engine, char** out_json);
 ```
+
+Torrents are automatically persisted to SQLite. On engine creation, previously added torrents are restored from the database.
 
 ## File Operations
 
@@ -69,7 +74,7 @@ ss_error_t ss_get_status(SeekServeEngine* engine, const char* torrent_id,
                           char** out_json);
 ```
 
-Status JSON includes: `torrent_id`, `name`, `progress`, `download_rate`, `upload_rate`, `num_peers`, `num_seeds`, `state`, `has_metadata`, `selected_file`, `stream_mode`, `playhead_piece`, `active_deadlines`.
+Status JSON includes: `torrent_id`, `name`, `progress`, `download_rate`, `upload_rate`, `num_peers`, `num_seeds`, `state`, `has_metadata`, `selected_file`, `offline_ready`, `stream_mode`, `playhead_piece`, `active_deadlines`.
 
 ## Server Control
 
@@ -97,28 +102,28 @@ Events are JSON: `{"type":"metadata_received","data":{"torrent_id":"..."}}`.
 ## Memory Management
 
 ```c
-// Free strings allocated by the library (ss_list_files, ss_get_stream_url, ss_get_status)
+// Free strings allocated by the library (ss_list_torrents, ss_list_files, ss_get_stream_url, ss_get_status)
 void ss_free_string(char* str);
 ```
 
-**Important**: All `char**` out parameters return library-allocated strings. Callers **must** call `ss_free_string()` on these strings to avoid memory leaks.
+**Important**: All `char**` out parameters return library-allocated strings. Callers **must** call `ss_free_string()` on these strings to avoid memory leaks. Passing `NULL` to `ss_free_string()` is safe (`delete[] nullptr` is a no-op per C++ standard).
 
 ## Error Codes
 
 | Code | Value | Meaning |
 |------|-------|---------|
 | `SS_OK` | 0 | Success |
-| `SS_ERR_INVALID_ARG` | 1 | Null pointer or invalid argument |
-| `SS_ERR_NOT_FOUND` | 2 | Torrent or file not found |
-| `SS_ERR_METADATA_PENDING` | 3 | Metadata not yet received |
-| `SS_ERR_TIMEOUT` | 4 | Operation timed out |
-| `SS_ERR_IO` | 5 | I/O error |
-| `SS_ERR_ALREADY_RUNNING` | 6 | Server already running |
-| `SS_ERR_CANCELLED` | 7 | Operation cancelled |
+| `SS_ERR_INVALID_ARG` | -1 | Null pointer or invalid argument |
+| `SS_ERR_NOT_FOUND` | -2 | Torrent or file not found |
+| `SS_ERR_METADATA_PENDING` | -3 | Metadata not yet received |
+| `SS_ERR_TIMEOUT` | -4 | Operation timed out |
+| `SS_ERR_IO` | -5 | I/O error |
+| `SS_ERR_ALREADY_RUNNING` | -6 | Server already running |
+| `SS_ERR_CANCELLED` | -7 | Operation cancelled |
 
 ## Null Safety
 
-All functions accepting `SeekServeEngine*` return `SS_ERR_INVALID_ARG` when passed NULL. `ss_engine_destroy(NULL)` and `ss_free_string(NULL)` are safe no-ops.
+All functions accepting `SeekServeEngine*` return `SS_ERR_INVALID_ARG` when passed NULL. `ss_engine_destroy(NULL)` is a safe no-op (`delete nullptr`). `ss_free_string(NULL)` is a safe no-op (`delete[] nullptr`).
 
 ## Thread Safety
 

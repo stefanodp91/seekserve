@@ -90,6 +90,14 @@ class SsTorrentManager extends ChangeNotifier {
       _startedAt = DateTime.now();
       _authToken = (config ?? SeekServeConfig(savePath: savePath)).authToken;
 
+      // Restore previously persisted torrents
+      try {
+        final ids = _client!.listTorrents();
+        for (final id in ids) {
+          _torrents[id] = SsTorrentEntry(torrentId: id);
+        }
+      } catch (_) {}
+
       _eventSub = _client!.events.listen(_onEvent, onError: _onEventError);
 
       _pollTimer = Timer.periodic(

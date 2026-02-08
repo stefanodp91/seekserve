@@ -40,6 +40,10 @@ ss_error_t ss_remove_torrent(SeekServeEngine* engine,
                              bool delete_files);
 
 __attribute__((visibility("default")))
+ss_error_t ss_list_torrents(SeekServeEngine* engine,
+                            char** out_json);
+
+__attribute__((visibility("default")))
 ss_error_t ss_list_files(SeekServeEngine* engine,
                          const char* torrent_id,
                          char** out_json);

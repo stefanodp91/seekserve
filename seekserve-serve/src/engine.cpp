@@ -21,6 +21,22 @@ SeekServeEngine::SeekServeEngine(const Config& config)
     sessions_ = std::make_unique<TorrentSessionManager>(config_.session);
     cache_ = std::make_unique<OfflineCacheManager>(config_.cache);
     wire_alerts();
+
+    // Auto-restore persisted torrents
+    auto saved = cache_->list_torrent_uris();
+    for (const auto& [id, uri] : saved) {
+        AddTorrentParams atp;
+        atp.uri = uri;
+        atp.save_path = config_.session.save_path;
+        auto result = sessions_->add_torrent(atp);
+        if (!result) {
+            spdlog::warn("Engine: failed to restore torrent {}: {}", id, result.error().message());
+            cache_->remove_torrent_uri(id);
+        }
+    }
+    if (!saved.empty()) {
+        spdlog::info("Engine: restored {} torrent(s)", saved.size());
+    }
 }
 
 SeekServeEngine::~SeekServeEngine() {
@@ -127,10 +143,16 @@ Result<TorrentId> SeekServeEngine::add_torrent(const std::string& uri,
     AddTorrentParams atp;
     atp.uri = uri;
     atp.save_path = save_path;
-    return sessions_->add_torrent(atp);
+    auto result = sessions_->add_torrent(atp);
+    if (result) {
+        cache_->save_torrent_uri(result.value(), uri);
+    }
+    return result;
 }
 
 Result<void> SeekServeEngine::remove_torrent(const TorrentId& id, bool delete_files) {
+    cache_->remove_torrent_uri(id);
+
     // Mark as removed FIRST so alert handlers skip late alerts for this torrent
     {
         std::lock_guard lock(mu_);
@@ -139,6 +161,10 @@ Result<void> SeekServeEngine::remove_torrent(const TorrentId& id, bool delete_fi
     }
     catalog_.remove(id);
     return sessions_->remove_torrent(id, delete_files);
+}
+
+std::vector<TorrentId> SeekServeEngine::list_torrents() const {
+    return sessions_->list_torrents();
 }
 
 Result<std::vector<FileInfo>> SeekServeEngine::list_files(const TorrentId& id) {

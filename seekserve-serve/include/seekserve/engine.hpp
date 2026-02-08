@@ -50,6 +50,7 @@ public:
     Result<TorrentId> add_torrent(const std::string& uri,
                                   const std::string& save_path = "");
     Result<void> remove_torrent(const TorrentId& id, bool delete_files);
+    std::vector<TorrentId> list_torrents() const;
 
     // File management
     Result<std::vector<FileInfo>> list_files(const TorrentId& id);

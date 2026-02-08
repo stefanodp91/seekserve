@@ -48,6 +48,21 @@ void OfflineCacheManager::init_db() {
         spdlog::error("OfflineCacheManager: failed to create table: {}", err ? err : "unknown");
         sqlite3_free(err);
     }
+
+    const char* torrents_sql = R"(
+        CREATE TABLE IF NOT EXISTS torrents (
+            torrent_id TEXT PRIMARY KEY,
+            uri TEXT NOT NULL,
+            added_at INTEGER NOT NULL
+        );
+    )";
+
+    err = nullptr;
+    rc = sqlite3_exec(db_, torrents_sql, nullptr, nullptr, &err);
+    if (rc != SQLITE_OK) {
+        spdlog::error("OfflineCacheManager: failed to create torrents table: {}", err ? err : "unknown");
+        sqlite3_free(err);
+    }
 }
 
 static std::int64_t now_epoch() {
@@ -266,6 +281,68 @@ void OfflineCacheManager::enforce_quota() {
         spdlog::info("OfflineCacheManager: evicted {}/{} (LRU)", tid, fi);
     }
     sqlite3_finalize(stmt);
+}
+
+void OfflineCacheManager::save_torrent_uri(const TorrentId& id, const std::string& uri) {
+    std::lock_guard lock(mu_);
+    if (!db_) return;
+
+    const char* sql = R"(
+        INSERT OR REPLACE INTO torrents (torrent_id, uri, added_at)
+        VALUES (?, ?, ?);
+    )";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        spdlog::error("OfflineCacheManager: prepare failed: {}", sqlite3_errmsg(db_));
+        return;
+    }
+
+    sqlite3_bind_text(stmt, 1, id.c_str(), static_cast<int>(id.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, uri.c_str(), static_cast<int>(uri.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 3, now_epoch());
+
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+void OfflineCacheManager::remove_torrent_uri(const TorrentId& id) {
+    std::lock_guard lock(mu_);
+    if (!db_) return;
+
+    const char* sql = R"(
+        DELETE FROM torrents WHERE torrent_id = ?;
+    )";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) return;
+
+    sqlite3_bind_text(stmt, 1, id.c_str(), static_cast<int>(id.size()), SQLITE_TRANSIENT);
+
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+std::vector<std::pair<TorrentId, std::string>> OfflineCacheManager::list_torrent_uris() const {
+    std::lock_guard lock(mu_);
+    std::vector<std::pair<TorrentId, std::string>> result;
+    if (!db_) return result;
+
+    const char* sql = R"(
+        SELECT torrent_id, uri FROM torrents ORDER BY added_at;
+    )";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) return result;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        auto tid = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+        auto uri = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
+        result.emplace_back(std::move(tid), std::move(uri));
+    }
+
+    sqlite3_finalize(stmt);
+    return result;
 }
 
 } // namespace seekserve

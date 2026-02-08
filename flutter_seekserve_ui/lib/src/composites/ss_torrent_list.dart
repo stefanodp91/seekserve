@@ -51,7 +51,12 @@ class SsTorrentList extends StatelessWidget {
               size: 24,
             ),
           ),
-          onDismissed: (_) => onDelete!(status),
+          confirmDismiss: (_) {
+            onDelete!(status);
+            // Return false — the item is removed by rebuilding the list,
+            // not by Dismissible's own removal (avoids "still part of tree").
+            return Future.value(false);
+          },
           child: tile,
         );
       },
