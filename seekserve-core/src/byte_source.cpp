@@ -32,7 +32,7 @@ Result<std::vector<std::uint8_t>> ByteSource::read(std::int64_t offset, std::int
     {
         std::unique_lock lock(mu_);
         bool ok = cv_.wait_for(lock, timeout_, [&] {
-            return avail_.is_span_complete(span) || cancelled_.load(std::memory_order_acquire);
+            return cancelled_.load(std::memory_order_acquire) || avail_.is_span_complete(span);
         });
 
         if (cancelled_.load(std::memory_order_acquire)) {

@@ -129,6 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   torrents: manager.statuses,
                   onTap: _onTorrentTap,
                   onDelete: _onTorrentDelete,
+                  onTogglePause: (s) => manager.togglePause(s.torrentId),
                 ),
               ),
             ],

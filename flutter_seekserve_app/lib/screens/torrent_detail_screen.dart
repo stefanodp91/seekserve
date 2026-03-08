@@ -114,7 +114,12 @@ class _TorrentDetailScreenState extends State<TorrentDetailScreen> {
                   )
                 : ListView(
                     children: [
-                      SsTorrentDetail(status: status, files: files),
+                      SsTorrentDetail(
+                        status: status,
+                        files: files,
+                        onTogglePause: () =>
+                            manager.togglePause(widget.torrentId),
+                      ),
                       if (files.isNotEmpty) ...[
                         Padding(
                           padding: const EdgeInsets.only(left: 16, top: 8),

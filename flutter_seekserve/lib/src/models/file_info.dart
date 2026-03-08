@@ -29,6 +29,18 @@ class FileInfo {
     return videoExts.contains(extension);
   }
 
+  /// Whether this file is a subtitle format.
+  bool get isSubtitle {
+    const subtitleExts = {'srt', 'vtt', 'ass', 'ssa'};
+    return subtitleExts.contains(extension);
+  }
+
+  /// Whether this file is an audio format.
+  bool get isAudio {
+    const audioExts = {'mp3', 'flac', 'ogg', 'wav', 'aac'};
+    return audioExts.contains(extension);
+  }
+
   factory FileInfo.fromJson(Map<String, dynamic> json) {
     return FileInfo(
       index: json['index'] as int,

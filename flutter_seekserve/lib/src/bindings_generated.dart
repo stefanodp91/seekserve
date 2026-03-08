@@ -108,6 +108,48 @@ class SeekServeBindings {
         int Function(ffi.Pointer<SeekServeEngine>, ffi.Pointer<ffi.Char>, bool)
       >();
 
+  int ss_pause_torrent(
+    ffi.Pointer<SeekServeEngine> engine,
+    ffi.Pointer<ffi.Char> torrent_id,
+  ) {
+    return _ss_pause_torrent(engine, torrent_id);
+  }
+
+  late final _ss_pause_torrentPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ss_error_t Function(
+            ffi.Pointer<SeekServeEngine>,
+            ffi.Pointer<ffi.Char>,
+          )
+        >
+      >('ss_pause_torrent');
+  late final _ss_pause_torrent = _ss_pause_torrentPtr
+      .asFunction<
+        int Function(ffi.Pointer<SeekServeEngine>, ffi.Pointer<ffi.Char>)
+      >();
+
+  int ss_resume_torrent(
+    ffi.Pointer<SeekServeEngine> engine,
+    ffi.Pointer<ffi.Char> torrent_id,
+  ) {
+    return _ss_resume_torrent(engine, torrent_id);
+  }
+
+  late final _ss_resume_torrentPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ss_error_t Function(
+            ffi.Pointer<SeekServeEngine>,
+            ffi.Pointer<ffi.Char>,
+          )
+        >
+      >('ss_resume_torrent');
+  late final _ss_resume_torrent = _ss_resume_torrentPtr
+      .asFunction<
+        int Function(ffi.Pointer<SeekServeEngine>, ffi.Pointer<ffi.Char>)
+      >();
+
   int ss_list_torrents(
     ffi.Pointer<SeekServeEngine> engine,
     ffi.Pointer<ffi.Pointer<ffi.Char>> out_json,

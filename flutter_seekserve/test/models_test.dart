@@ -126,6 +126,22 @@ void main() {
       expect(status.selectedFile, isNull);
       expect(status.streamMode, isNull);
       expect(status.playheadPiece, isNull);
+      expect(status.isPaused, false);
+    });
+
+    test('fromJson parses paused true', () {
+      final status = TorrentStatus.fromJson({
+        'torrent_id': 'abc',
+        'paused': true,
+      });
+      expect(status.isPaused, true);
+    });
+
+    test('fromJson defaults isPaused to false when absent', () {
+      final status = TorrentStatus.fromJson({
+        'torrent_id': 'abc',
+      });
+      expect(status.isPaused, false);
     });
   });
 
@@ -175,6 +191,24 @@ void main() {
       });
       expect(event, isA<TorrentError>());
       expect((event as TorrentError).message, 'timeout');
+    });
+
+    test('parses torrent_paused', () {
+      final event = SeekServeEvent.fromJson({
+        'type': 'torrent_paused',
+        'data': {'torrent_id': 'abc'},
+      });
+      expect(event, isA<TorrentPaused>());
+      expect((event as TorrentPaused).torrentId, 'abc');
+    });
+
+    test('parses torrent_resumed', () {
+      final event = SeekServeEvent.fromJson({
+        'type': 'torrent_resumed',
+        'data': {'torrent_id': 'abc'},
+      });
+      expect(event, isA<TorrentResumed>());
+      expect((event as TorrentResumed).torrentId, 'abc');
     });
 
     test('unknown type returns UnknownEvent', () {

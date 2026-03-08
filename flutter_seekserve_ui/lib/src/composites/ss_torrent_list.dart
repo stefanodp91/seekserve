@@ -9,12 +9,14 @@ class SsTorrentList extends StatelessWidget {
   final List<TorrentStatus> torrents;
   final void Function(TorrentStatus status)? onTap;
   final void Function(TorrentStatus status)? onDelete;
+  final void Function(TorrentStatus status)? onTogglePause;
 
   const SsTorrentList({
     super.key,
     required this.torrents,
     this.onTap,
     this.onDelete,
+    this.onTogglePause,
   });
 
   @override
@@ -34,6 +36,9 @@ class SsTorrentList extends StatelessWidget {
         final tile = SsTorrentTile(
           status: status,
           onTap: onTap != null ? () => onTap!(status) : null,
+          onTogglePause: onTogglePause != null
+              ? () => onTogglePause!(status)
+              : null,
         );
 
         if (onDelete == null) return tile;

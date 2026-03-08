@@ -8,6 +8,7 @@ class TorrentStatus {
   final int numPeers;
   final int numSeeds;
   final String state;
+  final bool isPaused;
   final bool hasMetadata;
   final int? selectedFile;
   final String? streamMode;
@@ -23,6 +24,7 @@ class TorrentStatus {
     required this.numPeers,
     required this.numSeeds,
     required this.state,
+    required this.isPaused,
     required this.hasMetadata,
     this.selectedFile,
     this.streamMode,
@@ -40,6 +42,7 @@ class TorrentStatus {
       numPeers: json['num_peers'] as int? ?? 0,
       numSeeds: json['num_seeds'] as int? ?? 0,
       state: _parseState(json['state']),
+      isPaused: json['paused'] as bool? ?? false,
       hasMetadata: json['has_metadata'] as bool? ?? false,
       selectedFile: json['selected_file'] as int?,
       streamMode: _parseStreamMode(json['stream_mode']),
@@ -88,6 +91,7 @@ class TorrentStatus {
     'num_peers': numPeers,
     'num_seeds': numSeeds,
     'state': state,
+    'paused': isPaused,
     'has_metadata': hasMetadata,
     if (selectedFile != null) 'selected_file': selectedFile,
     if (streamMode != null) 'stream_mode': streamMode,

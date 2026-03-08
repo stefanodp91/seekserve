@@ -145,6 +145,41 @@ class SsTorrentManager extends ChangeNotifier {
     }
   }
 
+  /// Pauses a torrent's download.
+  void pauseTorrent(String torrentId) {
+    if (_client == null) return;
+
+    try {
+      _client!.pauseTorrent(torrentId);
+      _errorMessage = null;
+      notifyListeners();
+    } catch (e) {
+      _errorMessage = e.toString();
+      notifyListeners();
+    }
+  }
+
+  /// Resumes a previously paused torrent.
+  void resumeTorrent(String torrentId) {
+    if (_client == null) return;
+
+    try {
+      _client!.resumeTorrent(torrentId);
+      _errorMessage = null;
+      notifyListeners();
+    } catch (e) {
+      _errorMessage = e.toString();
+      notifyListeners();
+    }
+  }
+
+  /// Toggles pause state: pauses if running, resumes if paused.
+  void togglePause(String torrentId) {
+    final status = _torrents[torrentId]?.status;
+    if (status == null) return;
+    status.isPaused ? resumeTorrent(torrentId) : pauseTorrent(torrentId);
+  }
+
   /// Lists files for a torrent.
   List<FileInfo> listFiles(String torrentId) {
     if (_client == null) return [];
@@ -217,6 +252,9 @@ class SsTorrentManager extends ChangeNotifier {
         notifyListeners();
       case FileCompleted(:final torrentId, :final fileIndex):
         debugPrint('File completed: $torrentId file $fileIndex');
+        notifyListeners();
+      case TorrentPaused():
+      case TorrentResumed():
         notifyListeners();
       case TorrentError(:final torrentId, :final message):
         _errorMessage = 'Torrent $torrentId: $message';

@@ -12,6 +12,7 @@ import '../theme/ss_theme.dart';
 import '../utils/format.dart';
 import 'ss_buffering_overlay.dart';
 import 'ss_player_status_bar.dart';
+import 'ss_track_selector.dart';
 
 /// Complete video player widget with overlay controls, seek bar,
 /// buffering indicator, and fullscreen toggle.
@@ -24,12 +25,24 @@ class SsVideoPlayer extends StatefulWidget {
   final bool isFullscreen;
   final VoidCallback? onFullscreenToggle;
 
+  /// All files in the torrent. The player filters subtitles internally.
+  final List<FileInfo> torrentFiles;
+
+  /// Generates an HTTP stream URL for a file by its index.
+  final String Function(int fileIndex)? streamUrlBuilder;
+
+  /// Requests SeekServe to prioritize downloading a file.
+  final void Function(int fileIndex)? onFileSelectRequested;
+
   const SsVideoPlayer({
     super.key,
     required this.streamUrl,
     this.torrentStatus,
     this.isFullscreen = false,
     this.onFullscreenToggle,
+    this.torrentFiles = const [],
+    this.streamUrlBuilder,
+    this.onFileSelectRequested,
   });
 
   @override
@@ -41,6 +54,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
   VideoController? _videoController;
   String _error = '';
   bool _noVideoFrames = false;
+  Timer? _formatRetryTimer;
 
   @override
   void initState() {
@@ -95,7 +109,17 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
     _videoController = VideoController(_player!);
 
     _player!.stream.error.listen((err) {
-      if (mounted) setState(() => _error = err);
+      if (!mounted) return;
+      // "Failed to recognize file format" means the torrent hasn't buffered
+      // enough data yet. Retry silently after 4 seconds.
+      if (err.contains('recognize file format') || err.contains('Invalid data found')) {
+        _formatRetryTimer?.cancel();
+        _formatRetryTimer = Timer(const Duration(seconds: 4), () {
+          if (mounted) _startPlayer(url);
+        });
+        return;
+      }
+      setState(() => _error = err);
     });
     _player!.stream.width.listen((w) {
       if (w != null && w > 0 && _noVideoFrames && mounted) {
@@ -124,11 +148,15 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
       error: _error,
       isFullscreen: widget.isFullscreen,
       onFullscreenToggle: widget.onFullscreenToggle,
+      torrentFiles: widget.torrentFiles,
+      streamUrlBuilder: widget.streamUrlBuilder,
+      onFileSelectRequested: widget.onFileSelectRequested,
     );
   }
 
   @override
   void dispose() {
+    _formatRetryTimer?.cancel();
     _player?.dispose();
     super.dispose();
   }
@@ -197,6 +225,9 @@ class _PlayerOverlay extends StatefulWidget {
   final String error;
   final bool isFullscreen;
   final VoidCallback? onFullscreenToggle;
+  final List<FileInfo> torrentFiles;
+  final String Function(int fileIndex)? streamUrlBuilder;
+  final void Function(int fileIndex)? onFileSelectRequested;
 
   const _PlayerOverlay({
     required this.player,
@@ -204,6 +235,9 @@ class _PlayerOverlay extends StatefulWidget {
     this.error = '',
     this.isFullscreen = false,
     this.onFullscreenToggle,
+    this.torrentFiles = const [],
+    this.streamUrlBuilder,
+    this.onFileSelectRequested,
   });
 
   @override
@@ -220,6 +254,8 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
   static const _pause = IconData(0xe47c, fontFamily: 'MaterialIcons');
   static const _replay10 = IconData(0xe524, fontFamily: 'MaterialIcons');
   static const _forward10 = IconData(0xe2c5, fontFamily: 'MaterialIcons');
+  static const _audiotrack = IconData(0xe0b6, fontFamily: 'MaterialIcons');
+  static const _subtitles = IconData(0xe619, fontFamily: 'MaterialIcons');
 
   @override
   void initState() {
@@ -248,6 +284,111 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
   }
 
   void _onInteraction() => _scheduleHide();
+
+  List<FileInfo> get _subtitleFiles =>
+      widget.torrentFiles.where((f) => f.isSubtitle).toList();
+
+  bool get _hasExternalSubtitles =>
+      _subtitleFiles.isNotEmpty && widget.streamUrlBuilder != null;
+
+  Future<void> _showAudioTrackSelector() async {
+    final tracks = widget.player.state.tracks.audio;
+    final current = widget.player.state.track.audio;
+
+    final options = tracks
+        .where((t) => t.id != 'auto')
+        .map((t) => SsTrackOption(
+              id: t.id,
+              label: t.title ?? t.language ?? 'Track ${t.id}',
+              subtitle: t.language,
+            ))
+        .toList();
+
+    if (options.isEmpty) return;
+
+    final selected = await SsTrackSelector.show(
+      context,
+      title: 'Audio',
+      options: options,
+      selectedId: current.id,
+    );
+
+    if (selected != null && mounted) {
+      final track = tracks.firstWhere((t) => t.id == selected);
+      widget.player.setAudioTrack(track);
+    }
+    _onInteraction();
+  }
+
+  Future<void> _showSubtitleSelector() async {
+    // Embedded subtitle tracks from the media container
+    final embeddedTracks = widget.player.state.tracks.subtitle
+        .where((t) => t.id != 'auto' && t.id != 'no')
+        .toList();
+    final current = widget.player.state.track.subtitle;
+
+    final options = <SsTrackOption>[
+      const SsTrackOption(id: 'off', label: 'Off'),
+    ];
+
+    // Add embedded tracks
+    for (final t in embeddedTracks) {
+      options.add(SsTrackOption(
+        id: 'embedded:${t.id}',
+        label: t.title ?? t.language ?? 'Track ${t.id}',
+        subtitle: t.language,
+      ));
+    }
+
+    // Add external subtitle files from the torrent
+    for (final f in _subtitleFiles) {
+      options.add(SsTrackOption(
+        id: 'external:${f.index}',
+        label: f.name,
+      ));
+    }
+
+    // Determine current selection ID
+    String? selectedId;
+    if (current.id == 'no' || current.id == 'auto') {
+      selectedId = 'off';
+    } else {
+      // Check if it's an embedded track
+      final isEmbedded = embeddedTracks.any((t) => t.id == current.id);
+      if (isEmbedded) {
+        selectedId = 'embedded:${current.id}';
+      }
+      // External tracks don't have a stable "current" ID from media_kit,
+      // so we can't reliably highlight them after selection.
+    }
+
+    final selected = await SsTrackSelector.show(
+      context,
+      title: 'Subtitles',
+      options: options,
+      selectedId: selectedId,
+    );
+
+    if (selected == null || !mounted) return;
+
+    if (selected == 'off') {
+      widget.player.setSubtitleTrack(SubtitleTrack.no());
+    } else if (selected.startsWith('embedded:')) {
+      final id = selected.replaceFirst('embedded:', '');
+      final track = embeddedTracks.firstWhere((t) => t.id == id);
+      widget.player.setSubtitleTrack(track);
+    } else if (selected.startsWith('external:')) {
+      final fileIndex = int.parse(selected.replaceFirst('external:', ''));
+      // Prioritize download of the subtitle file
+      widget.onFileSelectRequested?.call(fileIndex);
+      final url = widget.streamUrlBuilder!(fileIndex);
+      final file = _subtitleFiles.firstWhere((f) => f.index == fileIndex);
+      widget.player.setSubtitleTrack(
+        SubtitleTrack.uri(url, title: file.name),
+      );
+    }
+    _onInteraction();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -298,7 +439,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
 
     return Column(
       children: [
-        // -- Top gradient: fullscreen button --
+        // -- Top gradient: track selectors + fullscreen --
         Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -309,15 +450,51 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
           ),
           padding: EdgeInsets.only(
             top: widget.isFullscreen ? 16.0 : 4.0,
+            left: 4,
             right: 4,
           ),
-          alignment: Alignment.topRight,
-          child: SsIconButton(
-            icon: widget.isFullscreen ? _fullscreenExit : _fullscreen,
-            color: const Color(0xFFFFFFFF),
-            onPressed: () {
-              widget.onFullscreenToggle?.call();
-              _onInteraction();
+          child: StreamBuilder<Tracks>(
+            stream: widget.player.stream.tracks,
+            builder: (ctx, tracksSnap) {
+              final tracks = tracksSnap.data;
+              final hasMultipleAudio =
+                  (tracks?.audio.where((t) => t.id != 'auto').length ?? 0) > 1;
+              final hasEmbeddedSubs =
+                  (tracks?.subtitle.where((t) => t.id != 'auto' && t.id != 'no').length ?? 0) > 0;
+              final showAudio = hasMultipleAudio;
+              final showSubs = hasEmbeddedSubs || _hasExternalSubtitles;
+
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (showAudio)
+                    SsIconButton(
+                      icon: _audiotrack,
+                      color: const Color(0xFFFFFFFF),
+                      onPressed: () {
+                        _showAudioTrackSelector();
+                        _onInteraction();
+                      },
+                    ),
+                  if (showSubs)
+                    SsIconButton(
+                      icon: _subtitles,
+                      color: const Color(0xFFFFFFFF),
+                      onPressed: () {
+                        _showSubtitleSelector();
+                        _onInteraction();
+                      },
+                    ),
+                  SsIconButton(
+                    icon: widget.isFullscreen ? _fullscreenExit : _fullscreen,
+                    color: const Color(0xFFFFFFFF),
+                    onPressed: () {
+                      widget.onFullscreenToggle?.call();
+                      _onInteraction();
+                    },
+                  ),
+                ],
+              );
             },
           ),
         ),

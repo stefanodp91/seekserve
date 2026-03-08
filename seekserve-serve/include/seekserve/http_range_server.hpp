@@ -30,6 +30,8 @@ public:
                          const TorrentId& torrent_id,
                          FileIndex file_index,
                          const std::string& file_path = "");
+    void remove_byte_source(const TorrentId& torrent_id, FileIndex file_index);
+    void remove_byte_sources_for_torrent(const TorrentId& torrent_id);
 
     Result<std::uint16_t> start(std::uint16_t port = 0);
     void stop();
