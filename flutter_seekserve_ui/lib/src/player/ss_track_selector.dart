@@ -75,82 +75,84 @@ class SsTrackSelector extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = SsTheme.of(context);
 
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: Container(
-        constraints: const BoxConstraints(maxHeight: 320),
-        margin: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
-        decoration: BoxDecoration(
-          color: theme.surface,
-          borderRadius: BorderRadius.circular(theme.borderRadius * 2),
-          border: Border.all(color: theme.onSurface.withValues(alpha: 0.1)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text(title, style: theme.headingStyle),
-            ),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                padding: const EdgeInsets.only(bottom: 8),
-                itemCount: options.length,
-                itemBuilder: (ctx, i) {
-                  final option = options[i];
-                  final isSelected = option.id == selectedId;
-                  return GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => onSelected(option.id),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      color: isSelected
-                          ? theme.primary.withValues(alpha: 0.12)
-                          : null,
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  option.label,
-                                  style: theme.bodyStyle.copyWith(
-                                    color: isSelected
-                                        ? theme.primary
-                                        : theme.onSurface,
-                                    fontWeight: isSelected
-                                        ? FontWeight.w600
-                                        : FontWeight.normal,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                if (option.subtitle != null)
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: Container(
+          constraints: const BoxConstraints(maxHeight: 320),
+          margin: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+          decoration: BoxDecoration(
+            color: theme.surface,
+            borderRadius: BorderRadius.circular(theme.borderRadius * 2),
+            border: Border.all(color: theme.onSurface.withValues(alpha: 0.1)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(title, style: theme.headingStyle),
+              ),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.only(bottom: 8),
+                  itemCount: options.length,
+                  itemBuilder: (ctx, i) {
+                    final option = options[i];
+                    final isSelected = option.id == selectedId;
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => onSelected(option.id),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        color: isSelected
+                            ? theme.primary.withValues(alpha: 0.12)
+                            : null,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
                                   Text(
-                                    option.subtitle!,
-                                    style: theme.captionStyle,
+                                    option.label,
+                                    style: theme.bodyStyle.copyWith(
+                                      color: isSelected
+                                          ? theme.primary
+                                          : theme.onSurface,
+                                      fontWeight: isSelected
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                    ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
-                              ],
+                                  if (option.subtitle != null)
+                                    Text(
+                                      option.subtitle!,
+                                      style: theme.captionStyle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                ],
+                              ),
                             ),
-                          ),
-                          if (isSelected)
-                            Icon(_check, size: 20, color: theme.primary),
-                        ],
+                            if (isSelected)
+                              Icon(_check, size: 20, color: theme.primary),
+                          ],
+                        ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
