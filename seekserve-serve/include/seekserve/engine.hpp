@@ -52,6 +52,10 @@ public:
     Result<void> remove_torrent(const TorrentId& id, bool delete_files);
     std::vector<TorrentId> list_torrents() const;
 
+    // Pause / resume
+    Result<void> pause_torrent(const TorrentId& id);
+    Result<void> resume_torrent(const TorrentId& id);
+
     // File management
     Result<std::vector<FileInfo>> list_files(const TorrentId& id);
     Result<void> select_file(const TorrentId& id, FileIndex fi);

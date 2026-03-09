@@ -128,6 +128,30 @@ class SeekServeClient {
     }
   }
 
+  /// Pauses a torrent's download (and upload).
+  void pauseTorrent(String torrentId) {
+    _ensureNotDisposed();
+    final idPtr = torrentId.toNativeUtf8().cast<Char>();
+    try {
+      final err = _bindings.ss_pause_torrent(_engine, idPtr);
+      checkError(err);
+    } finally {
+      calloc.free(idPtr);
+    }
+  }
+
+  /// Resumes a previously paused torrent.
+  void resumeTorrent(String torrentId) {
+    _ensureNotDisposed();
+    final idPtr = torrentId.toNativeUtf8().cast<Char>();
+    try {
+      final err = _bindings.ss_resume_torrent(_engine, idPtr);
+      checkError(err);
+    } finally {
+      calloc.free(idPtr);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // File operations
   // ---------------------------------------------------------------------------

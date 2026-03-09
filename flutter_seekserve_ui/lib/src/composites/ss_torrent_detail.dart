@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_seekserve/seekserve.dart';
 
 import '../atoms/ss_badge.dart';
+import '../atoms/ss_button.dart';
 import '../atoms/ss_progress_bar.dart';
 import '../theme/ss_theme.dart';
 import '../utils/format.dart';
@@ -12,14 +13,17 @@ import 'ss_transfer_stats.dart';
 class SsTorrentDetail extends StatelessWidget {
   final TorrentStatus status;
   final List<FileInfo>? files;
+  final VoidCallback? onTogglePause;
 
   const SsTorrentDetail({
     super.key,
     required this.status,
     this.files,
+    this.onTogglePause,
   });
 
   Color _stateColor(SsThemeData t) {
+    if (status.isPaused) return t.paused;
     switch (status.state) {
       case 'downloading':
       case 'downloading_metadata':
@@ -56,12 +60,25 @@ class SsTorrentDetail extends StatelessWidget {
           ),
           const SizedBox(height: 8),
 
-          // State badge + stream mode
+          // State badge + stream mode + pause/resume button
           Row(
             children: [
-              SsBadge(label: status.state, color: color),
+              SsBadge(
+                label: status.isPaused ? 'PAUSED' : status.state,
+                color: color,
+              ),
               const SizedBox(width: 8),
               SsStreamModeBadge(mode: status.streamMode),
+              if (onTogglePause != null) ...[
+                const SizedBox(width: 8),
+                SsButton(
+                  label: status.isPaused ? 'Resume' : 'Pause',
+                  onPressed: onTogglePause,
+                  variant: status.isPaused
+                      ? SsButtonVariant.primary
+                      : SsButtonVariant.secondary,
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 12),

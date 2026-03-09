@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 
 #include <libtorrent/torrent_status.hpp>
+#include <libtorrent/torrent_flags.hpp>
 #include <libtorrent/hex.hpp>
 
 namespace seekserve {
@@ -428,6 +429,30 @@ void ControlApiServer::handle_connection(tcp::socket socket) {
         return;
     }
 
+    // POST /api/torrents/{id}/pause
+    if (method == http::verb::post && sub_path == "/pause") {
+        auto handle = sessions_.get_handle(torrent_id);
+        if (!handle.is_valid()) {
+            send_error(http::status::internal_server_error, "Invalid torrent handle");
+            return;
+        }
+        handle.pause();
+        send_json(http::status::ok, json{{"status", "paused"}});
+        return;
+    }
+
+    // POST /api/torrents/{id}/resume
+    if (method == http::verb::post && sub_path == "/resume") {
+        auto handle = sessions_.get_handle(torrent_id);
+        if (!handle.is_valid()) {
+            send_error(http::status::internal_server_error, "Invalid torrent handle");
+            return;
+        }
+        handle.resume();
+        send_json(http::status::ok, json{{"status", "resumed"}});
+        return;
+    }
+
     // GET /api/torrents/{id}/status
     if (method == http::verb::get && sub_path == "/status") {
         auto handle = sessions_.get_handle(torrent_id);
@@ -450,6 +475,7 @@ void ControlApiServer::handle_connection(tcp::socket socket) {
             {"total_download", st.total_download},
             {"total_upload", st.total_upload},
             {"state", static_cast<int>(st.state)},
+            {"paused", !!(st.flags & lt::torrent_flags::paused)},
             {"has_metadata", catalog_.has_metadata(torrent_id)},
             {"selected_file", selected.has_value() ? json(*selected) : json(nullptr)}
         };

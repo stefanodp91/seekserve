@@ -114,6 +114,38 @@ void HttpRangeServer::set_byte_source(std::shared_ptr<ByteSource> source,
     sources_[key] = SourceEntry{std::move(source), torrent_id, file_index, file_path};
 }
 
+void HttpRangeServer::remove_byte_source(const TorrentId& torrent_id, FileIndex file_index) {
+    std::string key = torrent_id + "/" + std::to_string(file_index);
+    std::shared_ptr<ByteSource> to_cancel;
+    {
+        std::lock_guard lock(sources_mu_);
+        auto it = sources_.find(key);
+        if (it != sources_.end()) {
+            to_cancel = std::move(it->second.source);
+            sources_.erase(it);
+        }
+    }
+    if (to_cancel) to_cancel->cancel();
+}
+
+void HttpRangeServer::remove_byte_sources_for_torrent(const TorrentId& torrent_id) {
+    std::vector<std::shared_ptr<ByteSource>> to_cancel;
+    {
+        std::lock_guard lock(sources_mu_);
+        for (auto it = sources_.begin(); it != sources_.end(); ) {
+            if (it->second.torrent_id == torrent_id) {
+                to_cancel.push_back(std::move(it->second.source));
+                it = sources_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    for (auto& src : to_cancel) {
+        if (src) src->cancel();
+    }
+}
+
 Result<std::uint16_t> HttpRangeServer::start(std::uint16_t port) {
     if (running_.load()) {
         return make_error_code(errc::server_already_running);
@@ -166,11 +198,12 @@ void HttpRangeServer::stop() {
         acceptor_->close(ec);
     }
 
-    // Cancel all byte sources
+    // Cancel all byte sources and clear the map
     std::lock_guard lock(sources_mu_);
     for (auto& [key, entry] : sources_) {
         if (entry.source) entry.source->cancel();
     }
+    sources_.clear();
     spdlog::info("HttpRangeServer: stopped");
 }
 

@@ -14,6 +14,10 @@ sealed class SeekServeEvent {
           torrentId: data['torrent_id'] as String? ?? '',
           fileIndex: data['file_index'] as int? ?? -1,
         );
+      case 'torrent_paused':
+        return TorrentPaused(torrentId: data['torrent_id'] as String? ?? '');
+      case 'torrent_resumed':
+        return TorrentResumed(torrentId: data['torrent_id'] as String? ?? '');
       case 'error':
         return TorrentError(
           torrentId: data['torrent_id'] as String? ?? '',
@@ -36,6 +40,18 @@ class FileCompleted extends SeekServeEvent {
   final String torrentId;
   final int fileIndex;
   const FileCompleted({required this.torrentId, required this.fileIndex});
+}
+
+/// Fired when a torrent is paused.
+class TorrentPaused extends SeekServeEvent {
+  final String torrentId;
+  const TorrentPaused({required this.torrentId});
+}
+
+/// Fired when a torrent is resumed.
+class TorrentResumed extends SeekServeEvent {
+  final String torrentId;
+  const TorrentResumed({required this.torrentId});
 }
 
 /// Fired when a torrent encounters an error.

@@ -6,6 +6,7 @@
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/hex.hpp>
 #include <libtorrent/torrent_status.hpp>
+#include <libtorrent/torrent_flags.hpp>
 #include <libtorrent/file_storage.hpp>
 
 #include <filesystem>
@@ -153,7 +154,14 @@ Result<TorrentId> SeekServeEngine::add_torrent(const std::string& uri,
 Result<void> SeekServeEngine::remove_torrent(const TorrentId& id, bool delete_files) {
     cache_->remove_torrent_uri(id);
 
-    // Mark as removed FIRST so alert handlers skip late alerts for this torrent
+    // Remove + cancel ByteSources from HttpRangeServer FIRST.
+    // This prevents new reads and unblocks in-flight ones before we
+    // destroy the TorrentState (which owns avail_ and mapper_).
+    if (http_server_) {
+        http_server_->remove_byte_sources_for_torrent(id);
+    }
+
+    // Now safe to destroy TorrentState
     {
         std::lock_guard lock(mu_);
         removed_ids_.insert(id);
@@ -161,6 +169,28 @@ Result<void> SeekServeEngine::remove_torrent(const TorrentId& id, bool delete_fi
     }
     catalog_.remove(id);
     return sessions_->remove_torrent(id, delete_files);
+}
+
+Result<void> SeekServeEngine::pause_torrent(const TorrentId& id) {
+    auto handle = sessions_->get_handle(id);
+    if (!handle.is_valid()) {
+        return make_error_code(errc::torrent_not_found);
+    }
+    handle.pause();
+    spdlog::info("Engine: paused torrent {}", id);
+    fire_event("torrent_paused", "{\"torrent_id\":\"" + id + "\"}");
+    return {};
+}
+
+Result<void> SeekServeEngine::resume_torrent(const TorrentId& id) {
+    auto handle = sessions_->get_handle(id);
+    if (!handle.is_valid()) {
+        return make_error_code(errc::torrent_not_found);
+    }
+    handle.resume();
+    spdlog::info("Engine: resumed torrent {}", id);
+    fire_event("torrent_resumed", "{\"torrent_id\":\"" + id + "\"}");
+    return {};
 }
 
 std::vector<TorrentId> SeekServeEngine::list_torrents() const {
@@ -187,6 +217,22 @@ Result<void> SeekServeEngine::select_file(const TorrentId& id, FileIndex fi) {
 
     auto result = catalog_.select_file(id, fi, handle);
     if (!result) return result;
+
+    // Clean up previous file selection's ByteSource from HttpRangeServer
+    // before we destroy the old TorrentState (which owns avail_ and mapper_).
+    {
+        FileIndex old_fi = -1;
+        {
+            std::lock_guard lock(mu_);
+            auto* old_state = find_state(id);
+            if (old_state && old_state->selected_file >= 0) {
+                old_fi = old_state->selected_file;
+            }
+        }
+        if (old_fi >= 0 && http_server_) {
+            http_server_->remove_byte_source(id, old_fi);
+        }
+    }
 
     auto ti = catalog_.torrent_info(id);
     if (!ti) {
@@ -284,6 +330,7 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
     status_json["total_download"] = st.total_download;
     status_json["total_upload"] = st.total_upload;
     status_json["state"] = static_cast<int>(st.state);
+    status_json["paused"] = !!(st.flags & lt::torrent_flags::paused);
     status_json["has_metadata"] = catalog_.has_metadata(id);
     status_json["selected_file"] = selected.has_value() ? json(*selected) : json(nullptr);
 

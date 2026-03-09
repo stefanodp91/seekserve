@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_seekserve/seekserve.dart';
 
 import '../atoms/ss_badge.dart';
+import '../atoms/ss_icon_button.dart';
 import '../atoms/ss_progress_bar.dart';
 import '../theme/ss_theme.dart';
 import '../utils/format.dart';
@@ -13,15 +14,18 @@ class SsTorrentTile extends StatelessWidget {
   final TorrentStatus status;
   final VoidCallback? onTap;
   final VoidCallback? onDelete;
+  final VoidCallback? onTogglePause;
 
   const SsTorrentTile({
     super.key,
     required this.status,
     this.onTap,
     this.onDelete,
+    this.onTogglePause,
   });
 
   Color _stateColor(SsThemeData t) {
+    if (status.isPaused) return t.paused;
     // Completed torrents always show as completed.
     if (status.progress >= 0.999) {
       return status.state == 'seeding' ? t.seeding : t.completed;
@@ -43,6 +47,7 @@ class SsTorrentTile extends StatelessWidget {
   }
 
   String _stateLabel() {
+    if (status.isPaused) return 'PAUSED';
     // Completed torrents: clear label regardless of libtorrent internal state.
     if (status.progress >= 0.999) {
       return status.state == 'seeding' ? 'SEED' : 'DONE';
@@ -82,7 +87,7 @@ class SsTorrentTile extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Row 1: name + badge
+            // Row 1: name + pause button + badge
             Row(
               children: [
                 Expanded(
@@ -93,6 +98,17 @@ class SsTorrentTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                if (onTogglePause != null) ...[
+                  const SizedBox(width: 4),
+                  SsIconButton(
+                    icon: status.isPaused
+                        ? const IconData(0xe037, fontFamily: 'MaterialIcons') // play_arrow
+                        : const IconData(0xe034, fontFamily: 'MaterialIcons'), // pause
+                    color: theme.onSurface,
+                    size: 20,
+                    onPressed: onTogglePause,
+                  ),
+                ],
                 const SizedBox(width: 8),
                 SsBadge(label: _stateLabel(), color: color),
               ],

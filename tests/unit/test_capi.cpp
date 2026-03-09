@@ -334,3 +334,79 @@ TEST_F(CApiTest, FullLifecycle) {
     // Cleanup
     ss_engine_destroy(engine);
 }
+
+// --- Pause / Resume tests ---
+
+TEST_F(CApiTest, PauseTorrentNullEngine) {
+    EXPECT_EQ(ss_pause_torrent(nullptr, "abc"), SS_ERR_INVALID_ARG);
+}
+
+TEST_F(CApiTest, PauseTorrentNullId) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+
+    EXPECT_EQ(ss_pause_torrent(engine, nullptr), SS_ERR_INVALID_ARG);
+
+    ss_engine_destroy(engine);
+}
+
+TEST_F(CApiTest, PauseTorrentNotFound) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+
+    EXPECT_EQ(ss_pause_torrent(engine, "nonexistent"), SS_ERR_NOT_FOUND);
+
+    ss_engine_destroy(engine);
+}
+
+TEST_F(CApiTest, ResumeTorrentNullEngine) {
+    EXPECT_EQ(ss_resume_torrent(nullptr, "abc"), SS_ERR_INVALID_ARG);
+}
+
+TEST_F(CApiTest, ResumeTorrentNotFound) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+
+    EXPECT_EQ(ss_resume_torrent(engine, "nonexistent"), SS_ERR_NOT_FOUND);
+
+    ss_engine_destroy(engine);
+}
+
+TEST_F(CApiTest, PauseAndResumeTorrent) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+
+    char id_buf[128] = {};
+    auto path = torrent_path();
+    ASSERT_EQ(ss_add_torrent(engine, path.c_str(), id_buf, sizeof(id_buf)), SS_OK);
+
+    // Pause
+    EXPECT_EQ(ss_pause_torrent(engine, id_buf), SS_OK);
+
+    // Verify status shows paused
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    char* json = nullptr;
+    ASSERT_EQ(ss_get_status(engine, id_buf, &json), SS_OK);
+    ASSERT_NE(json, nullptr);
+    std::string status_str(json);
+    EXPECT_NE(status_str.find("\"paused\":true"), std::string::npos);
+    ss_free_string(json);
+
+    // Resume
+    EXPECT_EQ(ss_resume_torrent(engine, id_buf), SS_OK);
+
+    // Verify status shows not paused
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    json = nullptr;
+    ASSERT_EQ(ss_get_status(engine, id_buf, &json), SS_OK);
+    ASSERT_NE(json, nullptr);
+    status_str = std::string(json);
+    EXPECT_NE(status_str.find("\"paused\":false"), std::string::npos);
+    ss_free_string(json);
+
+    ss_engine_destroy(engine);
+}
