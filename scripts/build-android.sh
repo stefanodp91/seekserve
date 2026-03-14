@@ -40,15 +40,18 @@ echo "jobs:  $JOBS"
 
 IFS=' ' read -r -a ABIS <<< "${SEEKSERVE_ANDROID_ABIS:-arm64-v8a armeabi-v7a}"
 
-declare -A ABI_TO_TRIPLET=(
-    ["arm64-v8a"]="arm64-android"
-    ["armeabi-v7a"]="arm-neon-android"
-    ["x86_64"]="x64-android"
-)
+abi_to_triplet() {
+    case "$1" in
+        arm64-v8a)   echo "arm64-android" ;;
+        armeabi-v7a) echo "arm-neon-android" ;;
+        x86_64)      echo "x64-android" ;;
+        *) echo "ERROR: unknown ABI $1" >&2; exit 1 ;;
+    esac
+}
 
 VCPKG_TRIPLETS=()
 for ABI in "${ABIS[@]}"; do
-    VCPKG_TRIPLETS+=("${ABI_TO_TRIPLET[$ABI]}")
+    VCPKG_TRIPLETS+=("$(abi_to_triplet "$ABI")")
 done
 
 OVERLAY_TRIPLETS="$PROJECT_DIR/triplets"
