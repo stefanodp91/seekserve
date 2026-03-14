@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Cross-compile SeekServe C API for Android (arm64-v8a, armeabi-v7a, x86_64)
+# Cross-compile SeekServe C API for Android.
 # Produces shared libraries for each ABI.
 # Requires: Android NDK + vcpkg
+#
+# Configure target ABIs via SEEKSERVE_ANDROID_ABIS (space-separated).
+# Default: arm64-v8a armeabi-v7a
+# Example: SEEKSERVE_ANDROID_ABIS="arm64-v8a armeabi-v7a x86_64" ./scripts/build-android.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,8 +38,19 @@ echo "NDK:   $NDK_DIR"
 echo "vcpkg: $VCPKG_DIR"
 echo "jobs:  $JOBS"
 
-ABIS=("arm64-v8a" "armeabi-v7a" "x86_64")
-VCPKG_TRIPLETS=("arm64-android" "arm-neon-android" "x64-android")
+IFS=' ' read -r -a ABIS <<< "${SEEKSERVE_ANDROID_ABIS:-arm64-v8a armeabi-v7a}"
+
+declare -A ABI_TO_TRIPLET=(
+    ["arm64-v8a"]="arm64-android"
+    ["armeabi-v7a"]="arm-neon-android"
+    ["x86_64"]="x64-android"
+)
+
+VCPKG_TRIPLETS=()
+for ABI in "${ABIS[@]}"; do
+    VCPKG_TRIPLETS+=("${ABI_TO_TRIPLET[$ABI]}")
+done
+
 OVERLAY_TRIPLETS="$PROJECT_DIR/triplets"
 
 build_abi() {

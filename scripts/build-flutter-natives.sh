@@ -54,7 +54,8 @@ build_android() {
     local STRIP_TOOL="${PREBUILT_DIR:+$PREBUILT_DIR/bin/llvm-strip}"
 
     # Copy .so files to plugin jniLibs
-    local ABIS=("arm64-v8a" "armeabi-v7a" "x86_64")
+    local -a ABIS
+    IFS=' ' read -r -a ABIS <<< "${SEEKSERVE_ANDROID_ABIS:-arm64-v8a armeabi-v7a}"
     for ABI in "${ABIS[@]}"; do
         local SRC="$PROJECT_DIR/build/android-$ABI/seekserve-capi/libseekserve.so"
         local DEST="$PLUGIN_DIR/android/src/main/jniLibs/$ABI"
@@ -93,7 +94,9 @@ fi
 if [ "$TARGET" = "android" ] || [ "$TARGET" = "all" ]; then
     echo ""
     echo "Android jniLibs:"
-    for ABI in arm64-v8a armeabi-v7a x86_64; do
+    local -a SUMMARY_ABIS
+    IFS=' ' read -r -a SUMMARY_ABIS <<< "${SEEKSERVE_ANDROID_ABIS:-arm64-v8a armeabi-v7a}"
+    for ABI in "${SUMMARY_ABIS[@]}"; do
         SO="$PLUGIN_DIR/android/src/main/jniLibs/$ABI/libseekserve.so"
         if [ -f "$SO" ]; then
             echo "  $ABI: $(du -h "$SO" | cut -f1)"

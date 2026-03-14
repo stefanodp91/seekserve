@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Changed — Android build: configurable ABI list
+
+The Android build scripts (`build-android.sh`, `build-flutter-natives.sh`) now
+read the target ABIs from the `SEEKSERVE_ANDROID_ABIS` environment variable
+(space-separated). Default is `arm64-v8a armeabi-v7a`, dropping x86_64 (emulator
+only, ~208 MB unstripped) from the default set.
+
+To include x86_64:
+```
+SEEKSERVE_ANDROID_ABIS="arm64-v8a armeabi-v7a x86_64" ./scripts/build-flutter-natives.sh android
+```
+
 ### Fixed — Android build script: cross-platform NDK detection
 
 `scripts/build-flutter-natives.sh` hardcoded a macOS-only path
