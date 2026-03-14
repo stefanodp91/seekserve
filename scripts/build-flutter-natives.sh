@@ -32,7 +32,7 @@ build_ios() {
 build_android() {
     echo ""
     echo "========================================"
-    echo "  Building Android .so (3 ABIs)"
+    echo "  Building Android .so"
     echo "========================================"
     bash "$SCRIPT_DIR/build-android.sh"
 
@@ -94,7 +94,6 @@ fi
 if [ "$TARGET" = "android" ] || [ "$TARGET" = "all" ]; then
     echo ""
     echo "Android jniLibs:"
-    local -a SUMMARY_ABIS
     IFS=' ' read -r -a SUMMARY_ABIS <<< "${SEEKSERVE_ANDROID_ABIS:-arm64-v8a armeabi-v7a}"
     for ABI in "${SUMMARY_ABIS[@]}"; do
         SO="$PLUGIN_DIR/android/src/main/jniLibs/$ABI/libseekserve.so"
