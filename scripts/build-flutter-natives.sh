@@ -36,10 +36,22 @@ build_android() {
     echo "========================================"
     bash "$SCRIPT_DIR/build-android.sh"
 
-    # Find NDK strip tool
+    # Find NDK strip tool (cross-platform: Linux CI and macOS)
     local NDK_DIR
-    NDK_DIR="$(ls -d "$HOME/Library/Android/sdk/ndk/"* 2>/dev/null | sort -V | tail -1)"
-    local STRIP_TOOL="$NDK_DIR/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip"
+    if [ -n "${ANDROID_NDK_HOME:-}" ] && [ -d "$ANDROID_NDK_HOME" ]; then
+        NDK_DIR="$ANDROID_NDK_HOME"
+    elif [ -n "${ANDROID_HOME:-}" ]; then
+        NDK_DIR="$(ls -d "$ANDROID_HOME/ndk/"* 2>/dev/null | sort -V | tail -1)"
+    else
+        NDK_DIR="$(ls -d "$HOME/Library/Android/sdk/ndk/"* 2>/dev/null | sort -V | tail -1)"
+    fi
+    local PREBUILT_DIR=""
+    if [ -d "${NDK_DIR:-}/toolchains/llvm/prebuilt/linux-x86_64" ]; then
+        PREBUILT_DIR="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64"
+    elif [ -d "${NDK_DIR:-}/toolchains/llvm/prebuilt/darwin-x86_64" ]; then
+        PREBUILT_DIR="$NDK_DIR/toolchains/llvm/prebuilt/darwin-x86_64"
+    fi
+    local STRIP_TOOL="${PREBUILT_DIR:+$PREBUILT_DIR/bin/llvm-strip}"
 
     # Copy .so files to plugin jniLibs
     local ABIS=("arm64-v8a" "armeabi-v7a" "x86_64")

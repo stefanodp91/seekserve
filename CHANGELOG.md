@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed — Android build script: cross-platform NDK detection
+
+`scripts/build-flutter-natives.sh` hardcoded a macOS-only path
+(`$HOME/Library/Android/sdk/ndk/`) and a `darwin-x86_64` prebuilt directory
+for `llvm-strip`. On Linux the `ls` glob returned exit code 1, causing the
+script to abort (due to `set -euo pipefail`) after a successful compilation,
+before the `.so` files were copied to the output directory.
+
+The NDK detection now follows the same priority order used by
+`build-android.sh`: `ANDROID_NDK_HOME` env var → `ANDROID_HOME/ndk/` →
+macOS SDK fallback. The `llvm-strip` prebuilt directory is selected based on
+the host OS (`linux-x86_64` or `darwin-x86_64`), and stripping is silently
+skipped when the tool is not found.
+
 ### Added — Video Player: Audio & Subtitle Track Selector
 
 In-player track selection for audio streams and subtitles (both embedded and
