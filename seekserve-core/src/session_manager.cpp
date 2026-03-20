@@ -38,9 +38,41 @@ lt::settings_pack TorrentSessionManager::make_settings(const SessionConfig& conf
         | lt::alert_category::storage
         | lt::alert_category::dht);
 
+    // Bind loopback-only: prevents exposure on LAN interfaces
     sp.set_str(lt::settings_pack::listen_interfaces,
-        "0.0.0.0:" + std::to_string(config.listen_port_start) +
-        ",[::0]:" + std::to_string(config.listen_port_start));
+        "127.0.0.1:" + std::to_string(config.listen_port_start));
+
+    // Disable LAN discovery protocols (UPnP, NAT-PMP, LSD)
+    // These broadcast the engine's presence on the local network
+    sp.set_bool(lt::settings_pack::enable_upnp, false);
+    sp.set_bool(lt::settings_pack::enable_natpmp, false);
+    sp.set_bool(lt::settings_pack::enable_lsd, false);
+
+    // Force peer encryption (MSE/PE RC4): reject plaintext connections
+    // Trade-off: reduces available peers, defeats DPI traffic analysis
+    sp.set_int(lt::settings_pack::out_enc_policy,
+        lt::settings_pack::pe_forced);
+    sp.set_int(lt::settings_pack::in_enc_policy,
+        lt::settings_pack::pe_forced);
+    sp.set_int(lt::settings_pack::allowed_enc_level,
+        lt::settings_pack::pe_rc4);
+
+    // Anonymous mode: suppresses client version in BEP-10 extension handshake,
+    // uses generic user-agent toward trackers, omits private IPs from announces
+    sp.set_bool(lt::settings_pack::anonymous_mode, true);
+
+    // Override user-agent sent to HTTP trackers.
+    // Generic string prevents client fingerprinting at the tracker layer.
+    sp.set_str(lt::settings_pack::user_agent, "Mozilla/5.0");
+
+    // Suppress client version field ("v") in BEP-10 extension handshake.
+    // Empty string means libtorrent omits the field entirely.
+    sp.set_str(lt::settings_pack::handshake_client_version, "");
+
+    // Override peer ID prefix (first 8 bytes of the 20-byte peer ID).
+    // Default "-lt{ver}-" identifies libtorrent; spoof as a common client
+    // to prevent client fingerprinting. Remaining 12 bytes are random.
+    sp.set_str(lt::settings_pack::peer_fingerprint, "-UT3600-");
 
     sp.set_int(lt::settings_pack::request_timeout, 10);
     sp.set_int(lt::settings_pack::peer_timeout, 30);

@@ -1,4 +1,5 @@
 #include "seekserve/control_api_server.hpp"
+#include "seekserve/auth_utils.hpp"
 
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -28,38 +29,6 @@ static std::string sanitize_url(std::string_view url) {
     auto end = url.find('&', pos);
     return std::string(url.substr(0, pos)) + "token=***" +
            (end != std::string_view::npos ? std::string(url.substr(end)) : "");
-}
-
-static bool constant_time_compare(const std::string& a, const std::string& b) {
-    if (a.size() != b.size()) return false;
-    volatile int result = 0;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        result |= (a[i] ^ b[i]);
-    }
-    return result == 0;
-}
-
-// Extract Bearer token from Authorization header or ?token= query param
-static std::string extract_token(const http::request<http::string_body>& req) {
-    // Check Authorization header first
-    auto auth_it = req.find(http::field::authorization);
-    if (auth_it != req.end()) {
-        auto val = std::string(auth_it->value());
-        if (val.size() > 7 && val.substr(0, 7) == "Bearer ") {
-            return val.substr(7);
-        }
-    }
-
-    // Check query param ?token=
-    auto target = std::string(req.target());
-    auto qpos = target.find("token=");
-    if (qpos != std::string::npos) {
-        auto val_start = qpos + 6;
-        auto amp = target.find('&', val_start);
-        return target.substr(val_start, amp == std::string::npos ? amp : amp - val_start);
-    }
-
-    return {};
 }
 
 // Extract path without query string

@@ -1,4 +1,5 @@
 #include "seekserve/http_range_server.hpp"
+#include "seekserve/auth_utils.hpp"
 #include "seekserve/range_parser.hpp"
 
 #include <boost/beast/core.hpp>
@@ -84,15 +85,6 @@ static std::string sanitize_url(std::string_view url) {
     auto end = url.find('&', pos);
     return std::string(url.substr(0, pos)) + "token=***" +
            (end != std::string_view::npos ? std::string(url.substr(end)) : "");
-}
-
-static bool constant_time_compare(const std::string& a, const std::string& b) {
-    if (a.size() != b.size()) return false;
-    volatile int result = 0;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        result |= (a[i] ^ b[i]);
-    }
-    return result == 0;
 }
 
 HttpRangeServer::HttpRangeServer(net::io_context& ioc, const ServerConfig& config)
@@ -375,9 +367,10 @@ void HttpRangeServer::handle_connection(tcp::socket socket) {
         return;
     }
 
-    // Auth check
+    // Auth check: accepts Authorization: Bearer <token> or ?token= query param
     if (!auth_token_.empty()) {
-        if (!constant_time_compare(parsed->token, auth_token_)) {
+        auto token = extract_token(req);
+        if (!constant_time_compare(token, auth_token_)) {
             send_error(http::status::forbidden, "Forbidden");
             return;
         }
