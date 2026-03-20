@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### Security — libtorrent session hardening and shared auth utilities
+
+#### `seekserve-core`
+
+- **Loopback-only binding:** `listen_interfaces` changed from `0.0.0.0:port,[::0]:port`
+  to `127.0.0.1:port` — the engine is no longer reachable from LAN interfaces.
+- **LAN discovery disabled:** UPnP, NAT-PMP, and LSD are explicitly disabled to
+  prevent broadcasting the engine's presence on the local network.
+- **Forced peer encryption (MSE/PE RC4):** both inbound and outbound policies set
+  to `pe_forced` with `pe_rc4` as the only allowed level; plaintext connections are
+  rejected. Trade-off: reduces available peers, defeats DPI traffic analysis.
+- **Anonymous mode:** `anonymous_mode = true` suppresses the client version in the
+  BEP-10 extension handshake, uses a generic user-agent toward HTTP trackers, and
+  omits private IPs from announces.
+- **User-agent spoofing:** `user_agent` overridden to `"Mozilla/5.0"` to prevent
+  client fingerprinting at the tracker layer.
+- **BEP-10 version suppression:** `handshake_client_version` set to `""` — the
+  version field is omitted entirely from the extension handshake.
+- **Peer ID spoofing:** `peer_fingerprint` set to `"-UT3600-"` (µTorrent 3.6.0.0),
+  replacing the default `-lt{ver}-` prefix that identifies libtorrent.
+
+#### `seekserve-serve`
+
+- **`auth_utils.hpp` (new):** shared header in `include/seekserve/` exposing
+  `constant_time_compare()` and `extract_token()` as `inline` functions in the
+  `seekserve` namespace, removing duplication between `control_api_server.cpp`
+  and `http_range_server.cpp`.
+- **`control_api_server.cpp`:** removed local `constant_time_compare` and
+  `extract_token` implementations; now includes `auth_utils.hpp`.
+- **`http_range_server.cpp`:** same deduplication; auth check updated to use
+  `extract_token(req)` from the shared header.
+
+---
+
 ### Changed — Android build: configurable ABI list
 
 The Android build scripts (`build-android.sh`, `build-flutter-natives.sh`) now
