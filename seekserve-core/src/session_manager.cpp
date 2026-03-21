@@ -51,12 +51,14 @@ lt::settings_pack TorrentSessionManager::make_settings(const SessionConfig& conf
     sp.set_bool(lt::settings_pack::enable_natpmp, false);
     sp.set_bool(lt::settings_pack::enable_lsd, false);
 
-    // Force peer encryption (MSE/PE RC4): reject plaintext connections
-    // Trade-off: reduces available peers, defeats DPI traffic analysis
+    // Prefer MSE/PE RC4 encryption but accept plaintext as fallback.
+    // pe_forced excluded too many peers (old clients, seedboxes without MSE)
+    // causing very low download speeds. Privacy is already guaranteed by
+    // anonymous_mode, spoofed user_agent/peer_fingerprint, and DoH.
     sp.set_int(lt::settings_pack::out_enc_policy,
-        lt::settings_pack::pe_forced);
+        lt::settings_pack::pe_enabled);
     sp.set_int(lt::settings_pack::in_enc_policy,
-        lt::settings_pack::pe_forced);
+        lt::settings_pack::pe_enabled);
     sp.set_int(lt::settings_pack::allowed_enc_level,
         lt::settings_pack::pe_rc4);
 
