@@ -38,9 +38,12 @@ lt::settings_pack TorrentSessionManager::make_settings(const SessionConfig& conf
         | lt::alert_category::storage
         | lt::alert_category::dht);
 
-    // Bind loopback-only: prevents exposure on LAN interfaces
+    // Bind on all interfaces: required for BitTorrent peer connectivity.
+    // Loopback-only binding breaks DHT and outbound peer connections.
+    // LAN discovery protocols (UPnP/NAT-PMP/LSD) are disabled separately below.
     sp.set_str(lt::settings_pack::listen_interfaces,
-        "127.0.0.1:" + std::to_string(config.listen_port_start));
+        "0.0.0.0:" + std::to_string(config.listen_port_start) +
+        ",[::0]:" + std::to_string(config.listen_port_start));
 
     // Disable LAN discovery protocols (UPnP, NAT-PMP, LSD)
     // These broadcast the engine's presence on the local network
