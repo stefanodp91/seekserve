@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Fix — use-after-free in HttpRangeServer (arm64/Android 16 crash)
+
+#### `seekserve-serve`
+
+- **`http_range_server.hpp`:** `HttpRangeServer` now inherits from
+  `std::enable_shared_from_this<HttpRangeServer>` to allow safe capture in
+  detached threads.
+- **`http_range_server.cpp` — `do_accept()`:** the async-accept lambda and the
+  detached `handle_connection` thread now capture a `shared_ptr<HttpRangeServer>`
+  via `shared_from_this()` instead of a raw `this` pointer. This prevents a
+  use-after-free (Data Abort, ISS 0x06) on arm64 when `stop_server()` destroys
+  the `HttpRangeServer` while an active connection thread still holds references
+  to `sources_mu_`, `sources_`, `range_callback_`, and `auth_token_`.
+
+#### `seekserve-serve` (engine)
+
+- **`engine.hpp` / `engine.cpp`:** `http_server_` changed from
+  `unique_ptr<HttpRangeServer>` to `shared_ptr<HttpRangeServer>` so that
+  `shared_from_this()` is valid at construction time.
+
+**Impact:** crash on Pixel 9 Pro (Android 16, arm64-v8a) — "Connection refused"
+immediately after the stream URL was obtained — is resolved. Android 16 ships
+with MTE (Memory Tagging Extensions) enabled which reliably detects dangling
+pointer accesses that silently succeeded on older devices.
+
+---
+
 ### Security — libtorrent session hardening and shared auth utilities
 
 #### `seekserve-core`

@@ -21,7 +21,7 @@ namespace seekserve {
 namespace net = boost::asio;
 using tcp = net::ip::tcp;
 
-class HttpRangeServer {
+class HttpRangeServer : public std::enable_shared_from_this<HttpRangeServer> {
 public:
     HttpRangeServer(net::io_context& ioc, const ServerConfig& config);
     ~HttpRangeServer();

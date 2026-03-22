@@ -97,7 +97,7 @@ private:
     std::unique_ptr<TorrentSessionManager> sessions_;
     MetadataCatalog catalog_;
     std::unique_ptr<OfflineCacheManager> cache_;
-    std::unique_ptr<HttpRangeServer> http_server_;
+    std::shared_ptr<HttpRangeServer> http_server_;
     std::unique_ptr<ControlApiServer> api_server_;
     std::unique_ptr<net::steady_timer> tick_timer_;
 

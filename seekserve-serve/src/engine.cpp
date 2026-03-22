@@ -357,7 +357,7 @@ Result<std::uint16_t> SeekServeEngine::start_server(std::uint16_t port) {
     }
 
     // Create servers
-    http_server_ = std::make_unique<HttpRangeServer>(ioc_, config_.server);
+    http_server_ = std::make_shared<HttpRangeServer>(ioc_, config_.server);
     http_server_->set_auth_token(config_.auth_token);
 
     api_server_ = std::make_unique<ControlApiServer>(

@@ -220,8 +220,9 @@ void HttpRangeServer::set_range_callback(RangeCallback cb) {
 void HttpRangeServer::do_accept() {
     if (!running_.load()) return;
 
+    auto self = shared_from_this();
     acceptor_->async_accept(
-        [this](boost::system::error_code ec, tcp::socket socket) {
+        [this, self](boost::system::error_code ec, tcp::socket socket) {
             if (ec) {
                 if (ec != net::error::operation_aborted) {
                     spdlog::warn("HttpRangeServer: accept error: {}", ec.message());
@@ -251,8 +252,10 @@ void HttpRangeServer::do_accept() {
 
                 // Handle each connection in its own thread so long-running
                 // streams don't block the accept loop (important for VLC seeks).
-                std::thread([this, s = std::move(socket)]() mutable {
-                    handle_connection(std::move(s));
+                // Capture shared_ptr to keep HttpRangeServer alive for the
+                // duration of the connection even if stop() is called.
+                std::thread([self, s = std::move(socket)]() mutable {
+                    self->handle_connection(std::move(s));
                 }).detach();
             }
 
