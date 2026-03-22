@@ -6,13 +6,16 @@
 
 #### `seekserve-core`
 
-- **Loopback-only binding:** `listen_interfaces` changed from `0.0.0.0:port,[::0]:port`
-  to `127.0.0.1:port` — the engine is no longer reachable from LAN interfaces.
+- **0.0.0.0 listen interface restored:** `listen_interfaces` reverted to
+  `0.0.0.0:port,[::0]:port` — loopback-only binding broke DHT and outbound
+  peer connections. LAN exposure is mitigated by separately disabling UPnP/NAT-PMP/LSD.
 - **LAN discovery disabled:** UPnP, NAT-PMP, and LSD are explicitly disabled to
   prevent broadcasting the engine's presence on the local network.
-- **Forced peer encryption (MSE/PE RC4):** both inbound and outbound policies set
-  to `pe_forced` with `pe_rc4` as the only allowed level; plaintext connections are
-  rejected. Trade-off: reduces available peers, defeats DPI traffic analysis.
+- **Peer encryption: `pe_enabled` (not forced):** both inbound and outbound policies
+  set to `pe_enabled` with `pe_rc4` preferred; plaintext accepted as fallback.
+  `pe_forced` was rejecting ~15–25% of peers (old clients, seedboxes without MSE)
+  causing very low download speeds. Privacy guaranteed by `anonymous_mode`,
+  spoofed `user_agent`/`peer_fingerprint`, and DoH/Tor at the transport layer.
 - **Anonymous mode:** `anonymous_mode = true` suppresses the client version in the
   BEP-10 extension handshake, uses a generic user-agent toward HTTP trackers, and
   omits private IPs from announces.
