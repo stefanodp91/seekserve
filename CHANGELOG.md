@@ -22,10 +22,14 @@
   `unique_ptr<HttpRangeServer>` to `shared_ptr<HttpRangeServer>` so that
   `shared_from_this()` is valid at construction time.
 
-**Impact:** crash on Pixel 9 Pro (Android 16, arm64-v8a) — "Connection refused"
-immediately after the stream URL was obtained — is resolved. Android 16 ships
-with MTE (Memory Tagging Extensions) enabled which reliably detects dangling
-pointer accesses that silently succeeded on older devices.
+**Impact:** real use-after-free bug eliminated. Android 16 ships with MTE (Memory
+Tagging Extensions) enabled on Pixel 9 Pro which reliably detects dangling pointer
+accesses that silently succeeded on older devices. Note: the "Connection refused"
+symptom observed on Pixel 9 Pro (Android 16, arm64-v8a) during testing was
+ultimately traced to a separate Android 16 bug in `libfuse_jni.so`
+(`NodeTracker::CheckTracked()`) triggered when the `:torrent_service` process opened
+files on the FUSE-backed external storage path — fixed on the app side by switching
+`save_path` to internal storage (`filesDir`).
 
 ---
 
