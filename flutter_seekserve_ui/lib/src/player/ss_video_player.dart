@@ -34,6 +34,12 @@ class SsVideoPlayer extends StatefulWidget {
   /// Requests SeekServe to prioritize downloading a file.
   final void Function(int fileIndex)? onFileSelectRequested;
 
+  /// Called after a seek. Receives the target position.
+  final void Function(Duration position)? onSeek;
+
+  /// Called after play/pause is toggled. Receives the new playing state.
+  final void Function({required bool isPlaying})? onPlayPause;
+
   const SsVideoPlayer({
     super.key,
     required this.streamUrl,
@@ -43,6 +49,8 @@ class SsVideoPlayer extends StatefulWidget {
     this.torrentFiles = const [],
     this.streamUrlBuilder,
     this.onFileSelectRequested,
+    this.onSeek,
+    this.onPlayPause,
   });
 
   @override
@@ -151,6 +159,8 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
       torrentFiles: widget.torrentFiles,
       streamUrlBuilder: widget.streamUrlBuilder,
       onFileSelectRequested: widget.onFileSelectRequested,
+      onSeek: widget.onSeek,
+      onPlayPause: widget.onPlayPause,
     );
   }
 
@@ -228,6 +238,8 @@ class _PlayerOverlay extends StatefulWidget {
   final List<FileInfo> torrentFiles;
   final String Function(int fileIndex)? streamUrlBuilder;
   final void Function(int fileIndex)? onFileSelectRequested;
+  final void Function(Duration position)? onSeek;
+  final void Function({required bool isPlaying})? onPlayPause;
 
   const _PlayerOverlay({
     required this.player,
@@ -238,6 +250,8 @@ class _PlayerOverlay extends StatefulWidget {
     this.torrentFiles = const [],
     this.streamUrlBuilder,
     this.onFileSelectRequested,
+    this.onSeek,
+    this.onPlayPause,
   });
 
   @override
@@ -511,6 +525,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
               color: const Color(0xFFFFFFFF),
               onPressed: () {
                 widget.player.playOrPause();
+                widget.onPlayPause?.call(isPlaying: !playing);
                 _onInteraction();
               },
             );
@@ -591,8 +606,9 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
                       activeColor: theme.primary,
                       trackColor: const Color(0x40FFFFFF),
                       onChanged: (v) {
-                        widget.player
-                            .seek(Duration(milliseconds: v.toInt()));
+                        final target = Duration(milliseconds: v.toInt());
+                        widget.player.seek(target);
+                        widget.onSeek?.call(target);
                         _onInteraction();
                       },
                     ),
@@ -634,8 +650,9 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
                       color: const Color(0xFFFFFFFF),
                       onPressed: () {
                         final t = position - const Duration(seconds: 10);
-                        widget.player
-                            .seek(t < Duration.zero ? Duration.zero : t);
+                        final target = t < Duration.zero ? Duration.zero : t;
+                        widget.player.seek(target);
+                        widget.onSeek?.call(target);
                         _onInteraction();
                       },
                     ),
@@ -645,6 +662,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
                       color: const Color(0xFFFFFFFF),
                       onPressed: () {
                         widget.player.playOrPause();
+                        widget.onPlayPause?.call(isPlaying: !playing);
                         _onInteraction();
                       },
                     ),
@@ -653,7 +671,9 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
                       color: const Color(0xFFFFFFFF),
                       onPressed: () {
                         final t = position + const Duration(seconds: 10);
-                        widget.player.seek(t > duration ? duration : t);
+                        final target = t > duration ? duration : t;
+                        widget.player.seek(target);
+                        widget.onSeek?.call(target);
                         _onInteraction();
                       },
                     ),

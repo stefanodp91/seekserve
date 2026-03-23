@@ -10,7 +10,18 @@ import '../utils/format.dart';
 class SsSeekControls extends StatelessWidget {
   final Player player;
 
-  const SsSeekControls({super.key, required this.player});
+  /// Called after a seek completes. Receives the target position.
+  final void Function(Duration position)? onSeek;
+
+  /// Called after play/pause is toggled. Receives the new playing state.
+  final void Function({required bool isPlaying})? onPlayPause;
+
+  const SsSeekControls({
+    super.key,
+    required this.player,
+    this.onSeek,
+    this.onPlayPause,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -51,7 +62,9 @@ class SsSeekControls extends StatelessWidget {
                           value: posMs,
                           max: maxMs > 0 ? maxMs : 1.0,
                           onChanged: (v) {
-                            player.seek(Duration(milliseconds: v.toInt()));
+                            final target = Duration(milliseconds: v.toInt());
+                            player.seek(target);
+                            onSeek?.call(target);
                           },
                         ),
                       ),
@@ -75,15 +88,20 @@ class SsSeekControls extends StatelessWidget {
                             onPressed: () {
                               final t =
                                   position - const Duration(seconds: 10);
-                              player.seek(
-                                  t < Duration.zero ? Duration.zero : t);
+                              final target =
+                                  t < Duration.zero ? Duration.zero : t;
+                              player.seek(target);
+                              onSeek?.call(target);
                             },
                           ),
                           SsIconButton(
                             icon: playing ? pause : playArrow,
                             size: 36,
                             color: theme.onSurface,
-                            onPressed: () => player.playOrPause(),
+                            onPressed: () {
+                              player.playOrPause();
+                              onPlayPause?.call(isPlaying: !playing);
+                            },
                           ),
                           SsIconButton(
                             icon: forward10,
@@ -91,8 +109,9 @@ class SsSeekControls extends StatelessWidget {
                             onPressed: () {
                               final t =
                                   position + const Duration(seconds: 10);
-                              player
-                                  .seek(t > duration ? duration : t);
+                              final target = t > duration ? duration : t;
+                              player.seek(target);
+                              onSeek?.call(target);
                             },
                           ),
                         ],
