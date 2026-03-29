@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added — Video Player: Title and Back Button
+
+#### Flutter UI (`flutter_seekserve_ui`)
+
+- `SsVideoPlayer` / `_PlayerOverlay`:
+  - `title` parameter — optional title displayed in the top-left corner of the
+    overlay, with ellipsis overflow for long text.
+  - `onBack` parameter — optional callback that renders a back arrow button in
+    the top-left corner; triggers `_onInteraction()` to reset the auto-hide timer.
+  - Top bar layout changed: back arrow + title on the left, track selector
+    buttons on the right (with `Spacer` when no title is provided).
+
+---
+
 ### Fix — use-after-free in HttpRangeServer (arm64/Android 16 crash)
 
 #### `seekserve-serve`

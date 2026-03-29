@@ -40,6 +40,12 @@ class SsVideoPlayer extends StatefulWidget {
   /// Called after play/pause is toggled. Receives the new playing state.
   final void Function({required bool isPlaying})? onPlayPause;
 
+  /// Optional title shown in the top-left corner of the overlay.
+  final String? title;
+
+  /// Called when the user taps the back button in the overlay.
+  final VoidCallback? onBack;
+
   const SsVideoPlayer({
     super.key,
     required this.streamUrl,
@@ -51,6 +57,8 @@ class SsVideoPlayer extends StatefulWidget {
     this.onFileSelectRequested,
     this.onSeek,
     this.onPlayPause,
+    this.title,
+    this.onBack,
   });
 
   @override
@@ -161,6 +169,8 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
       onFileSelectRequested: widget.onFileSelectRequested,
       onSeek: widget.onSeek,
       onPlayPause: widget.onPlayPause,
+      title: widget.title,
+      onBack: widget.onBack,
     );
   }
 
@@ -240,6 +250,8 @@ class _PlayerOverlay extends StatefulWidget {
   final void Function(int fileIndex)? onFileSelectRequested;
   final void Function(Duration position)? onSeek;
   final void Function({required bool isPlaying})? onPlayPause;
+  final String? title;
+  final VoidCallback? onBack;
 
   const _PlayerOverlay({
     required this.player,
@@ -252,6 +264,8 @@ class _PlayerOverlay extends StatefulWidget {
     this.onFileSelectRequested,
     this.onSeek,
     this.onPlayPause,
+    this.title,
+    this.onBack,
   });
 
   @override
@@ -262,6 +276,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
   bool _visible = true;
   Timer? _hideTimer;
 
+  static const _arrowBack = IconData(0xe092, fontFamily: 'MaterialIcons');
   static const _fullscreen = IconData(0xe2cb, fontFamily: 'MaterialIcons');
   static const _fullscreenExit = IconData(0xe2cc, fontFamily: 'MaterialIcons');
   static const _playArrow = IconData(0xe4cb, fontFamily: 'MaterialIcons');
@@ -479,8 +494,31 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
               final showSubs = hasEmbeddedSubs || _hasExternalSubtitles;
 
               return Row(
-                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
+                  if (widget.onBack != null)
+                    SsIconButton(
+                      icon: _arrowBack,
+                      color: const Color(0xFFFFFFFF),
+                      onPressed: () {
+                        widget.onBack?.call();
+                        _onInteraction();
+                      },
+                    ),
+                  if (widget.title != null)
+                    Expanded(
+                      child: Text(
+                        widget.title!,
+                        style: const TextStyle(
+                          color: Color(0xFFFFFFFF),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    )
+                  else
+                    const Spacer(),
                   if (showAudio)
                     SsIconButton(
                       icon: _audiotrack,
