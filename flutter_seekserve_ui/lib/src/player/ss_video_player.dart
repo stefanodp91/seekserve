@@ -91,6 +91,12 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
       _error = '';
     });
 
+    // Local files: skip HTTP probe — media_kit handles file:// natively.
+    if (widget.streamUrl.startsWith('file://')) {
+      if (mounted) _startPlayer(widget.streamUrl);
+      return;
+    }
+
     try {
       final uri = Uri.parse(widget.streamUrl);
       final client = HttpClient()

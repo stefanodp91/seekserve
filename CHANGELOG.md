@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added — Video Player: Local File Playback
+
+#### Flutter UI (`flutter_seekserve_ui`)
+
+- `SsVideoPlayer`: skip HTTP probe for `file://` URLs — `media_kit` handles
+  local files natively, so the stream-availability check is unnecessary and
+  would fail on non-HTTP schemes.
+
+---
+
 ### Added — Video Player: Title and Back Button
 
 #### Flutter UI (`flutter_seekserve_ui`)
