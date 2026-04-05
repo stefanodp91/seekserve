@@ -342,6 +342,27 @@ class SeekServeBindings {
   late final _ss_stop_server = _ss_stop_serverPtr
       .asFunction<int Function(ffi.Pointer<SeekServeEngine>)>();
 
+  int ss_set_proxy(
+    ffi.Pointer<SeekServeEngine> engine,
+    ffi.Pointer<ffi.Char> proxy_json,
+  ) {
+    return _ss_set_proxy(engine, proxy_json);
+  }
+
+  late final _ss_set_proxyPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ss_error_t Function(
+            ffi.Pointer<SeekServeEngine>,
+            ffi.Pointer<ffi.Char>,
+          )
+        >
+      >('ss_set_proxy');
+  late final _ss_set_proxy = _ss_set_proxyPtr
+      .asFunction<
+        int Function(ffi.Pointer<SeekServeEngine>, ffi.Pointer<ffi.Char>)
+      >();
+
   void ss_free_string(ffi.Pointer<ffi.Char> str) {
     return _ss_free_string(str);
   }

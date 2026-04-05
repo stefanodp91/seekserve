@@ -68,6 +68,9 @@ public:
     Result<std::uint16_t> start_server(std::uint16_t port = 0);
     void stop_server();
 
+    // Proxy configuration (runtime update via apply_settings)
+    void set_proxy(const ProxyConfig& proxy);
+
     // Event callbacks (fired from alert thread or timer thread)
     using EventCallback = std::function<void(const std::string& event_json)>;
     void set_event_callback(EventCallback cb);

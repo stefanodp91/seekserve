@@ -423,6 +423,11 @@ void SeekServeEngine::stop_server() {
     spdlog::info("Engine: servers stopped");
 }
 
+void SeekServeEngine::set_proxy(const ProxyConfig& proxy) {
+    sessions_->set_proxy(proxy);
+    config_.session.proxy = proxy;
+}
+
 void SeekServeEngine::set_event_callback(EventCallback cb) {
     std::lock_guard lock(event_mu_);
     event_cb_ = std::move(cb);

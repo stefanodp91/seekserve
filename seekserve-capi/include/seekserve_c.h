@@ -86,6 +86,9 @@ __attribute__((visibility("default")))
 ss_error_t ss_stop_server(SeekServeEngine* engine);
 
 __attribute__((visibility("default")))
+ss_error_t ss_set_proxy(SeekServeEngine* engine, const char* proxy_json);
+
+__attribute__((visibility("default")))
 void ss_free_string(char* str);
 
 #ifdef __cplusplus

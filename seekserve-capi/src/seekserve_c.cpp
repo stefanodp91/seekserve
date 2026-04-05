@@ -78,6 +78,12 @@ static seekserve::SeekServeEngine::Config parse_config(const char* config_json) 
                 config.session.extra_trackers.push_back(t.get<std::string>());
             }
         }
+        if (j.contains("proxy_enabled"))
+            config.session.proxy.enabled = j["proxy_enabled"].get<bool>();
+        if (j.contains("proxy_hostname"))
+            config.session.proxy.hostname = j["proxy_hostname"].get<std::string>();
+        if (j.contains("proxy_port"))
+            config.session.proxy.port = j["proxy_port"].get<int>();
     } catch (const std::exception& e) {
         spdlog::warn("C API: failed to parse config JSON: {}", e.what());
     }
@@ -241,6 +247,29 @@ ss_error_t ss_stop_server(SeekServeEngine* engine) {
     if (!engine) return SS_ERR_INVALID_ARG;
 
     engine->stop_server();
+    return SS_OK;
+}
+
+ss_error_t ss_set_proxy(SeekServeEngine* engine, const char* proxy_json) {
+    if (!engine) return SS_ERR_INVALID_ARG;
+
+    seekserve::ProxyConfig proxy;
+    if (proxy_json && proxy_json[0] != '\0') {
+        try {
+            auto j = json::parse(proxy_json);
+            if (j.contains("enabled"))
+                proxy.enabled = j["enabled"].get<bool>();
+            if (j.contains("hostname"))
+                proxy.hostname = j["hostname"].get<std::string>();
+            if (j.contains("port"))
+                proxy.port = j["port"].get<int>();
+        } catch (const std::exception& e) {
+            spdlog::warn("C API: failed to parse proxy JSON: {}", e.what());
+            return SS_ERR_INVALID_ARG;
+        }
+    }
+
+    engine->set_proxy(proxy);
     return SS_OK;
 }
 

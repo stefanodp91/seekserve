@@ -37,11 +37,14 @@ public:
     bool has_torrent(const TorrentId& id) const;
     std::vector<TorrentId> list_torrents() const;
 
+    void set_proxy(const ProxyConfig& proxy);
+
     lt::session& session() { return *session_; }
     AlertDispatcher& alert_dispatcher() { return dispatcher_; }
 
 private:
     static lt::settings_pack make_settings(const SessionConfig& config);
+    static void apply_proxy_settings(lt::settings_pack& sp, const ProxyConfig& proxy);
     TorrentId torrent_id_from_handle(const lt::torrent_handle& h) const;
 
     SessionConfig config_;

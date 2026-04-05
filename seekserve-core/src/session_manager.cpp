@@ -95,7 +95,34 @@ lt::settings_pack TorrentSessionManager::make_settings(const SessionConfig& conf
     }
 #endif
 
+    apply_proxy_settings(sp, config.proxy);
+
     return sp;
+}
+
+void TorrentSessionManager::apply_proxy_settings(lt::settings_pack& sp, const ProxyConfig& proxy) {
+    if (proxy.enabled) {
+        sp.set_int(lt::settings_pack::proxy_type, lt::settings_pack::socks5);
+        sp.set_str(lt::settings_pack::proxy_hostname, proxy.hostname);
+        sp.set_int(lt::settings_pack::proxy_port, proxy.port);
+        sp.set_bool(lt::settings_pack::proxy_hostnames, true);
+        sp.set_bool(lt::settings_pack::proxy_peer_connections, true);
+        sp.set_bool(lt::settings_pack::proxy_tracker_connections, true);
+        // DHT uses UDP which SOCKS5 cannot proxy — disable to prevent IP leaks
+        sp.set_bool(lt::settings_pack::enable_dht, false);
+        spdlog::info("SOCKS5 proxy enabled: {}:{}", proxy.hostname, proxy.port);
+    } else {
+        sp.set_int(lt::settings_pack::proxy_type, lt::settings_pack::none);
+        sp.set_bool(lt::settings_pack::enable_dht, true);
+        spdlog::info("Proxy disabled, DHT re-enabled");
+    }
+}
+
+void TorrentSessionManager::set_proxy(const ProxyConfig& proxy) {
+    config_.proxy = proxy;
+    lt::settings_pack sp;
+    apply_proxy_settings(sp, proxy);
+    session_->apply_settings(std::move(sp));
 }
 
 Result<TorrentId> TorrentSessionManager::add_torrent(const AddTorrentParams& params) {

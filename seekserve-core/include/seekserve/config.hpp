@@ -7,6 +7,12 @@
 
 namespace seekserve {
 
+struct ProxyConfig {
+    bool enabled = false;
+    std::string hostname = "127.0.0.1";
+    int port = 9050;
+};
+
 struct SessionConfig {
     std::string save_path = "./downloads";
     bool enable_webtorrent = true;
@@ -14,6 +20,7 @@ struct SessionConfig {
     int listen_port_start = 6881;
     int listen_port_end = 6891;
     int alert_queue_size = 5000;
+    ProxyConfig proxy;
 };
 
 struct SchedulerConfig {

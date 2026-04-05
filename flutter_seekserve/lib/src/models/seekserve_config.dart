@@ -11,6 +11,9 @@ class SeekServeConfig {
   final String? logLevel;
   final bool? enableWebtorrent;
   final List<String>? extraTrackers;
+  final bool? proxyEnabled;
+  final String? proxyHostname;
+  final int? proxyPort;
 
   const SeekServeConfig({
     this.savePath,
@@ -22,6 +25,9 @@ class SeekServeConfig {
     this.logLevel,
     this.enableWebtorrent,
     this.extraTrackers,
+    this.proxyEnabled,
+    this.proxyHostname,
+    this.proxyPort,
   });
 
   /// Serializes to JSON string for `ss_engine_create()`.
@@ -36,6 +42,9 @@ class SeekServeConfig {
     if (logLevel != null) map['log_level'] = logLevel;
     if (enableWebtorrent != null) map['enable_webtorrent'] = enableWebtorrent;
     if (extraTrackers != null) map['extra_trackers'] = extraTrackers;
+    if (proxyEnabled != null) map['proxy_enabled'] = proxyEnabled;
+    if (proxyHostname != null) map['proxy_hostname'] = proxyHostname;
+    if (proxyPort != null) map['proxy_port'] = proxyPort;
     return jsonEncode(map);
   }
 }

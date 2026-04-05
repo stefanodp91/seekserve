@@ -245,6 +245,35 @@ class SeekServeClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Proxy configuration
+  // ---------------------------------------------------------------------------
+
+  /// Updates the SOCKS5 proxy configuration at runtime.
+  ///
+  /// When [enabled] is true, all peer connections and tracker announces
+  /// are routed through the SOCKS5 proxy (e.g. Tor at 127.0.0.1:9050).
+  /// DHT is automatically disabled since SOCKS5 cannot proxy UDP.
+  void setProxy({
+    required bool enabled,
+    String hostname = '127.0.0.1',
+    int port = 9050,
+  }) {
+    _ensureNotDisposed();
+    final proxyJson = jsonEncode({
+      'enabled': enabled,
+      'hostname': hostname,
+      'port': port,
+    });
+    final ptr = proxyJson.toNativeUtf8().cast<Char>();
+    try {
+      final err = _bindings.ss_set_proxy(_engine, ptr);
+      checkError(err);
+    } finally {
+      calloc.free(ptr);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 
