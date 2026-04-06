@@ -55,6 +55,7 @@ public:
     // Pause / resume
     Result<void> pause_torrent(const TorrentId& id);
     Result<void> resume_torrent(const TorrentId& id);
+    Result<void> force_reannounce(const TorrentId& id);
 
     // File management
     Result<std::vector<FileInfo>> list_files(const TorrentId& id);

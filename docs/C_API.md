@@ -44,6 +44,15 @@ ss_error_t ss_add_torrent(SeekServeEngine* engine, const char* uri,
 ss_error_t ss_remove_torrent(SeekServeEngine* engine, const char* torrent_id,
                               bool delete_files);
 
+// Pause / Resume torrent download and upload
+ss_error_t ss_pause_torrent(SeekServeEngine* engine, const char* torrent_id);
+ss_error_t ss_resume_torrent(SeekServeEngine* engine, const char* torrent_id);
+
+// Force immediate reannounce to all trackers, bypassing libtorrent's exponential
+// backoff. Useful when SOCKS5/Tor is active (DHT disabled) and the initial tracker
+// announce fails because Tor circuits are not yet cached.
+ss_error_t ss_force_reannounce(SeekServeEngine* engine, const char* torrent_id);
+
 // List active torrent IDs (returns JSON array: ["id1","id2",...])
 ss_error_t ss_list_torrents(SeekServeEngine* engine, char** out_json);
 ```

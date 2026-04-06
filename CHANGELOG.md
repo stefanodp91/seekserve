@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Added — Torrent Force Reannounce
+
+#### `seekserve-serve`
+
+- **`engine.hpp` / `engine.cpp`**: nuovo metodo `force_reannounce(const TorrentId& id)` che chiama
+  `lt::torrent_handle::force_reannounce()` bypassando il backoff esponenziale di libtorrent verso i tracker.
+  Utile quando SOCKS5/Tor è attivo e DHT è disabilitato: alla prima connessione i circuiti Tor non sono
+  ancora cached; un reannounce periodico garantisce che il tracker announce avvenga non appena i circuiti
+  sono disponibili.
+
+#### `seekserve-capi`
+
+- **`seekserve_c.h` / `seekserve_c.cpp`**: nuova funzione C API `ss_force_reannounce(engine, torrent_id)`.
+
+#### Flutter FFI (`flutter_seekserve`)
+
+- **`seekserve_client.dart`**: metodo `forceReannounce(String torrentId)`.
+- **`bindings_generated.dart`**: binding FFI manuale per `ss_force_reannounce`.
+
+---
+
 ### Added — Video Player: Local File Playback
 
 #### Flutter UI (`flutter_seekserve_ui`)

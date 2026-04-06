@@ -152,6 +152,18 @@ class SeekServeClient {
     }
   }
 
+  /// Force a torrent to reannounce to all its trackers immediately.
+  void forceReannounce(String torrentId) {
+    _ensureNotDisposed();
+    final idPtr = torrentId.toNativeUtf8().cast<Char>();
+    try {
+      final err = _bindings.ss_force_reannounce(_engine, idPtr);
+      checkError(err);
+    } finally {
+      calloc.free(idPtr);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // File operations
   // ---------------------------------------------------------------------------

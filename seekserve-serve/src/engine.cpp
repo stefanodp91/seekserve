@@ -193,6 +193,16 @@ Result<void> SeekServeEngine::resume_torrent(const TorrentId& id) {
     return {};
 }
 
+Result<void> SeekServeEngine::force_reannounce(const TorrentId& id) {
+    auto handle = sessions_->get_handle(id);
+    if (!handle.is_valid()) {
+        return make_error_code(errc::torrent_not_found);
+    }
+    handle.force_reannounce();
+    spdlog::info("Engine: force reannounce for torrent {}", id);
+    return {};
+}
+
 std::vector<TorrentId> SeekServeEngine::list_torrents() const {
     // Return from DB (ordered by added_at) rather than the session's
     // unordered_map so the UI shows torrents in insertion order.
