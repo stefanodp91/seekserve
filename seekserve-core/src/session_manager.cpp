@@ -110,10 +110,17 @@ void TorrentSessionManager::apply_proxy_settings(lt::settings_pack& sp, const Pr
         sp.set_bool(lt::settings_pack::proxy_tracker_connections, true);
         // DHT uses UDP which SOCKS5 cannot proxy — disable to prevent IP leaks
         sp.set_bool(lt::settings_pack::enable_dht, false);
+        // uTP runs over UDP, which a Tor SOCKS5 proxy cannot carry: libtorrent
+        // would drop the packets anyway, but it would still accept incoming
+        // uTP on its UDP socket. Peer connections go over TCP only.
+        sp.set_bool(lt::settings_pack::enable_outgoing_utp, false);
+        sp.set_bool(lt::settings_pack::enable_incoming_utp, false);
         spdlog::info("SOCKS5 proxy enabled: {}:{}", proxy.hostname, proxy.port);
     } else {
         sp.set_int(lt::settings_pack::proxy_type, lt::settings_pack::none);
         sp.set_bool(lt::settings_pack::enable_dht, true);
+        sp.set_bool(lt::settings_pack::enable_outgoing_utp, true);
+        sp.set_bool(lt::settings_pack::enable_incoming_utp, true);
         spdlog::info("Proxy disabled, DHT re-enabled");
     }
 }
