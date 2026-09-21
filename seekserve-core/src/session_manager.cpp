@@ -88,7 +88,7 @@ lt::settings_pack TorrentSessionManager::make_settings(const SessionConfig& conf
 
     sp.set_int(lt::settings_pack::alert_queue_size, config.alert_queue_size);
 
-#ifdef TORRENT_USE_RTC
+#if TORRENT_USE_RTC
     if (config.enable_webtorrent) {
         sp.set_str(lt::settings_pack::webtorrent_stun_server, "stun.l.google.com:19302");
         spdlog::info("WebTorrent enabled (STUN: stun.l.google.com:19302)");

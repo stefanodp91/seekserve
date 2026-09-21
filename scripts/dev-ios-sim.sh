@@ -101,7 +101,7 @@ build_native() {
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
             -DCMAKE_OSX_SYSROOT=iphonesimulator \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DSEEKSERVE_ENABLE_WEBTORRENT=ON \
+            -DSEEKSERVE_ENABLE_WEBTORRENT="${SEEKSERVE_ENABLE_WEBTORRENT:-OFF}" \
             -DSEEKSERVE_BUILD_TESTS=OFF \
             -DSEEKSERVE_BUILD_DEMO=OFF \
             -DSEEKSERVE_BUILD_CAPI=ON \
@@ -186,7 +186,7 @@ package_xcframework() {
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
             -DCMAKE_OSX_SYSROOT=iphoneos \
             -DCMAKE_BUILD_TYPE=Release \
-            -DSEEKSERVE_ENABLE_WEBTORRENT=ON \
+            -DSEEKSERVE_ENABLE_WEBTORRENT="${SEEKSERVE_ENABLE_WEBTORRENT:-OFF}" \
             -DSEEKSERVE_BUILD_TESTS=OFF \
             -DSEEKSERVE_BUILD_DEMO=OFF \
             -DSEEKSERVE_BUILD_CAPI=ON \

@@ -6,6 +6,9 @@
 # Configure target ABIs via SEEKSERVE_ANDROID_ABIS (space-separated).
 # Default: arm64-v8a armeabi-v7a
 # Example: SEEKSERVE_ANDROID_ABIS="arm64-v8a armeabi-v7a x86_64" ./scripts/build-android.sh
+#
+# WebTorrent (WebRTC) is off by default: its connections bypass the SOCKS5
+# proxy. Set SEEKSERVE_ENABLE_WEBTORRENT=ON to build it in.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,7 +78,7 @@ build_abi() {
         -DANDROID_ABI="$ABI" \
         -DANDROID_PLATFORM=android-28 \
         -DCMAKE_BUILD_TYPE=Release \
-        -DSEEKSERVE_ENABLE_WEBTORRENT=ON \
+        -DSEEKSERVE_ENABLE_WEBTORRENT="${SEEKSERVE_ENABLE_WEBTORRENT:-OFF}" \
         -DSEEKSERVE_BUILD_TESTS=OFF \
         -DSEEKSERVE_BUILD_DEMO=OFF \
         -DSEEKSERVE_BUILD_CAPI=ON \
