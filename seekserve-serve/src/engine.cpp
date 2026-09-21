@@ -176,6 +176,10 @@ Result<void> SeekServeEngine::pause_torrent(const TorrentId& id) {
     if (!handle.is_valid()) {
         return make_error_code(errc::torrent_not_found);
     }
+    // An auto-managed torrent can be resumed at any time by libtorrent's
+    // queue (see torrent_handle::pause()): take it out of auto-management so
+    // a pause really stops downloading and seeding.
+    handle.unset_flags(lt::torrent_flags::auto_managed);
     handle.pause();
     spdlog::info("Engine: paused torrent {}", id);
     fire_event("torrent_paused", "{\"torrent_id\":\"" + id + "\"}");
@@ -187,6 +191,7 @@ Result<void> SeekServeEngine::resume_torrent(const TorrentId& id) {
     if (!handle.is_valid()) {
         return make_error_code(errc::torrent_not_found);
     }
+    handle.set_flags(lt::torrent_flags::auto_managed);
     handle.resume();
     spdlog::info("Engine: resumed torrent {}", id);
     fire_event("torrent_resumed", "{\"torrent_id\":\"" + id + "\"}");
