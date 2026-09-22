@@ -9,8 +9,8 @@ register, roadmap) lives in the app repository, `obsidian-eclipse`, in
 | What | Where |
 |---|---|
 | This repo | `/Users/stefano/Workspace/seekserve`, remote `https://github.com/stefanodp91/seekserve` |
-| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published. `feature/native-jackett-engine` and `main` are untouched |
-| App | `obsidian-eclipse` pins `38cf24a` for `flutter_seekserve` and `flutter_seekserve_ui`, and ships an Android `libseekserve.so` built from it (committed in `android/app/src/main/jniLibs/<abi>/`, sentinel `.seekserve_build_commit`). App commit `85a70255` needs `782f2ee`: once it is pushed, the app moves its refs and commits the `.so` built from it |
+| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (last push 2026-09-22, with `782f2ee` and this note). `feature/native-jackett-engine` and `main` are untouched |
+| App | `obsidian-eclipse` pins `782f2ee` for `flutter_seekserve` and `flutter_seekserve_ui` (since 2026-09-22, for its BUG-18 download queue; before that `38cf24a`), and ships an Android `libseekserve.so` built from it (committed in `android/app/src/main/jniLibs/<abi>/`, sentinel `.seekserve_build_commit`) |
 
 Rule from the project owner (DEC-12 in the app wiki): every repository the
 work touches uses a branch named like the app's work branch; nothing is
@@ -23,7 +23,7 @@ merged into `main` unless asked.
 | `88fd8d6` | `pause_torrent` unsets `auto_managed` before `pause()`, `resume_torrent` sets it back: libtorrent's queue can no longer resume a paused torrent (app BUG-22) |
 | `d8776ee` | WebTorrent off by default in `build-android.sh`, `build-ios.sh`, `dev-ios-sim.sh` (`SEEKSERVE_ENABLE_WEBTORRENT`, default `OFF`); `#if TORRENT_USE_RTC` in `session_manager.cpp`, because libtorrent defines the macro as 0 when WebTorrent is off (app SEC-18) |
 | `38cf24a` | uTP off while the SOCKS5 proxy is on (Tor cannot carry UDP) |
-| `782f2ee` | One limit on queued downloads: the C API reads `max_concurrent_torrents` into `SessionConfig::max_active_downloads`, set as libtorrent's `active_downloads` when > 0; `add_torrent` clears `auto_managed` and `paused`, so metadata and streaming start at once outside the queue, and `resume_torrent` (which sets `auto_managed`) is how a download joins the queue (app BUG-18, DEC-15). Not yet pushed on 2026-09-22 |
+| `782f2ee` | One limit on queued downloads: the C API reads `max_concurrent_torrents` into `SessionConfig::max_active_downloads`, set as libtorrent's `active_downloads` when > 0; `add_torrent` clears `auto_managed` and `paused`, so metadata and streaming start at once outside the queue, and `resume_torrent` (which sets `auto_managed`) is how a download joins the queue (app BUG-18, DEC-15) |
 
 ## Building the Android library
 
@@ -64,6 +64,10 @@ ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./sc
   alignment on arm64 (`llvm-readelf -l`), no WebRTC strings.
 
 ## Open items
+
+- The download limit is not strict by design: with libtorrent's default
+  `dont_count_slow_torrents`, a download below 2 KB/s for 60 s leaves its slot,
+  so a dead torrent does not block the queue.
 
 - The iOS framework in `flutter_seekserve` was not rebuilt: it still has
   WebTorrent.
