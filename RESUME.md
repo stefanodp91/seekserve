@@ -9,8 +9,8 @@ register, roadmap) lives in the app repository, `obsidian-eclipse`, in
 | What | Where |
 |---|---|
 | This repo | `/Users/stefano/Workspace/seekserve`, remote `https://github.com/stefanodp91/seekserve` |
-| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (last push 2026-09-22, with `782f2ee` and this note). `feature/native-jackett-engine` and `main` are untouched |
-| App | `obsidian-eclipse` pins `782f2ee` for `flutter_seekserve` and `flutter_seekserve_ui` (since 2026-09-22, for its BUG-18 download queue; before that `38cf24a`), and ships an Android `libseekserve.so` built from it (committed in `android/app/src/main/jniLibs/<abi>/`, sentinel `.seekserve_build_commit`) The app's worktree already holds a `.so` built from `3bc9aa0`, uncommitted: once `dba03c0` and `3bc9aa0` are pushed, the app moves its refs to `3bc9aa0` and commits it (same steps as for `782f2ee`) |
+| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (last push 2026-09-22, with `dba03c0`, `3bc9aa0` and this note). `feature/native-jackett-engine` and `main` are untouched |
+| App | `obsidian-eclipse` pins `3bc9aa0` for `flutter_seekserve` and `flutter_seekserve_ui` (since 2026-09-22; before that `782f2ee` and `38cf24a`), and ships an Android `libseekserve.so` built from it (committed in `android/app/src/main/jniLibs/<abi>/`, sentinel `.seekserve_build_commit`) |
 
 Rule from the project owner (DEC-12 in the app wiki): every repository the
 work touches uses a branch named like the app's work branch; nothing is
@@ -24,8 +24,8 @@ merged into `main` unless asked.
 | `d8776ee` | WebTorrent off by default in `build-android.sh`, `build-ios.sh`, `dev-ios-sim.sh` (`SEEKSERVE_ENABLE_WEBTORRENT`, default `OFF`); `#if TORRENT_USE_RTC` in `session_manager.cpp`, because libtorrent defines the macro as 0 when WebTorrent is off (app SEC-18) |
 | `38cf24a` | uTP off while the SOCKS5 proxy is on (Tor cannot carry UDP) |
 | `782f2ee` | One limit on queued downloads: the C API reads `max_concurrent_torrents` into `SessionConfig::max_active_downloads`, set as libtorrent's `active_downloads` when > 0; `add_torrent` clears `auto_managed` and `paused`, so metadata and streaming start at once outside the queue, and `resume_torrent` (which sets `auto_managed`) is how a download joins the queue (app BUG-18, DEC-15) |
-| `dba03c0` | `file_progress` added to the alert mask: `file_completed_alert` belongs to that category, so the `file_completed` event never fired and the offline cache never marked a file ready (app BUG-20). **Not yet pushed** on 2026-09-22 |
-| `3bc9aa0` | `select_file` keeps subtitle files (`.srt`, `.vtt`, `.ass`, `.ssa`) at default priority, so they download with the selected video and the player reads them from disk; selecting a subtitle stopped the video (app BUG-24). **Not yet pushed** on 2026-09-22 |
+| `dba03c0` | `file_progress` added to the alert mask: `file_completed_alert` belongs to that category, so the `file_completed` event never fired and the offline cache never marked a file ready (app BUG-20) |
+| `3bc9aa0` | `select_file` keeps subtitle files (`.srt`, `.vtt`, `.ass`, `.ssa`) at default priority, so they download with the selected video and the player reads them from disk; selecting a subtitle stopped the video (app BUG-24) |
 
 ## Building the Android library
 
