@@ -9,7 +9,7 @@ register, roadmap) lives in the app repository, `obsidian-eclipse`, in
 | What | Where |
 |---|---|
 | This repo | `/Users/stefano/Workspace/seekserve`, remote `https://github.com/stefanodp91/seekserve` |
-| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (pushes on 2026-09-22: `dba03c0`, `3bc9aa0` and these notes; the last one updates them for app BUG-19 and BUG-55). `feature/native-jackett-engine` and `main` are untouched |
+| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (pushes on 2026-09-22: `dba03c0`, `3bc9aa0` and these notes, last updated for app BUG-19 and BUG-55). The notes of 2026-09-23 (app BUG-43, the app's reconciliation) are committed, not pushed: publish them with the app's next push, when the owner asks. `feature/native-jackett-engine` and `main` are untouched |
 | App | `obsidian-eclipse` pins `3bc9aa0` for `flutter_seekserve` and `flutter_seekserve_ui` (since 2026-09-22; before that `782f2ee` and `38cf24a`), and ships an Android `libseekserve.so` built from it (committed in `android/app/src/main/jniLibs/arm64-v8a/`, sentinel `.seekserve_build_commit`). Since app commit `9cd94f4d` the APK holds arm64-v8a only, the only ABI with Tor (app BUG-19); the armeabi-v7a library still in the app repository is unused (removal in the app's WORK-10) |
 
 Rule from the project owner (DEC-12 in the app wiki): every repository the
@@ -91,6 +91,22 @@ ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./sc
   `c2f7e952` (BUG-42).
 - `build-android.sh` used alone still picks the NDK implicitly; the app's
   `update_seekserve.dart` pins it.
-- The app's Android service is bind-only and dies with its last client, so
-  downloads stop when the app's Flutter engine detaches (app BUG-43, WORK-18);
-  nothing to change here for that.
+- The app's Android service used to be bind-only and died with its last
+  client, so downloads stopped when the app was closed (app BUG-43). Since app
+  `4e0c86e7` (the owner's DEC-18) it starts itself and outlives the app: a
+  download goes on with the app closed, with its notification. If the app's
+  main process dies, Tor dies with it, and the service pauses every torrent
+  and stops, because torrents run only through Tor (app DEC-03). Since app
+  `df2d52d6` it also keeps that process awake while torrents are active (app
+  BUG-58) and handles Android 15's time limit for data-sync services (app
+  BUG-09). Nothing changed here for any of it.
+- At startup this engine restores every torrent in `seekserve_cache.db` as
+  running. The app then reads that table (`torrent_id`, `uri`), matches each
+  row to its Library by every hash either side knows, and brings each torrent
+  back to the state the user left: completed ones leave the engine (no
+  seeding), paused ones are paused again, downloading ones resume only with
+  Tor ready, unknown ones are removed (files deleted only when certainly
+  nobody's). Since app `bea21c7b` the decision is a tested function,
+  `reconcileAction`. The engine still starts those torrents before the app has
+  reconciled them, without connections until Tor listens (app SEC-19); a way
+  to restore torrents paused would remove that window.
