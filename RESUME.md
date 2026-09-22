@@ -110,3 +110,19 @@ ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./sc
   `reconcileAction`. The engine still starts those torrents before the app has
   reconciled them, without connections until Tor listens (app SEC-19); a way
   to restore torrents paused would remove that window.
+- Since app `e615ad1a` (app SEC-14, 2026-09-23) Tor picks its SOCKS port at
+  runtime instead of the fixed 9050, which another app could take first. The
+  app's Android service creates this engine with `proxy_enabled=true` and
+  `proxy_port=0` (nothing can listen there, so every connection fails), then
+  calls `ss_set_proxy` whenever Tor is ready, with Tor's current port, and
+  with 0 while Tor is paused. The app now depends on two things here:
+  - `ss_set_proxy` applying `proxy_type`, host and port at runtime through
+    `set_proxy` → `apply_settings` (verified on the emulator: the engine
+    connects to the new port, also after it changes);
+  - libtorrent failing closed with proxy port 0: no special case for port 0,
+    TCP to `127.0.0.1:0` is refused, UDP without a SOCKS5 association is
+    dropped (`udp_socket.cpp`).
+  `ss_set_proxy` treats a JSON without `"enabled"` as a disabled proxy
+  (`ProxyConfig.enabled` defaults to `false`); since app `93e6a73b` the
+  service always sends a JSON it builds itself, with `"enabled": true`. Keep
+  these semantics if the C API changes. Nothing changed in this repository.
