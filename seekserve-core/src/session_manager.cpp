@@ -36,7 +36,9 @@ lt::settings_pack TorrentSessionManager::make_settings(const SessionConfig& conf
         | lt::alert_category::piece_progress
         | lt::alert_category::error
         | lt::alert_category::storage
-        | lt::alert_category::dht);
+        | lt::alert_category::dht
+        // file_completed_alert (file_completed events, offline cache)
+        | lt::alert_category::file_progress);
 
     // Bind on all interfaces: required for BitTorrent peer connectivity.
     // Loopback-only binding breaks DHT and outbound peer connections.
