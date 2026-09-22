@@ -88,6 +88,10 @@ lt::settings_pack TorrentSessionManager::make_settings(const SessionConfig& conf
 
     sp.set_int(lt::settings_pack::alert_queue_size, config.alert_queue_size);
 
+    if (config.max_active_downloads > 0) {
+        sp.set_int(lt::settings_pack::active_downloads, config.max_active_downloads);
+    }
+
 #if TORRENT_USE_RTC
     if (config.enable_webtorrent) {
         sp.set_str(lt::settings_pack::webtorrent_stun_server, "stun.l.google.com:19302");
@@ -152,6 +156,12 @@ Result<TorrentId> TorrentSessionManager::add_torrent(const AddTorrentParams& par
     }
 
     atp.save_path = params.save_path.empty() ? config_.save_path : params.save_path;
+
+    // Start at once, outside the download queue: fetching metadata and
+    // streaming must not wait for a queue slot. resume_torrent makes the
+    // torrent auto-managed, which is how a background download joins the
+    // queue (max_active_downloads).
+    atp.flags &= ~(lt::torrent_flags::auto_managed | lt::torrent_flags::paused);
 
     for (const auto& tracker : config_.extra_trackers) {
         atp.trackers.push_back(tracker);

@@ -20,6 +20,10 @@ struct SessionConfig {
     int listen_port_start = 6881;
     int listen_port_end = 6891;
     int alert_queue_size = 5000;
+    // How many queued (auto-managed) torrents download at once; <= 0 keeps
+    // libtorrent's default (3). Torrents start outside the queue when added
+    // and join it on resume_torrent.
+    int max_active_downloads = 0;
     ProxyConfig proxy;
 };
 

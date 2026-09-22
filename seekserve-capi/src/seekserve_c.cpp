@@ -78,6 +78,8 @@ static seekserve::SeekServeEngine::Config parse_config(const char* config_json) 
                 config.session.extra_trackers.push_back(t.get<std::string>());
             }
         }
+        if (j.contains("max_concurrent_torrents"))
+            config.session.max_active_downloads = j["max_concurrent_torrents"].get<int>();
         if (j.contains("proxy_enabled"))
             config.session.proxy.enabled = j["proxy_enabled"].get<bool>();
         if (j.contains("proxy_hostname"))
