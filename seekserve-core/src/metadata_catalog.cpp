@@ -4,7 +4,24 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
+#include <cctype>
+
 namespace seekserve {
+
+namespace {
+
+// Subtitle files the player can load next to the video (.srt, .vtt, .ass, .ssa).
+bool is_subtitle(const std::string& path) {
+    auto dot = path.find_last_of('.');
+    if (dot == std::string::npos) return false;
+    std::string ext = path.substr(dot + 1);
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return ext == "srt" || ext == "vtt" || ext == "ass" || ext == "ssa";
+}
+
+} // namespace
 
 void MetadataCatalog::on_metadata_received(const TorrentId& id,
                                            std::shared_ptr<const lt::torrent_info> ti) {
@@ -85,6 +102,12 @@ Result<void> MetadataCatalog::select_file(const TorrentId& id, FileIndex fi,
     const int num_files = static_cast<int>(entry.files.size());
 
     std::vector<lt::download_priority_t> priorities(num_files, lt::dont_download);
+    // Subtitles come along with the selected file: they are a few KB, and the
+    // player loads them from disk instead of selecting them, which would stop
+    // the video from downloading.
+    for (int i = 0; i < num_files; ++i) {
+        if (is_subtitle(entry.files[i].path)) priorities[i] = lt::default_priority;
+    }
     priorities[fi] = lt::default_priority;
     handle.prioritize_files(priorities);
 
