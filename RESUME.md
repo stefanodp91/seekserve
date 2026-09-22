@@ -9,8 +9,8 @@ register, roadmap) lives in the app repository, `obsidian-eclipse`, in
 | What | Where |
 |---|---|
 | This repo | `/Users/stefano/Workspace/seekserve`, remote `https://github.com/stefanodp91/seekserve` |
-| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (last push 2026-09-22, with `dba03c0`, `3bc9aa0` and this note). `feature/native-jackett-engine` and `main` are untouched |
-| App | `obsidian-eclipse` pins `3bc9aa0` for `flutter_seekserve` and `flutter_seekserve_ui` (since 2026-09-22; before that `782f2ee` and `38cf24a`), and ships an Android `libseekserve.so` built from it (committed in `android/app/src/main/jniLibs/<abi>/`, sentinel `.seekserve_build_commit`) |
+| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (pushes on 2026-09-22: `dba03c0`, `3bc9aa0` and these notes; the last one updates them for app BUG-19 and BUG-55). `feature/native-jackett-engine` and `main` are untouched |
+| App | `obsidian-eclipse` pins `3bc9aa0` for `flutter_seekserve` and `flutter_seekserve_ui` (since 2026-09-22; before that `782f2ee` and `38cf24a`), and ships an Android `libseekserve.so` built from it (committed in `android/app/src/main/jniLibs/arm64-v8a/`, sentinel `.seekserve_build_commit`). Since app commit `9cd94f4d` the APK holds arm64-v8a only, the only ABI with Tor (app BUG-19); the armeabi-v7a library still in the app repository is unused (removal in the app's WORK-10) |
 
 Rule from the project owner (DEC-12 in the app wiki): every repository the
 work touches uses a branch named like the app's work branch; nothing is
@@ -39,12 +39,22 @@ dart scripts/build_utilities/commands/update_seekserve.dart --platform=android
 
 (from the `obsidian-eclipse` checkout). Since app commit `9de05d68` it:
 - uses NDK 28.2.13676358 only (`ANDROID_NDK_HOME` is honoured only if it points
-  to that version) and requires vcpkg in `VCPKG_ROOT` or `~/vcpkg`;
+  to that version) and vcpkg in `VCPKG_ROOT` or `~/vcpkg`;
 - passes `SEEKSERVE_ENABLE_WEBTORRENT=OFF` and always strips with
   `--strip-unneeded`;
 - writes a sentinel with this repo's commit, NDK, vcpkg commit, WebTorrent and
-  strip settings, and rebuilds when any of them changes;
+  strip settings;
 - stops the app configuration if the build fails.
+
+Since app commit `cfa11ed8` (app BUG-55) the committed library counts as
+current when the sentinel records the pinned commit of this repo with the same
+NDK, WebTorrent and strip settings and the `.so` exists for every requested
+ABI. The script checks this first and looks for NDK and vcpkg only when it has
+to rebuild, so CI and machines without vcpkg use the committed file; before,
+a missing vcpkg stopped the app configuration, CI included. The vcpkg commit in
+the sentinel is only a note: dependency versions come from the `vcpkg.json`
+baseline. Since app commit `9cd94f4d` the script builds arm64-v8a only unless
+`--abis=` says otherwise.
 
 To publish a seekserve change to the app: commit and push here, move the
 `flutter_seekserve` refs in the app's `pubspec.yaml` and
@@ -58,8 +68,9 @@ ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./sc
 ```
 
 - vcpkg is a full clone in `~/vcpkg` (the `vcpkg.json` baseline needs its
-  history). The first build compiles the vcpkg dependencies for both ABIs
-  (tens of minutes); later builds take about a minute.
+  history). The first build compiles the vcpkg dependencies for every ABI in
+  `SEEKSERVE_ANDROID_ABIS` (tens of minutes); later builds take about a minute.
+  The app needs arm64-v8a only.
 - Always pass `ANDROID_NDK_HOME`: the script alone picks the highest installed
   NDK, which may be a beta.
 - Checks used on 2026-09-22: 17 `ss_*` exports (`llvm-nm -D`), 16 KB `LOAD`
