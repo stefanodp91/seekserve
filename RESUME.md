@@ -26,6 +26,30 @@ merged into `main` unless asked.
 
 ## Building the Android library
 
+For the app, use its script: it builds from the pub-cache copy of the pinned
+commit, strips, copies into `android/app/src/main/jniLibs/<abi>/` and writes
+the sentinel.
+
+```bash
+dart scripts/build_utilities/commands/update_seekserve.dart --platform=android
+```
+
+(from the `obsidian-eclipse` checkout). Since app commit `9de05d68` it:
+- uses NDK 28.2.13676358 only (`ANDROID_NDK_HOME` is honoured only if it points
+  to that version) and requires vcpkg in `VCPKG_ROOT` or `~/vcpkg`;
+- passes `SEEKSERVE_ENABLE_WEBTORRENT=OFF` and always strips with
+  `--strip-unneeded`;
+- writes a sentinel with this repo's commit, NDK, vcpkg commit, WebTorrent and
+  strip settings, and rebuilds when any of them changes;
+- stops the app configuration if the build fails.
+
+To publish a seekserve change to the app: commit and push here, move the
+`flutter_seekserve` refs in the app's `pubspec.yaml` and
+`plugins/torrent_streaming/pubspec.yaml`, `flutter pub get`, run the script,
+commit the `jniLibs` changes.
+
+To build by hand in this checkout instead:
+
 ```bash
 ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./scripts/build-android.sh
 ```
@@ -33,12 +57,8 @@ ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./sc
 - vcpkg is a full clone in `~/vcpkg` (the `vcpkg.json` baseline needs its
   history). The first build compiles the vcpkg dependencies for both ABIs
   (tens of minutes); later builds take about a minute.
-- Pass the NDK explicitly: the script otherwise picks the highest installed
-  version, which may be a beta.
-- For the app: strip with the NDK's `llvm-strip --strip-unneeded`, copy to
-  `android/app/src/main/jniLibs/<abi>/libseekserve.so`, write this repo's
-  commit into `.seekserve_build_commit`, and move the `flutter_seekserve` refs
-  in the app's `pubspec.yaml` and `plugins/torrent_streaming/pubspec.yaml`.
+- Always pass `ANDROID_NDK_HOME`: the script alone picks the highest installed
+  NDK, which may be a beta.
 - Checks used on 2026-09-22: 17 `ss_*` exports (`llvm-nm -D`), 16 KB `LOAD`
   alignment on arm64 (`llvm-readelf -l`), no WebRTC strings.
 
@@ -51,5 +71,8 @@ ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./sc
 - Torrent states in the status JSON are libtorrent's raw `state_t` values
   (1-based); the app's Android side read them 0-based until app commit
   `c2f7e952` (BUG-42).
-- `build-android.sh` still picks the NDK implicitly and `update_seekserve.dart`
-  in the app does not fail hard (app WORK-09, step C).
+- `build-android.sh` used alone still picks the NDK implicitly; the app's
+  `update_seekserve.dart` pins it.
+- The app's Android service is bind-only and dies with its last client, so
+  downloads stop when the app's Flutter engine detaches (app BUG-43, WORK-18);
+  nothing to change here for that.
