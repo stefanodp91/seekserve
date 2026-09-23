@@ -80,6 +80,8 @@ static seekserve::SeekServeEngine::Config parse_config(const char* config_json) 
         }
         if (j.contains("max_concurrent_torrents"))
             config.session.max_active_downloads = j["max_concurrent_torrents"].get<int>();
+        if (j.contains("ca_cert_file"))
+            config.session.ca_cert_file = j["ca_cert_file"].get<std::string>();
         if (j.contains("proxy_enabled"))
             config.session.proxy.enabled = j["proxy_enabled"].get<bool>();
         if (j.contains("proxy_hostname"))

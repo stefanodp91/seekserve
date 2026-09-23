@@ -26,11 +26,18 @@ void ss_engine_destroy(SeekServeEngine* engine);
     "cache_db_path": "seekserve_cache.db",
     "log_level": "info",
     "enable_webtorrent": false,
-    "extra_trackers": ["udp://tracker.example.com:6969"]
+    "extra_trackers": ["udp://tracker.example.com:6969"],
+    "ca_cert_file": "/path/to/ca-bundle.pem"
 }
 ```
 
 All fields are optional. Unknown fields are ignored.
+
+`ca_cert_file` is a PEM file with the CAs that HTTPS trackers and web seeds are
+checked against, on top of OpenSSL's default locations. On Android it is
+needed: the default locations do not exist there, and OpenSSL ignores
+`SSL_CERT_FILE` in app processes, so without it every HTTPS tracker fails with
+"certificate verify failed".
 
 ## Torrent Management
 

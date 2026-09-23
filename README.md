@@ -1594,6 +1594,7 @@ Engine configuration is passed as JSON to `ss_engine_create()` (C API) or via `S
 | `log_level` | `info` | `debug`, `info`, `warn`, `error` |
 | `enable_webtorrent` | `false` | Enable WebRTC-based BitTorrent peers |
 | `extra_trackers` | `[]` | Additional tracker URLs (including `wss://` for WebTorrent) |
+| `ca_cert_file` | (empty) | PEM file of CAs for HTTPS trackers and web seeds, added to OpenSSL's defaults; required on Android, which has no default CA locations for OpenSSL |
 
 ---
 

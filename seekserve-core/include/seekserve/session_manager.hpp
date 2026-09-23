@@ -45,6 +45,7 @@ public:
 private:
     static lt::settings_pack make_settings(const SessionConfig& config);
     static void apply_proxy_settings(lt::settings_pack& sp, const ProxyConfig& proxy);
+    void load_tracker_cas(const std::string& ca_file);
     TorrentId torrent_id_from_handle(const lt::torrent_handle& h) const;
 
     SessionConfig config_;

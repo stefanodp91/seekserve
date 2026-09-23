@@ -24,6 +24,11 @@ struct SessionConfig {
     // libtorrent's default (3). Torrents start outside the queue when added
     // and join it on resume_torrent.
     int max_active_downloads = 0;
+    // PEM file with the CAs that HTTPS trackers and web seeds are checked
+    // against, in addition to OpenSSL's default locations. Empty = defaults
+    // only. Needed on Android, where the defaults do not exist and OpenSSL
+    // ignores SSL_CERT_FILE in app processes.
+    std::string ca_cert_file;
     ProxyConfig proxy;
 };
 

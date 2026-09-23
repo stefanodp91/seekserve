@@ -6,6 +6,7 @@
 #include <libtorrent/session_params.hpp>
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/hex.hpp>
+#include <libtorrent/aux_/session_impl.hpp>
 
 #include <spdlog/spdlog.h>
 
@@ -18,6 +19,9 @@ TorrentSessionManager::TorrentSessionManager(const SessionConfig& config)
 {
     auto sp = make_settings(config);
     session_ = std::make_unique<lt::session>(lt::session_params{sp});
+    if (!config_.ca_cert_file.empty()) {
+        load_tracker_cas(config_.ca_cert_file);
+    }
     dispatcher_.start(*session_);
     spdlog::info("TorrentSessionManager: session created (save_path={})", config_.save_path);
 }
@@ -129,6 +133,28 @@ void TorrentSessionManager::apply_proxy_settings(lt::settings_pack& sp, const Pr
         sp.set_bool(lt::settings_pack::enable_incoming_utp, true);
         spdlog::info("Proxy disabled, DHT re-enabled");
     }
+}
+
+// libtorrent checks HTTPS trackers and web seeds against OpenSSL's default CA
+// locations. On Android those do not exist, and OpenSSL ignores SSL_CERT_FILE
+// in app processes (AT_SECURE is set), so every HTTPS announce failed with
+// "certificate verify failed". The public API has no hook for the CAs: they
+// go into the SSL context libtorrent keeps for those connections, right after
+// the session is created and before any tracker is contacted.
+void TorrentSessionManager::load_tracker_cas(const std::string& ca_file) {
+#if TORRENT_USE_SSL && defined TORRENT_USE_OPENSSL
+    auto impl = session_->native_handle();
+    // ssl_ctx() is public in session_interface, private in session_impl.
+    lt::aux::session_interface* ses = impl.get();
+    auto* ctx = ses ? ses->ssl_ctx() : nullptr;
+    if (ctx && SSL_CTX_load_verify_locations(ctx->native_handle(), ca_file.c_str(), nullptr) == 1) {
+        spdlog::info("TorrentSessionManager: tracker CAs loaded from {}", ca_file);
+        return;
+    }
+    spdlog::warn("TorrentSessionManager: tracker CAs not loaded from {}", ca_file);
+#else
+    spdlog::warn("TorrentSessionManager: built without OpenSSL, ca_cert_file ignored");
+#endif
 }
 
 void TorrentSessionManager::set_proxy(const ProxyConfig& proxy) {
