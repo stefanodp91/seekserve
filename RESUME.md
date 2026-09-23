@@ -136,3 +136,11 @@ The app pins this repository by commit and `flutter pub get` fetches it from Git
   service always sends a JSON it builds itself, with `"enabled": true`. Keep
   these semantics if the C API changes. Nothing changed in this repository.
 - HTTPS trackers and web seeds on Android need `ca_cert_file` (since `847c1be`); the app's service exports the system CAs (`AndroidCAStore`, `system:` aliases) to a PEM file and passes it. The iOS framework was not rebuilt and passes nothing: libtorrent looks for `/etc/ssl/cert.pem` there (the `__APPLE__` branch of `session_impl::start_session`), not checked on a device.
+- `parse_config` in `seekserve-capi/src/seekserve_c.cpp` reads every key inside one
+  `try`: a key of the wrong type (for example `ca_cert_file` or
+  `max_concurrent_torrents` not being a string or a number) throws before the
+  `proxy_*` keys are read, and the engine starts with the proxy **off**
+  (`ProxyConfig.enabled` defaults to `false`). The app's service always sends
+  the right types, so this cannot happen today; reading the proxy keys first,
+  or each key on its own, would keep the engine fail-closed (found by an
+  independent review of `847c1be` on 2026-09-23).
