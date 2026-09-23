@@ -9,8 +9,8 @@ register, roadmap) lives in the app repository, `obsidian-eclipse`, in
 | What | Where |
 |---|---|
 | This repo | `/Users/stefano/Workspace/seekserve`, remote `https://github.com/stefanodp91/seekserve` |
-| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (pushes on 2026-09-22: `dba03c0`, `3bc9aa0` and these notes, last updated for app BUG-19 and BUG-55). The notes of 2026-09-23 (app BUG-43, the app's reconciliation) were published that day with the owner's approval, together with the app's WORK-07. `feature/native-jackett-engine` and `main` are untouched |
-| App | `obsidian-eclipse` pins `3bc9aa0` for `flutter_seekserve` and `flutter_seekserve_ui` (since 2026-09-22; before that `782f2ee` and `38cf24a`), and ships an Android `libseekserve.so` built from it (committed in `android/app/src/main/jniLibs/arm64-v8a/`, sentinel `.seekserve_build_commit`). Since app commit `9cd94f4d` the APK holds arm64-v8a only, the only ABI with Tor (app BUG-19); the armeabi-v7a library still in the app repository is unused (removal in the app's WORK-10) |
+| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (pushes on 2026-09-22: `dba03c0`, `3bc9aa0` and these notes, last updated for app BUG-19 and BUG-55). The notes of 2026-09-23 (app BUG-43, the app's reconciliation) were published that day with the owner's approval, together with the app's WORK-07, and so was `f49afe4` with the app's WORK-15. **Not published yet:** `847c1be` (`ca_cert_file`, app BUG-61) and these notes. `feature/native-jackett-engine` and `main` are untouched |
+| App | `obsidian-eclipse` pins `847c1be` for `flutter_seekserve` and `flutter_seekserve_ui` since app commit `ad596493` (2026-09-23; before that `3bc9aa0`, `782f2ee` and `38cf24a`), and ships an Android `libseekserve.so` built from it (committed in `android/app/src/main/jniLibs/arm64-v8a/`, sentinel `.seekserve_build_commit`). Since app commit `9cd94f4d` the APK holds arm64-v8a only, the only ABI with Tor (app BUG-19); the armeabi-v7a library still in the app repository is unused (removal in the app's WORK-10) |
 
 Rule from the project owner (DEC-12 in the app wiki): every repository the
 work touches uses a branch named like the app's work branch; nothing is
@@ -26,6 +26,7 @@ merged into `main` unless asked.
 | `782f2ee` | One limit on queued downloads: the C API reads `max_concurrent_torrents` into `SessionConfig::max_active_downloads`, set as libtorrent's `active_downloads` when > 0; `add_torrent` clears `auto_managed` and `paused`, so metadata and streaming start at once outside the queue, and `resume_torrent` (which sets `auto_managed`) is how a download joins the queue (app BUG-18, DEC-15) |
 | `dba03c0` | `file_progress` added to the alert mask: `file_completed_alert` belongs to that category, so the `file_completed` event never fired and the offline cache never marked a file ready (app BUG-20) |
 | `3bc9aa0` | `select_file` keeps subtitle files (`.srt`, `.vtt`, `.ass`, `.ssa`) at default priority, so they download with the selected video and the player reads them from disk; selecting a subtitle stopped the video (app BUG-24) |
+| `847c1be` | New config key `ca_cert_file` (`SessionConfig::ca_cert_file`): a PEM file whose CAs are loaded, right after the session is created, into the SSL context libtorrent uses for HTTPS trackers and web seeds, on top of OpenSSL's defaults. On Android every HTTPS tracker failed with "certificate verify failed": OpenSSL (3.6.1 from vcpkg, `OPENSSLDIR` `/etc/ssl`) finds no CAs there, ignores `SSL_CERT_FILE` in app processes (`AT_SECURE` is 1), and cannot use Android's CA directory, whose file names are the old subject hash. libtorrent has no public hook: the context is reached through `session_interface::ssl_ctx()`. Three tests in `tests/integration/test_tracker_cas.cpp` with `fixtures/test_tracker_ca.pem`, the session on a proxy at port 0, so no network (app BUG-61, WORK-22) |
 
 ## Building the Android library
 
@@ -75,6 +76,14 @@ ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./sc
   NDK, which may be a beta.
 - Checks used on 2026-09-22: 17 `ss_*` exports (`llvm-nm -D`), 16 KB `LOAD`
   alignment on arm64 (`llvm-readelf -l`), no WebRTC strings.
+
+## Tests on the owner's Mac
+
+`build/debug` (triplet `arm64-osx`): `cmake --build build/debug`, then `build/debug/tests/seekserve-unit-tests` (138 passed on 2026-09-23) and `build/debug/tests/seekserve-integration-tests --gtest_filter='TrackerCas.*'` (3). The other integration tests create libtorrent sessions without a proxy, with the DHT on and announces to the trackers of the Sintel fixture: the app project does not allow BitTorrent traffic from the Mac, so do not run them there.
+
+## Publishing order
+
+The app pins this repository by commit and `flutter pub get` fetches it from GitHub: publish this branch **before** the app's. Until then the app resolves `847c1be` only on this Mac, where it was fetched into the pub cache from this clone (app wiki, `toolchain-and-local-build`).
 
 ## Open items
 
@@ -126,3 +135,4 @@ ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./sc
   (`ProxyConfig.enabled` defaults to `false`); since app `93e6a73b` the
   service always sends a JSON it builds itself, with `"enabled": true`. Keep
   these semantics if the C API changes. Nothing changed in this repository.
+- HTTPS trackers and web seeds on Android need `ca_cert_file` (since `847c1be`); the app's service exports the system CAs (`AndroidCAStore`, `system:` aliases) to a PEM file and passes it. The iOS framework was not rebuilt and passes nothing: libtorrent looks for `/etc/ssl/cert.pem` there (the `__APPLE__` branch of `session_impl::start_session`), not checked on a device.
