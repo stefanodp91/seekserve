@@ -123,8 +123,18 @@ private:
         send_all(fd, r, sizeof(r));
     }
 
+    // Both legs are shut down when either ends: a half-open leg would keep
+    // the seeder's connection from 127.0.0.1 alive, and it would refuse the
+    // engine's next one as a duplicate peer.
     void serve(int client) {
-        unsigned char buf[256];
+        int upstream = -1;
+        relay(client, upstream);
+        ::shutdown(client, SHUT_RDWR);
+        if (upstream >= 0) ::shutdown(upstream, SHUT_RDWR);
+    }
+
+    void relay(int client, int& upstream) {
+        unsigned char buf[512];
         if (!recv_all(client, buf, 2) || buf[0] != 5 || !recv_all(client, buf + 2, buf[1])) return;
         const unsigned char no_auth[] = {5, 0};
         if (!send_all(client, no_auth, sizeof(no_auth))) return;
@@ -140,7 +150,7 @@ private:
         std::memcpy(&target.sin_port, buf + 8, 2);
         if (target.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) return reply(client, 2);  // not allowed
 
-        int upstream = ::socket(AF_INET, SOCK_STREAM, 0);
+        upstream = ::socket(AF_INET, SOCK_STREAM, 0);
         track(upstream);
         if (::connect(upstream, reinterpret_cast<sockaddr*>(&target), sizeof(target)) != 0) {
             return reply(client, 5);  // connection refused
@@ -201,7 +211,10 @@ protected:
         lt::create_torrent ct(lt::list_files((dir_ / "seed" / "video.mkv").string()),
                               16 * 1024);
         lt::set_piece_hashes(ct, (dir_ / "seed").string());
-        ti_ = lt::load_torrent_buffer(ct.generate_buf()).ti;
+        auto torrent = ct.generate_buf();
+        std::ofstream((dir_ / "hybrid.torrent").string(), std::ios::binary)
+            .write(torrent.data(), static_cast<std::streamsize>(torrent.size()));
+        ti_ = lt::load_torrent_buffer(torrent).ti;
     }
 
     void TearDown() override {
@@ -358,6 +371,53 @@ TEST_F(HybridTorrent, V1MagnetAddedAgainAfterRemovalGetsItsMetadata) {
     EXPECT_EQ(again.value(), first.value());
     EXPECT_TRUE(wait_for([&] { return has_metadata(engine, again.value()); }));
     EXPECT_TRUE(engine.list_files(again.value()));
+}
+
+// The same magnet added again once the metadata is in (a second tap in the
+// app's search): libtorrent returns the torrent it has, which now knows its
+// v2 hash too, and the id must stay the v1 one of the first add.
+TEST_F(HybridTorrent, V1MagnetAddedTwiceKeepsItsId) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+    EventLog events(engine);
+
+    auto first = engine.add_torrent(magnet(*seeder));
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(wait_for([&] { return has_metadata(engine, first.value()); }));
+
+    auto second = engine.add_torrent(magnet(*seeder));
+    ASSERT_TRUE(second);
+    EXPECT_EQ(second.value(), first.value());
+    EXPECT_EQ(engine.list_torrents(), std::vector<TorrentId>{first.value()});
+
+    ASSERT_TRUE(engine.select_file(first.value(), 0));
+    ASSERT_TRUE(wait_for([&] { return !events.ids("file_completed").empty(); }))
+        << "the file did not complete " << engine.get_status_json(first.value());
+    EXPECT_EQ(events.ids("file_completed"), std::vector<TorrentId>{first.value()});
+}
+
+// Removed after its v1 magnet, the torrent comes back from its .torrent file,
+// so under its v2 id: the alerts of the new add must not be taken for late
+// alerts of the removed one.
+TEST_F(HybridTorrent, TorrentFileAfterV1MagnetRemovalGetsItsMetadata) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+
+    auto from_magnet = engine.add_torrent(magnet(*seeder));
+    ASSERT_TRUE(from_magnet);
+    ASSERT_TRUE(wait_for([&] { return has_metadata(engine, from_magnet.value()); }));
+    ASSERT_TRUE(engine.remove_torrent(from_magnet.value(), false));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    auto from_file = engine.add_torrent((dir_ / "hybrid.torrent").string());
+    ASSERT_TRUE(from_file);
+    EXPECT_EQ(from_file.value(), v2_hex());
+    EXPECT_TRUE(wait_for([&] { return has_metadata(engine, from_file.value()); },
+                         std::chrono::seconds(5)));
 }
 
 }  // namespace

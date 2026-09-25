@@ -195,8 +195,22 @@ Result<TorrentId> TorrentSessionManager::add_torrent(const AddTorrentParams& par
         atp.trackers.push_back(tracker);
     }
 
+    // The id is fixed here, from what the add knows, and the torrent carries
+    // it in its userdata: its alerts are matched by it even before handles_
+    // has it, and when libtorrent adds a hash with the metadata.
+    auto id = id_from_hashes(atp.ti ? atp.ti->info_hashes() : atp.info_hashes);
+    {
+        std::lock_guard lock(mu_);
+        atp.userdata = lt::client_data_t(&ids_.try_emplace(id, id).first->second);
+    }
+
     lt::torrent_handle h = session_->add_torrent(std::move(atp));
-    auto id = torrent_id_from_handle(h);
+    // Already in the session: libtorrent returns that torrent, still under the
+    // id it was first added with. Hashing it again would give its v2 id once a
+    // hybrid added by v1 has its metadata (app BUG-71).
+    if (auto existing = id_of(h)) {
+        id = *existing;
+    }
 
     {
         std::lock_guard lock(mu_);
@@ -249,9 +263,15 @@ std::vector<TorrentId> TorrentSessionManager::list_torrents() const {
     return ids;
 }
 
-TorrentId TorrentSessionManager::torrent_id_from_handle(const lt::torrent_handle& h) const {
-    auto status = h.status(lt::torrent_handle::query_name);
-    auto ih = status.info_hashes;
+std::optional<TorrentId> TorrentSessionManager::id_of(const lt::torrent_handle& h) const {
+    // Entries of ids_ are never erased or changed, so no lock is needed.
+    if (auto* id = h.userdata().get<TorrentId>()) {
+        return *id;
+    }
+    return std::nullopt;
+}
+
+TorrentId TorrentSessionManager::id_from_hashes(const lt::info_hash_t& ih) {
     if (ih.has_v2()) {
         return lt::aux::to_hex({ih.v2.data(), static_cast<ptrdiff_t>(ih.v2.size())});
     }

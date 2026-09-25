@@ -61,8 +61,9 @@ void SeekServeEngine::wire_alerts() {
     sessions_->alert_dispatcher().on<lt::metadata_received_alert>(
         [this](const lt::metadata_received_alert& a) {
             auto ti = a.handle.torrent_file();
-            auto st = a.handle.status(lt::torrent_handle::query_name);
-            auto id = id_of(st.info_hashes);
+            auto found = sessions_->id_of(a.handle);
+            if (!found) return;
+            const auto& id = *found;
 
             // Guard: skip if torrent was explicitly removed
             {
@@ -83,8 +84,9 @@ void SeekServeEngine::wire_alerts() {
             }
             auto ti = a.handle.torrent_file();
             if (ti) {
-                auto st = a.handle.status(lt::torrent_handle::query_name);
-                auto id = id_of(st.info_hashes);
+                auto found = sessions_->id_of(a.handle);
+                if (!found) return;
+                const auto& id = *found;
 
                 // Guard: skip if torrent was explicitly removed
                 {
@@ -99,8 +101,9 @@ void SeekServeEngine::wire_alerts() {
     // piece_finished_alert → availability + scheduler + byte_source
     sessions_->alert_dispatcher().on<lt::piece_finished_alert>(
         [this](const lt::piece_finished_alert& a) {
-            auto st = a.handle.status(lt::torrent_handle::query_name);
-            auto id = id_of(st.info_hashes);
+            auto found = sessions_->id_of(a.handle);
+            if (!found) return;
+            const auto& id = *found;
             auto piece = static_cast<PieceIndex>(a.piece_index);
 
             std::lock_guard lock(mu_);
@@ -115,8 +118,9 @@ void SeekServeEngine::wire_alerts() {
     // file_completed_alert → cache
     sessions_->alert_dispatcher().on<lt::file_completed_alert>(
         [this](const lt::file_completed_alert& a) {
-            auto st = a.handle.status(lt::torrent_handle::query_name);
-            auto id = id_of(st.info_hashes);
+            auto found = sessions_->id_of(a.handle);
+            if (!found) return;
+            const auto& id = *found;
             auto fi = static_cast<FileIndex>(a.index);
 
             cache_->on_file_completed(id, fi);
@@ -516,32 +520,6 @@ void SeekServeEngine::on_tick(const boost::system::error_code& ec) {
     tick_timer_->async_wait([this](const boost::system::error_code& ec2) {
         on_tick(ec2);
     });
-}
-
-std::string SeekServeEngine::infohash_to_hex(const lt::info_hash_t& ih) {
-    if (ih.has_v2()) {
-        return lt::aux::to_hex({ih.v2.data(), static_cast<ptrdiff_t>(ih.v2.size())});
-    }
-    return lt::aux::to_hex({ih.v1.data(), static_cast<ptrdiff_t>(ih.v1.size())});
-}
-
-TorrentId SeekServeEngine::id_of(const lt::info_hash_t& ih) {
-    auto id = infohash_to_hex(ih);
-    if (!ih.has_v1() || !ih.has_v2() || sessions_->has_torrent(id)) return id;
-
-    // A hybrid torrent (v1 and v2 hashes) added from a magnet with only its v1
-    // hash: libtorrent adds the v2 hash when the metadata arrives, but the
-    // torrent stays under the v1 id add_torrent returned, which the app and
-    // every call use. Before, its alerts went under the v2 id: the catalog
-    // had no metadata for the v1 id and the app waited for it in vain (app
-    // BUG-71).
-    auto v1 = lt::aux::to_hex({ih.v1.data(), static_cast<ptrdiff_t>(ih.v1.size())});
-    if (sessions_->has_torrent(v1)) return v1;
-
-    // Removed: its late alerts must match the id in removed_ids_.
-    std::lock_guard lock(mu_);
-    if (removed_ids_.count(v1) && !removed_ids_.count(id)) return v1;
-    return id;
 }
 
 SeekServeEngine::TorrentState* SeekServeEngine::find_state(const TorrentId& id) {
