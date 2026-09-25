@@ -198,6 +198,20 @@ Result<void> SeekServeEngine::resume_torrent(const TorrentId& id) {
     return {};
 }
 
+Result<void> SeekServeEngine::start_torrent(const TorrentId& id) {
+    auto handle = sessions_->get_handle(id);
+    if (!handle.is_valid()) {
+        return make_error_code(errc::torrent_not_found);
+    }
+    // Out of auto-management libtorrent's queue neither holds it back nor
+    // counts it, so a download already running keeps its slot.
+    handle.unset_flags(lt::torrent_flags::auto_managed);
+    handle.resume();
+    spdlog::info("Engine: started torrent {} outside the queue", id);
+    fire_event("torrent_resumed", "{\"torrent_id\":\"" + id + "\"}");
+    return {};
+}
+
 Result<void> SeekServeEngine::force_reannounce(const TorrentId& id) {
     auto handle = sessions_->get_handle(id);
     if (!handle.is_valid()) {

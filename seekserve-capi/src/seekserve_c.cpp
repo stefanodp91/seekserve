@@ -150,6 +150,13 @@ ss_error_t ss_resume_torrent(SeekServeEngine* engine, const char* torrent_id) {
     return result ? SS_OK : map_error(result.error());
 }
 
+ss_error_t ss_start_torrent(SeekServeEngine* engine, const char* torrent_id) {
+    if (!engine || !torrent_id) return SS_ERR_INVALID_ARG;
+
+    auto result = engine->start_torrent(torrent_id);
+    return result ? SS_OK : map_error(result.error());
+}
+
 ss_error_t ss_force_reannounce(SeekServeEngine* engine, const char* torrent_id) {
     if (!engine || !torrent_id) return SS_ERR_INVALID_ARG;
 

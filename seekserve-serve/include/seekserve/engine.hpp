@@ -54,7 +54,11 @@ public:
 
     // Pause / resume
     Result<void> pause_torrent(const TorrentId& id);
+    // Resumes into libtorrent's download queue (max_active_downloads).
     Result<void> resume_torrent(const TorrentId& id);
+    // Resumes outside the queue, as add_torrent does: for streaming, which
+    // must not wait for (or push out) a queued download.
+    Result<void> start_torrent(const TorrentId& id);
     Result<void> force_reannounce(const TorrentId& id);
 
     // File management

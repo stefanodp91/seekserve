@@ -47,6 +47,13 @@ __attribute__((visibility("default")))
 ss_error_t ss_resume_torrent(SeekServeEngine* engine,
                              const char* torrent_id);
 
+/* Resumes a torrent outside the download queue (max_concurrent_torrents),
+ * as ss_add_torrent adds it: for streaming. ss_resume_torrent puts it back
+ * into the queue. */
+__attribute__((visibility("default")))
+ss_error_t ss_start_torrent(SeekServeEngine* engine,
+                            const char* torrent_id);
+
 __attribute__((visibility("default")))
 ss_error_t ss_force_reannounce(SeekServeEngine* engine,
                                const char* torrent_id);

@@ -375,6 +375,48 @@ TEST_F(CApiTest, ResumeTorrentNotFound) {
     ss_engine_destroy(engine);
 }
 
+TEST_F(CApiTest, StartTorrentNullEngine) {
+    EXPECT_EQ(ss_start_torrent(nullptr, "abc"), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_start_torrent(reinterpret_cast<SeekServeEngine*>(0x1), nullptr),
+              SS_ERR_INVALID_ARG);
+}
+
+TEST_F(CApiTest, StartTorrentNotFound) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+
+    EXPECT_EQ(ss_start_torrent(engine, "nonexistent"), SS_ERR_NOT_FOUND);
+
+    ss_engine_destroy(engine);
+}
+
+// A paused torrent started outside the queue runs even when the only queue
+// slot is set, and no network is used (proxy on port 0).
+TEST_F(CApiTest, PauseAndStartTorrentOutsideQueue) {
+    auto config = make_config(
+        R"("max_concurrent_torrents":1,"proxy_enabled":true,)"
+        R"("proxy_hostname":"127.0.0.1","proxy_port":0)");
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+
+    char id_buf[128] = {};
+    auto path = torrent_path();
+    ASSERT_EQ(ss_add_torrent(engine, path.c_str(), id_buf, sizeof(id_buf)), SS_OK);
+    ASSERT_EQ(ss_pause_torrent(engine, id_buf), SS_OK);
+
+    EXPECT_EQ(ss_start_torrent(engine, id_buf), SS_OK);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    char* json = nullptr;
+    ASSERT_EQ(ss_get_status(engine, id_buf, &json), SS_OK);
+    ASSERT_NE(json, nullptr);
+    EXPECT_NE(std::string(json).find("\"paused\":false"), std::string::npos);
+    ss_free_string(json);
+
+    ss_engine_destroy(engine);
+}
+
 TEST_F(CApiTest, PauseAndResumeTorrent) {
     auto config = make_config();
     SeekServeEngine* engine = ss_engine_create(config.c_str());
