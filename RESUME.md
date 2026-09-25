@@ -9,7 +9,7 @@ register, roadmap) lives in the app repository, `obsidian-eclipse`, in
 | What | Where |
 |---|---|
 | This repo | `/Users/stefano/Workspace/seekserve`, remote `https://github.com/stefanodp91/seekserve` |
-| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (pushes on 2026-09-22: `dba03c0`, `3bc9aa0` and these notes, last updated for app BUG-19 and BUG-55). The notes of 2026-09-23 (app BUG-43, the app's reconciliation) were published that day with the owner's approval, together with the app's WORK-07, and so was `f49afe4` with the app's WORK-15. Then `847c1be` (`ca_cert_file`, app BUG-61) and the notes up to this one were published on 2026-09-25 with the owner's approval ("pubblica tutto"), before the app's WORK-21 and WORK-22. `feature/native-jackett-engine` and `main` are untouched |
+| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (pushes on 2026-09-22: `dba03c0`, `3bc9aa0` and these notes, last updated for app BUG-19 and BUG-55). The notes of 2026-09-23 (app BUG-43, the app's reconciliation) were published that day with the owner's approval, together with the app's WORK-07, and so was `f49afe4` with the app's WORK-15. Then `847c1be` (`ca_cert_file`, app BUG-61) and the notes up to this one were published on 2026-09-25 with the owner's approval ("pubblica tutto"), before the app's WORK-21 and WORK-22. Also on 2026-09-25, each time with the owner's approval and before the app: `2f8509c` (`ss_start_torrent`, app BUG-63) with its notes, then `4782c68` (a torrent removed and added again gets its metadata, app BUG-68) with the notes up to `b767dcb`. `feature/native-jackett-engine` and `main` are untouched |
 | App | `obsidian-eclipse` pins `4782c68` for `flutter_seekserve` and `flutter_seekserve_ui` since app commit `b0e095eb` (2026-09-25), `2f8509c` since `ed706005` (2026-09-25, published first, then the app), `847c1be` since `ad596493` (2026-09-23; before that `3bc9aa0`, `782f2ee` and `38cf24a`), and ships an Android `libseekserve.so` built from it (arm64-v8a only) (committed in `android/app/src/main/jniLibs/arm64-v8a/`, sentinel `.seekserve_build_commit`). Since app commit `9cd94f4d` the APK holds arm64-v8a only, the only ABI with Tor (app BUG-19); the unused armeabi-v7a library left the app repository in app commit `380d934b` (2026-09-25, app WORK-10). Since app commit `9fa9ffc7` (2026-09-25) the app builds with AGP 9.0.1, Gradle 9.1.0 and Kotlin 2.3.20: nothing changes for this repository, whose Android library the app ships prebuilt |
 
 Rule from the project owner (DEC-12 in the app wiki): every repository the
@@ -91,7 +91,7 @@ ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./sc
 
 ## Tests on the owner's Mac
 
-`build/debug` (triplet `arm64-osx`): `cmake --build build/debug`, then `build/debug/tests/seekserve-unit-tests` (138 passed on 2026-09-23) and `build/debug/tests/seekserve-integration-tests --gtest_filter='TrackerCas.*'` (3). The other integration tests create libtorrent sessions without a proxy, with the DHT on and announces to the trackers of the Sintel fixture: the app project does not allow BitTorrent traffic from the Mac, so do not run them there.
+`build/debug` (triplet `arm64-osx`): `cmake --build build/debug`, then `build/debug/tests/seekserve-unit-tests` (138 passed on 2026-09-25) and `build/debug/tests/seekserve-integration-tests --gtest_filter='TrackerCas.*'` (3). Of the C API tests run only the four that stay off the network (proxy on port 0 or no torrent): `build/debug/tests/seekserve-capi-tests --gtest_filter='CApiTest.StartTorrent*:CApiTest.PauseAndStartTorrentOutsideQueue:CApiTest.AddedAgainAfterRemovalGetsItsMetadata'`; the others add the Sintel fixture without a proxy. The other integration tests create libtorrent sessions without a proxy, with the DHT on and announces to the trackers of the Sintel fixture: the app project does not allow BitTorrent traffic from the Mac, so do not run them there.
 
 ## Publishing order
 
@@ -158,3 +158,20 @@ The app pins this repository by commit and `flutter pub get` fetches it from Git
   the right types, so this cannot happen today; reading the proxy keys first,
   or each key on its own, would keep the engine fail-closed (found by an
   independent review of `847c1be` on 2026-09-23).
+- Hybrid torrents (v1 and v2 hashes) added from a magnet with only `btih`
+  may never report their metadata (app BUG-71, plausible, found by an
+  independent review on 2026-09-25, not reproduced): when the metadata
+  arrives libtorrent updates the torrent's info hashes
+  (`extern/libtorrent/src/torrent.cpp:7882-7957`), and the alert handlers in
+  `seekserve-serve/src/engine.cpp` derive the id from the new hashes (v2),
+  while the app, `handles_`, `removed_ids_` and `get_status_json` use the v1 id
+  returned by `add_torrent`: the catalog would end up under the v2 id and
+  `has_metadata(v1)` stay false. Test with a free hybrid torrent reachable
+  through Tor (app WORK-26) before changing anything.
+- The catch-up in `add_torrent` (`4782c68`) checks `has_metadata` and then
+  registers without holding a lock against the alert thread, so a torrent
+  added again could get two `metadata_received` events. The catalog
+  (`on_metadata_received` ignores a known id) and the cache (`INSERT OR
+  IGNORE`) take it; the app would select the file twice. It needs a
+  `.torrent` with its metadata at add time: the app adds magnets only, so it
+  cannot happen today.
