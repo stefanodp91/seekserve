@@ -9,7 +9,7 @@ register, roadmap) lives in the app repository, `obsidian-eclipse`, in
 | What | Where |
 |---|---|
 | This repo | `/Users/stefano/Workspace/seekserve`, remote `https://github.com/stefanodp91/seekserve` |
-| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (pushes on 2026-09-22: `dba03c0`, `3bc9aa0` and these notes, last updated for app BUG-19 and BUG-55). The notes of 2026-09-23 (app BUG-43, the app's reconciliation) were published that day with the owner's approval, together with the app's WORK-07, and so was `f49afe4` with the app's WORK-15. **Not published yet:** `847c1be` (`ca_cert_file`, app BUG-61) and these notes. `feature/native-jackett-engine` and `main` are untouched |
+| Branch | `chore/resume-build-remove-auth`, created from `feature/native-jackett-engine` at `403bef8` and published (pushes on 2026-09-22: `dba03c0`, `3bc9aa0` and these notes, last updated for app BUG-19 and BUG-55). The notes of 2026-09-23 (app BUG-43, the app's reconciliation) were published that day with the owner's approval, together with the app's WORK-07, and so was `f49afe4` with the app's WORK-15. Then `847c1be` (`ca_cert_file`, app BUG-61) and the notes up to this one were published on 2026-09-25 with the owner's approval ("pubblica tutto"), before the app's WORK-21 and WORK-22. `feature/native-jackett-engine` and `main` are untouched |
 | App | `obsidian-eclipse` pins `847c1be` for `flutter_seekserve` and `flutter_seekserve_ui` since app commit `ad596493` (2026-09-23; before that `3bc9aa0`, `782f2ee` and `38cf24a`), and ships an Android `libseekserve.so` built from it (committed in `android/app/src/main/jniLibs/arm64-v8a/`, sentinel `.seekserve_build_commit`). Since app commit `9cd94f4d` the APK holds arm64-v8a only, the only ABI with Tor (app BUG-19); the armeabi-v7a library still in the app repository is unused (removal in the app's WORK-10) |
 
 Rule from the project owner (DEC-12 in the app wiki): every repository the
@@ -93,7 +93,7 @@ ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./sc
 
 ## Publishing order
 
-The app pins this repository by commit and `flutter pub get` fetches it from GitHub: publish this branch **before** the app's. Until then the app resolves `847c1be` only on this Mac, where it was fetched into the pub cache from this clone (app wiki, `toolchain-and-local-build`).
+The app pins this repository by commit and `flutter pub get` fetches it from GitHub: publish this branch **before** the app's. Until a pinned commit is published, the app resolves it only on the machine whose pub cache fetched it from this clone (app wiki, `toolchain-and-local-build`), as happened with `847c1be` until its publication on 2026-09-25.
 
 ## Open items
 
