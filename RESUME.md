@@ -76,6 +76,16 @@ ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./sc
   NDK, which may be a beta.
 - Checks used on 2026-09-22: 17 `ss_*` exports (`llvm-nm -D`), 16 KB `LOAD`
   alignment on arm64 (`llvm-readelf -l`), no WebRTC strings.
+- The libraries of `847c1be` in the app (app `ad596493`, 2026-09-23) were built
+  this way, one ABI at a time (`SEEKSERVE_ANDROID_ABIS=arm64-v8a`, then
+  `armeabi-v7a`) with `SEEKSERVE_ENABLE_WEBTORRENT=OFF`, stripped with the
+  NDK's `llvm-strip --strip-unneeded` into the app's
+  `android/app/src/main/jniLibs/<abi>/`, with the full commit as the first line
+  of the app's sentinel: the app's script then reports them up to date. Same
+  checks as above.
+- For a quick rebuild after a local change (a temporary probe, for example),
+  `cmake --build build/android-arm64-v8a` takes seconds: the script itself
+  deletes the build folder first. A probe must never be committed.
 
 ## Tests on the owner's Mac
 
