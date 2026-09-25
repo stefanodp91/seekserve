@@ -93,6 +93,9 @@ private:
     void start_tick_timer();
     void on_tick(const boost::system::error_code& ec);
     static std::string infohash_to_hex(const lt::info_hash_t& ih);
+    // The id an alert's torrent was added under (see add_torrent). Takes mu_:
+    // call it before locking.
+    TorrentId id_of(const lt::info_hash_t& ih);
     TorrentState* find_state(const TorrentId& id);
     void fire_event(const std::string& type, const std::string& data);
     // Files of a torrent whose metadata arrived: catalog, cache, event.

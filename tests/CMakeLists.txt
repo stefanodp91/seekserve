@@ -35,6 +35,7 @@ add_executable(seekserve-integration-tests
     integration/test_end_to_end_stream.cpp
     integration/test_stress.cpp
     integration/test_tracker_cas.cpp
+    integration/test_hybrid_torrent.cpp
 )
 
 target_link_libraries(seekserve-integration-tests
