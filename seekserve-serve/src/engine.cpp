@@ -70,14 +70,7 @@ void SeekServeEngine::wire_alerts() {
                 if (removed_ids_.count(id)) return;
             }
 
-            catalog_.on_metadata_received(id, ti);
-
-            auto files_result = catalog_.list_files(id);
-            if (files_result) {
-                cache_->on_torrent_added(id, files_result.value());
-            }
-
-            fire_event("metadata_received", "{\"torrent_id\":\"" + id + "\"}");
+            register_metadata(id, ti);
         });
 
     // add_torrent_alert → catalog (for .torrent files with embedded metadata)
@@ -99,14 +92,7 @@ void SeekServeEngine::wire_alerts() {
                     if (removed_ids_.count(id)) return;
                 }
 
-                catalog_.on_metadata_received(id, ti);
-
-                auto files_result = catalog_.list_files(id);
-                if (files_result) {
-                    cache_->on_torrent_added(id, files_result.value());
-                }
-
-                fire_event("metadata_received", "{\"torrent_id\":\"" + id + "\"}");
+                register_metadata(id, ti);
             }
         });
 
@@ -146,9 +132,39 @@ Result<TorrentId> SeekServeEngine::add_torrent(const std::string& uri,
     atp.save_path = save_path;
     auto result = sessions_->add_torrent(atp);
     if (result) {
-        cache_->save_torrent_uri(result.value(), uri);
+        const auto& id = result.value();
+        cache_->save_torrent_uri(id, uri);
+        // Added again after a removal in this session: its alerts count again.
+        // Before, removed_ids_ kept skipping them, so the torrent never got
+        // its files and has_metadata stayed false until the engine restarted
+        // (app BUG-68). An alert the alert thread skipped before the erase is
+        // caught up from the handle, which already has the metadata then.
+        bool was_removed = false;
+        {
+            std::lock_guard lock(mu_);
+            was_removed = removed_ids_.erase(id) > 0;
+        }
+        if (was_removed) {
+            auto handle = sessions_->get_handle(id);
+            auto ti = handle.is_valid() ? handle.torrent_file() : nullptr;
+            if (ti && !catalog_.has_metadata(id)) {
+                register_metadata(id, ti);
+            }
+        }
     }
     return result;
+}
+
+void SeekServeEngine::register_metadata(const TorrentId& id,
+                                        std::shared_ptr<const lt::torrent_info> ti) {
+    catalog_.on_metadata_received(id, ti);
+
+    auto files_result = catalog_.list_files(id);
+    if (files_result) {
+        cache_->on_torrent_added(id, files_result.value());
+    }
+
+    fire_event("metadata_received", "{\"torrent_id\":\"" + id + "\"}");
 }
 
 Result<void> SeekServeEngine::remove_torrent(const TorrentId& id, bool delete_files) {

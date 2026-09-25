@@ -95,6 +95,9 @@ private:
     static std::string infohash_to_hex(const lt::info_hash_t& ih);
     TorrentState* find_state(const TorrentId& id);
     void fire_event(const std::string& type, const std::string& data);
+    // Files of a torrent whose metadata arrived: catalog, cache, event.
+    void register_metadata(const TorrentId& id,
+                           std::shared_ptr<const lt::torrent_info> ti);
 
     Config config_;
     net::io_context ioc_;
@@ -110,7 +113,9 @@ private:
     std::unique_ptr<net::steady_timer> tick_timer_;
 
     std::unordered_map<TorrentId, std::unique_ptr<TorrentState>> states_;
-    std::unordered_set<TorrentId> removed_ids_;  // guards alert handlers against late alerts
+    // Guards alert handlers against late alerts of a removed torrent; an id
+    // leaves it when the torrent is added again (app BUG-68).
+    std::unordered_set<TorrentId> removed_ids_;
     mutable std::mutex mu_;
 
     EventCallback event_cb_;

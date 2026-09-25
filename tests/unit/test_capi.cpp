@@ -417,6 +417,49 @@ TEST_F(CApiTest, PauseAndStartTorrentOutsideQueue) {
     ss_engine_destroy(engine);
 }
 
+// Removed and added again in the same session, a torrent gets its files
+// again (app BUG-68): the guard against late alerts of the removed torrent
+// skipped the new one's alerts too. No network: proxy on port 0, and the
+// fixture is a .torrent file with its metadata.
+TEST_F(CApiTest, AddedAgainAfterRemovalGetsItsMetadata) {
+    auto config = make_config(
+        R"("proxy_enabled":true,"proxy_hostname":"127.0.0.1","proxy_port":0)");
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+
+    auto has_metadata = [&](const char* id) {
+        for (int i = 0; i < 50; ++i) {
+            char* json = nullptr;
+            if (ss_get_status(engine, id, &json) == SS_OK && json) {
+                bool yes = std::string(json).find("\"has_metadata\":true") != std::string::npos;
+                ss_free_string(json);
+                if (yes) return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        return false;
+    };
+
+    char id_buf[128] = {};
+    auto path = torrent_path();
+    ASSERT_EQ(ss_add_torrent(engine, path.c_str(), id_buf, sizeof(id_buf)), SS_OK);
+    ASSERT_TRUE(has_metadata(id_buf));
+
+    ASSERT_EQ(ss_remove_torrent(engine, id_buf, false), SS_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    char again[128] = {};
+    ASSERT_EQ(ss_add_torrent(engine, path.c_str(), again, sizeof(again)), SS_OK);
+    EXPECT_STREQ(again, id_buf);
+    EXPECT_TRUE(has_metadata(again));
+
+    char* files = nullptr;
+    EXPECT_EQ(ss_list_files(engine, again, &files), SS_OK);
+    if (files) ss_free_string(files);
+
+    ss_engine_destroy(engine);
+}
+
 TEST_F(CApiTest, PauseAndResumeTorrent) {
     auto config = make_config();
     SeekServeEngine* engine = ss_engine_create(config.c_str());
