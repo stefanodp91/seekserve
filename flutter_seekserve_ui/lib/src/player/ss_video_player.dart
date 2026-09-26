@@ -65,6 +65,23 @@ class SsVideoPlayer extends StatefulWidget {
   State<SsVideoPlayer> createState() => _SsVideoPlayerState();
 }
 
+/// mpv's network timeout for a local SeekServe stream, in seconds; 0 = no
+/// timeout.
+///
+/// media_kit sets it to 5 s: after a seek beyond the part already
+/// downloaded, the local SeekServe server keeps the connection open while
+/// the pieces arrive, but mpv gave up after 5 s of silence, retried for about
+/// half a minute and then took the stream for finished, jumping to the end
+/// (app BUG-83). The server ends the response itself when the stream goes
+/// away, so the player can wait as long as it takes. Other URLs keep
+/// media_kit's timeout.
+const String _localNetworkTimeoutSeconds = '0';
+
+bool _isLocalStream(String url) {
+  final host = Uri.tryParse(url)?.host;
+  return host == '127.0.0.1' || host == 'localhost' || host == '::1';
+}
+
 class _SsVideoPlayerState extends State<SsVideoPlayer> {
   Player? _player;
   VideoController? _videoController;
@@ -159,8 +176,87 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
       });
     }
 
-    _player!.open(Media(url));
+    unawaited(_open(_player!, url));
     if (mounted) setState(() {});
+  }
+
+  Future<void> _open(Player player, String url) async {
+    final platform = player.platform;
+    if (platform is NativePlayer && _isLocalStream(url)) {
+      // Read when the stream opens, so it has to be set before open().
+      try {
+        await platform.setProperty(
+          'network-timeout',
+          _localNetworkTimeoutSeconds,
+        );
+      } on AssertionError {
+        // The player was disposed meanwhile: the check below stops here.
+      }
+    }
+    if (!mounted || !identical(player, _player)) return;
+    await player.open(Media(url));
+  }
+
+  /// Opens the stream again at [target], keeping the chosen tracks.
+  ///
+  /// A seek queues behind a read that is waiting for data: with no network
+  /// timeout (see [_localNetworkTimeoutSeconds]) it would run only once the
+  /// awaited pieces arrive, maybe never. Opening again aborts that read, the
+  /// server sees the connection close, and a new request asks for [target].
+  Future<void> _reopenAt(Duration target) async {
+    final player = _player;
+    if (player == null || !mounted) return;
+    final audio = player.state.track.audio;
+    final subtitle = player.state.track.subtitle;
+    final play = player.state.playing;
+    try {
+      await player.open(Media(widget.streamUrl, start: target), play: play);
+    } on AssertionError {
+      return; // disposed meanwhile
+    }
+    if (!mounted || !identical(player, _player)) return;
+    await _restoreTracks(player, audio, subtitle);
+  }
+
+  Future<void> _restoreTracks(
+    Player player,
+    AudioTrack audio,
+    SubtitleTrack subtitle,
+  ) async {
+    final keepAudio = audio.id != 'auto';
+    final keepSubtitle = subtitle.id != 'auto';
+    if (!keepAudio && !keepSubtitle) return;
+    if (keepSubtitle && (subtitle.id == 'no' || subtitle.uri)) {
+      await player.setSubtitleTrack(subtitle);
+    }
+    final embeddedSubtitle = keepSubtitle && subtitle.id != 'no' && !subtitle.uri;
+    if (!keepAudio && !embeddedSubtitle) return;
+    try {
+      // The reopened file lists its tracks again once it is loaded.
+      final tracks = await player.stream.tracks
+          .firstWhere(
+            (t) =>
+                (!keepAudio || t.audio.any((a) => a.id == audio.id)) &&
+                (!embeddedSubtitle ||
+                    t.subtitle.any((s) => s.id == subtitle.id)),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (!mounted || !identical(player, _player)) return;
+      if (keepAudio) {
+        await player.setAudioTrack(
+          tracks.audio.firstWhere((a) => a.id == audio.id),
+        );
+      }
+      if (embeddedSubtitle) {
+        await player.setSubtitleTrack(
+          tracks.subtitle.firstWhere((s) => s.id == subtitle.id),
+        );
+      }
+    } on TimeoutException {
+      // The file did not load in time: its default tracks stay.
+    } on StateError {
+      // The player was disposed while waiting.
+    }
   }
 
   Widget _buildControls(VideoState state) {
@@ -177,6 +273,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
       onPlayPause: widget.onPlayPause,
       title: widget.title,
       onBack: widget.onBack,
+      onReopenAt: widget.streamUrl.startsWith('file://') ? null : _reopenAt,
     );
   }
 
@@ -259,6 +356,10 @@ class _PlayerOverlay extends StatefulWidget {
   final String? title;
   final VoidCallback? onBack;
 
+  /// Opens the stream again at a position: used for seeks while playback
+  /// waits for data, which a plain seek could not interrupt.
+  final Future<void> Function(Duration target)? onReopenAt;
+
   const _PlayerOverlay({
     required this.player,
     this.torrentStatus,
@@ -272,6 +373,7 @@ class _PlayerOverlay extends StatefulWidget {
     this.onPlayPause,
     this.title,
     this.onBack,
+    this.onReopenAt,
   });
 
   @override
@@ -281,6 +383,11 @@ class _PlayerOverlay extends StatefulWidget {
 class _PlayerOverlayState extends State<_PlayerOverlay> {
   bool _visible = true;
   Timer? _hideTimer;
+
+  /// Where the seek bar points while it is dragged, and briefly after the
+  /// release until the player reports the new position.
+  Duration? _scrubTarget;
+  Timer? _scrubTimer;
 
   static const _arrowBack = IconData(0xe092, fontFamily: 'MaterialIcons');
   static const _fullscreen = IconData(0xe2cb, fontFamily: 'MaterialIcons');
@@ -301,7 +408,19 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _scrubTimer?.cancel();
     super.dispose();
+  }
+
+  void _seekTo(Duration target) {
+    final reopen = widget.onReopenAt;
+    if (reopen != null && widget.player.state.buffering) {
+      unawaited(reopen(target));
+    } else {
+      widget.player.seek(target);
+    }
+    widget.onSeek?.call(target);
+    _onInteraction();
   }
 
   void _scheduleHide() {
@@ -627,8 +746,8 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
           return StreamBuilder<Duration>(
             stream: widget.player.stream.duration,
             builder: (ctx, durSnap) {
-              final position = posSnap.data ?? Duration.zero;
               final duration = durSnap.data ?? Duration.zero;
+              final position = _scrubTarget ?? posSnap.data ?? Duration.zero;
               final maxMs = duration.inMilliseconds.toDouble();
               final posMs = position.inMilliseconds
                   .toDouble()
@@ -650,10 +769,21 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
                       activeColor: theme.primary,
                       trackColor: const Color(0x40FFFFFF),
                       onChanged: (v) {
-                        final target = Duration(milliseconds: v.toInt());
-                        widget.player.seek(target);
-                        widget.onSeek?.call(target);
+                        _scrubTimer?.cancel();
+                        setState(
+                          () => _scrubTarget =
+                              Duration(milliseconds: v.toInt()),
+                        );
                         _onInteraction();
+                      },
+                      // One seek where the drag ends: seeking on every drag
+                      // update opened a stream request each time, and the
+                      // server takes at most four at once.
+                      onChangeEnd: (v) {
+                        _seekTo(Duration(milliseconds: v.toInt()));
+                        _scrubTimer = Timer(const Duration(seconds: 1), () {
+                          if (mounted) setState(() => _scrubTarget = null);
+                        });
                       },
                     ),
                   ),
@@ -694,10 +824,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
                       color: const Color(0xFFFFFFFF),
                       onPressed: () {
                         final t = position - const Duration(seconds: 10);
-                        final target = t < Duration.zero ? Duration.zero : t;
-                        widget.player.seek(target);
-                        widget.onSeek?.call(target);
-                        _onInteraction();
+                        _seekTo(t < Duration.zero ? Duration.zero : t);
                       },
                     ),
                     SsIconButton(
@@ -715,10 +842,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
                       color: const Color(0xFFFFFFFF),
                       onPressed: () {
                         final t = position + const Duration(seconds: 10);
-                        final target = t > duration ? duration : t;
-                        widget.player.seek(target);
-                        widget.onSeek?.call(target);
-                        _onInteraction();
+                        _seekTo(t > duration ? duration : t);
                       },
                     ),
                   ],

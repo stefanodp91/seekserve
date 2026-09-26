@@ -61,7 +61,10 @@ class SsSeekControls extends StatelessWidget {
                         child: SsSlider(
                           value: posMs,
                           max: maxMs > 0 ? maxMs : 1.0,
-                          onChanged: (v) {
+                          // One seek where the drag ends, not one stream
+                          // request per drag update.
+                          onChanged: (_) {},
+                          onChangeEnd: (v) {
                             final target = Duration(milliseconds: v.toInt());
                             player.seek(target);
                             onSeek?.call(target);

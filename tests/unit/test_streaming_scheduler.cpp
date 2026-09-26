@@ -223,6 +223,38 @@ TEST_F(StreamingSchedulerTest, NoPendingDeadlinesWhenAllComplete) {
     EXPECT_EQ(sched.active_deadlines(), 0);
 }
 
+// Prefetching the lookahead when libtorrent has no time-critical piece
+// cancels every outstanding request: it waits until the hot window needs a
+// piece, unless earlier deadlines are still pending.
+TEST_F(StreamingSchedulerTest, LookaheadWaitsWhileTheHotWindowIsDownloaded) {
+    auto sched = make_scheduler();
+    for (int i = 0; i < 5; ++i) avail_->mark_complete(i);
+
+    sched.on_range_request(ByteRange{0, 100}, s_handle);
+    EXPECT_EQ(sched.active_deadlines(), 0);
+}
+
+TEST_F(StreamingSchedulerTest, LookaheadFollowsWhenTheHotWindowNeedsAPiece) {
+    auto sched = make_scheduler();
+    for (int i = 0; i < 4; ++i) avail_->mark_complete(i);
+
+    sched.on_range_request(ByteRange{0, 100}, s_handle);
+    EXPECT_GT(sched.active_deadlines(), 1);
+}
+
+TEST_F(StreamingSchedulerTest, PendingDeadlinesKeepTheLookaheadGoing) {
+    auto sched = make_scheduler();
+    sched.on_range_request(ByteRange{0, 100}, s_handle);
+    ASSERT_GT(sched.active_deadlines(), 5);
+
+    for (int i = 0; i < 5; ++i) {
+        avail_->mark_complete(i);
+        sched.on_piece_complete(i);
+    }
+    sched.on_range_request(ByteRange{0, 100}, s_handle);
+    EXPECT_GT(sched.active_deadlines(), 0);
+}
+
 TEST_F(StreamingSchedulerTest, OnPieceCompleteDecrementsActiveDeadlines) {
     auto sched = make_scheduler();
 

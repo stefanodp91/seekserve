@@ -51,6 +51,10 @@ struct ServerConfig {
     int max_concurrent_streams = 4;
     std::chrono::seconds read_timeout{30};
     std::chrono::seconds connection_timeout{60};
+    // How long a stream response may wait for missing pieces before giving
+    // up. 0 = as long as the client stays connected: the response then never
+    // ends short while the player still waits for a seek target (app BUG-83).
+    std::chrono::seconds stall_timeout{0};
 };
 
 struct CacheConfig {

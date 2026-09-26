@@ -25,9 +25,21 @@ public:
                PieceAvailabilityIndex& avail,
                std::chrono::milliseconds read_timeout = std::chrono::seconds(30));
 
+    // Waits up to the read timeout given at construction for the pieces
+    // covering [offset, offset+len), then reads them from disk.
     Result<std::vector<std::uint8_t>> read(std::int64_t offset, std::int64_t len);
+    // Same, waiting at most `wait`: lets a caller wait in slices and check
+    // in between whether it should keep waiting (see HttpRangeServer).
+    Result<std::vector<std::uint8_t>> read(std::int64_t offset, std::int64_t len,
+                                           std::chrono::milliseconds wait);
     bool is_available(std::int64_t offset, std::int64_t len) const;
+    // Piece holding the byte at `offset`, or -1 once cancelled.
+    PieceIndex piece_at(std::int64_t offset) const;
+    // Bytes from `offset` to the end of its piece, or -1 once cancelled.
+    std::int64_t bytes_to_piece_end(std::int64_t offset) const;
     void notify_piece_complete();
+    // After cancel() returns no call touches the mapper or the availability
+    // index again, so their owner may destroy them.
     void cancel();
     std::int64_t file_size() const;
 
@@ -40,7 +52,11 @@ private:
     ByteRangeMapper& mapper_;
     PieceAvailabilityIndex& avail_;
     std::chrono::milliseconds timeout_;
+    std::int64_t file_size_;
 
+    // Guards every use of mapper_ and avail_ together with cancelled_, and
+    // the condition variable, so a completion is never missed between the
+    // check and the wait.
     mutable std::mutex mu_;
     std::condition_variable cv_;
     std::atomic<bool> cancelled_{false};

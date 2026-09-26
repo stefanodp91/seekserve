@@ -72,7 +72,7 @@ protected:
             lt::torrent_handle{}, 0, file_path_, *mapper_, *avail_, std::chrono::seconds(5));
 
         // Set up server
-        server_ = std::make_unique<HttpRangeServer>(ioc_, ServerConfig{});
+        server_ = std::make_shared<HttpRangeServer>(ioc_, ServerConfig{});
         server_->set_byte_source(source_, "abc123", 0);
         server_->set_auth_token("testtoken");
 
@@ -154,7 +154,7 @@ protected:
     std::shared_ptr<ByteSource> source_;
 
     net::io_context ioc_;
-    std::unique_ptr<HttpRangeServer> server_;
+    std::shared_ptr<HttpRangeServer> server_;
     std::uint16_t port_ = 0;
     std::thread io_thread_;
 };

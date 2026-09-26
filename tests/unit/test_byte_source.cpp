@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdio>
 #include <fstream>
 #include <thread>
@@ -243,6 +244,85 @@ TEST_F(ByteSourceTest, ReadAfterCancelFailsImmediately) {
     auto result = src->read(0, 100);
     ASSERT_FALSE(result.ok());
     EXPECT_EQ(result.error(), make_error_code(errc::cancelled));
+}
+
+// --- read() with a wait of its own (HttpRangeServer waits in slices) ---
+
+TEST_F(ByteSourceTest, ReadWithShortWaitTimesOutBeforeTheSourceTimeout) {
+    auto src = make_source(std::chrono::seconds(30));
+
+    auto started = std::chrono::steady_clock::now();
+    auto result = src->read(0, 100, std::chrono::milliseconds(50));
+    auto elapsed = std::chrono::steady_clock::now() - started;
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error(), make_error_code(errc::timeout_waiting_for_piece));
+    EXPECT_LT(elapsed, std::chrono::seconds(5));
+}
+
+TEST_F(ByteSourceTest, ReadWithWaitReturnsDataWhenAvailable) {
+    avail_->mark_complete(0);
+    auto src = make_source();
+
+    auto result = src->read(10, 20, std::chrono::milliseconds(50));
+    ASSERT_TRUE(result.ok()) << result.error().message();
+    ASSERT_EQ(result.value().size(), 20u);
+    EXPECT_EQ(result.value()[0], test_byte(10));
+}
+
+// --- piece_at() ---
+
+TEST_F(ByteSourceTest, PieceAtMapsOffsets) {
+    auto src = make_source();
+    EXPECT_EQ(src->piece_at(0), 0);
+    EXPECT_EQ(src->piece_at(999), 0);
+    EXPECT_EQ(src->piece_at(1000), 1);
+    EXPECT_EQ(src->piece_at(2499), 2);
+}
+
+TEST_F(ByteSourceTest, BytesToPieceEnd) {
+    auto src = make_source();
+    EXPECT_EQ(src->bytes_to_piece_end(0), 1000);
+    EXPECT_EQ(src->bytes_to_piece_end(999), 1);
+    EXPECT_EQ(src->bytes_to_piece_end(1000), 1000);
+    src->cancel();
+    EXPECT_EQ(src->bytes_to_piece_end(0), -1);
+}
+
+// Guards the lock taken in notify_piece_complete(): a completion signalled
+// right after a reader checked the pieces, and before it started to wait,
+// was missed until the next piece or the timeout.
+TEST_F(ByteSourceTest, CompletionRightAfterTheCheckWakesTheReader) {
+    int slow = 0;
+    const int kIterations = 20000;
+    for (int i = 0; i < kIterations; ++i) {
+        PieceAvailabilityIndex avail(kNumPieces, kPieceLength, kLastPieceSize);
+        ByteSource src(lt::torrent_handle{}, 0, file_path_, *mapper_, avail,
+                       std::chrono::seconds(30));
+        std::atomic<bool> started{false};
+        std::thread reader([&] {
+            started.store(true);
+            auto t0 = std::chrono::steady_clock::now();
+            (void)src.read(0, 10, std::chrono::milliseconds(200));
+            if (std::chrono::steady_clock::now() - t0 > std::chrono::milliseconds(150)) ++slow;
+        });
+        while (!started.load()) {}
+        avail.mark_complete(0);
+        src.notify_piece_complete();
+        reader.join();
+    }
+    EXPECT_EQ(slow, 0) << slow << " of " << kIterations << " reads missed the wakeup";
+}
+
+TEST_F(ByteSourceTest, CancelledSourceNoLongerUsesTheIndex) {
+    avail_->mark_complete(0);
+    auto src = make_source();
+    src->cancel();
+
+    // Their owner may destroy the mapper and the index after cancel().
+    EXPECT_EQ(src->piece_at(0), -1);
+    EXPECT_FALSE(src->is_available(0, 100));
+    EXPECT_EQ(src->file_size(), kFileSize);
 }
 
 // --- is_available() ---

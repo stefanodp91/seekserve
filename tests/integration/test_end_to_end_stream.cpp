@@ -58,7 +58,7 @@ protected:
 
         // Set up HTTP servers
         srv_config_.bind_address = "127.0.0.1";
-        range_server_ = std::make_unique<HttpRangeServer>(ioc_, srv_config_);
+        range_server_ = std::make_shared<HttpRangeServer>(ioc_, srv_config_);
         range_server_->set_auth_token(auth_token_);
 
         auto range_result = range_server_->start(0);
@@ -128,7 +128,7 @@ protected:
 
     net::io_context ioc_;
     ServerConfig srv_config_;
-    std::unique_ptr<HttpRangeServer> range_server_;
+    std::shared_ptr<HttpRangeServer> range_server_;
     std::unique_ptr<ControlApiServer> api_server_;
     std::unique_ptr<OfflineCacheManager> cache_;
     std::uint16_t range_port_ = 0;

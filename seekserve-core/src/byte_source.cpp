@@ -18,20 +18,26 @@ ByteSource::ByteSource(lt::torrent_handle handle,
     , mapper_(mapper)
     , avail_(avail)
     , timeout_(read_timeout)
+    , file_size_(mapper.file_size())
 {
 }
 
 Result<std::vector<std::uint8_t>> ByteSource::read(std::int64_t offset, std::int64_t len) {
-    if (cancelled_.load(std::memory_order_acquire)) {
-        return make_error_code(errc::cancelled);
-    }
+    return read(offset, len, timeout_);
+}
 
-    ByteRange range{offset, offset + len - 1};
-    auto span = mapper_.map(range);
-
+Result<std::vector<std::uint8_t>> ByteSource::read(std::int64_t offset, std::int64_t len,
+                                                   std::chrono::milliseconds wait) {
     {
         std::unique_lock lock(mu_);
-        bool ok = cv_.wait_for(lock, timeout_, [&] {
+        if (cancelled_.load(std::memory_order_acquire)) {
+            return make_error_code(errc::cancelled);
+        }
+
+        ByteRange range{offset, offset + len - 1};
+        auto span = mapper_.map(range);
+
+        bool ok = cv_.wait_for(lock, wait, [&] {
             return cancelled_.load(std::memory_order_acquire) || avail_.is_span_complete(span);
         });
 
@@ -67,22 +73,44 @@ Result<std::vector<std::uint8_t>> ByteSource::read_from_disk(std::int64_t offset
 }
 
 bool ByteSource::is_available(std::int64_t offset, std::int64_t len) const {
+    std::lock_guard lock(mu_);
+    if (cancelled_.load(std::memory_order_acquire)) return false;
     ByteRange range{offset, offset + len - 1};
     auto span = mapper_.map(range);
     return avail_.is_span_complete(span);
 }
 
+PieceIndex ByteSource::piece_at(std::int64_t offset) const {
+    std::lock_guard lock(mu_);
+    if (cancelled_.load(std::memory_order_acquire)) return -1;
+    return mapper_.map(ByteRange{offset, offset}).first;
+}
+
+std::int64_t ByteSource::bytes_to_piece_end(std::int64_t offset) const {
+    std::lock_guard lock(mu_);
+    if (cancelled_.load(std::memory_order_acquire)) return -1;
+    auto span = mapper_.map(ByteRange{offset, offset});
+    return static_cast<std::int64_t>(mapper_.piece_length()) - span.first_offset;
+}
+
 void ByteSource::notify_piece_complete() {
+    // Taking the lock orders this after a reader's check of the pieces: a
+    // completion landing between that check and the wait would otherwise be
+    // missed until the next piece or the timeout.
+    { std::lock_guard lock(mu_); }
     cv_.notify_all();
 }
 
 void ByteSource::cancel() {
-    cancelled_.store(true, std::memory_order_release);
+    {
+        std::lock_guard lock(mu_);
+        cancelled_.store(true, std::memory_order_release);
+    }
     cv_.notify_all();
 }
 
 std::int64_t ByteSource::file_size() const {
-    return mapper_.file_size();
+    return file_size_;
 }
 
 } // namespace seekserve

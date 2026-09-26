@@ -134,8 +134,15 @@ void StreamingScheduler::set_deadlines(lt::torrent_handle& h) {
         ++deadline_count;
     }
 
-    // Lookahead: longer deadlines (2000ms base, +200ms per piece beyond hot)
-    for (int i = 0; i < lookahead_size && deadline_count < budget; ++i) {
+    // Lookahead: longer deadlines (2000ms base, +200ms per piece beyond hot).
+    // Only while the hot window needs pieces, a seek boost runs or earlier
+    // deadlines are still pending: when libtorrent has no time-critical
+    // piece, a new deadline cancels every outstanding request on every peer
+    // (torrent::set_piece_deadline). As the playhead follows the reader,
+    // prefetching a far piece each time it moves on would keep dropping the
+    // pipelines of a swarm that is ahead of playback.
+    const bool extend = deadline_count > 0 || seek_boosting_ || active_deadlines_ > 0;
+    for (int i = 0; extend && i < lookahead_size && deadline_count < budget; ++i) {
         PieceIndex p = playhead_piece_ + hot_size + i;
         if (p < file_first || p >= file_end) continue;
         if (avail_.is_complete(p)) continue;

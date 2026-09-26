@@ -9,7 +9,9 @@
 #include <libtorrent/torrent_flags.hpp>
 #include <libtorrent/file_storage.hpp>
 
+#include <algorithm>
 #include <filesystem>
+#include <thread>
 
 namespace seekserve {
 
@@ -329,14 +331,6 @@ Result<void> SeekServeEngine::select_file(const TorrentId& id, FileIndex fi) {
     // Register byte source on HTTP server if running
     if (http_server_) {
         http_server_->set_byte_source(state->source, id, fi, file_info.value().path);
-
-        // Wire range callback → scheduler
-        auto* sched_ptr = state->scheduler.get();
-        http_server_->set_range_callback(
-            [sched_ptr, handle](const ByteRange& range,
-                                const TorrentId&, FileIndex) mutable {
-                sched_ptr->on_range_request(range, handle);
-            });
     }
 
     {
@@ -409,6 +403,21 @@ Result<std::uint16_t> SeekServeEngine::start_server(std::uint16_t port) {
     http_server_ = std::make_shared<HttpRangeServer>(ioc_, config_.server);
     http_server_->set_auth_token(config_.auth_token);
 
+    // Range requests and reader progress move the scheduler of the torrent
+    // and file they are for. The callback used to capture the scheduler of
+    // the last select_file of any torrent, so a download selected after the
+    // stream took its seeks, and it pointed to a freed scheduler once that
+    // selection was replaced or removed (app BUG-83).
+    http_server_->set_range_callback(
+        [this](const ByteRange& range, const TorrentId& id, FileIndex fi) {
+            std::lock_guard lock(mu_);
+            auto* state = find_state(id);
+            if (!state || !state->scheduler || state->selected_file != fi) return;
+            auto handle = sessions_->get_handle(id);
+            if (!handle.is_valid()) return;
+            state->scheduler->on_range_request(range, handle);
+        });
+
     api_server_ = std::make_unique<ControlApiServer>(
         ioc_, *sessions_, catalog_, *http_server_, *cache_, config_.auth_token);
 
@@ -444,11 +453,6 @@ Result<std::uint16_t> SeekServeEngine::start_server(std::uint16_t port) {
 void SeekServeEngine::stop_server() {
     if (!server_running_.exchange(false)) return;
 
-    if (tick_timer_) {
-        tick_timer_->cancel();
-        tick_timer_.reset();
-    }
-
     if (api_server_) api_server_->stop();
     if (http_server_) http_server_->stop();
 
@@ -460,6 +464,21 @@ void SeekServeEngine::stop_server() {
         }
     }
 
+    // Stream connection threads own sockets of ioc_: let them end before
+    // ioc_ can go (stop() has woken them all). Bounded, so a stuck thread
+    // cannot hold up the shutdown.
+    if (http_server_) {
+        auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (http_server_->active_connections() > 0 &&
+               std::chrono::steady_clock::now() < until) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (http_server_->active_connections() > 0) {
+            spdlog::warn("Engine: {} stream connection(s) still ending",
+                         http_server_->active_connections());
+        }
+    }
+
     if (work_guard_) {
         work_guard_.reset();
     }
@@ -468,6 +487,10 @@ void SeekServeEngine::stop_server() {
     if (io_thread_.joinable()) {
         io_thread_.join();
     }
+
+    // Only now: on_tick runs on the io thread and re-arms the timer, and a
+    // completion already queued ignores cancel().
+    tick_timer_.reset();
 
     spdlog::info("Engine: servers stopped");
 }
@@ -496,7 +519,25 @@ void SeekServeEngine::on_tick(const boost::system::error_code& ec) {
             if (!state->scheduler) continue;
             auto handle = sessions_->get_handle(id);
             if (!handle.is_valid()) continue;
-            auto st = handle.status();
+            auto st = handle.status(lt::torrent_handle::query_pieces);
+
+            // Pieces libtorrent has but the index missed (a completion
+            // between select_file's snapshot and the new state, or a
+            // dropped alert) would keep a stream waiting forever.
+            if (state->mapper && st.pieces.size() > 0) {
+                int end = std::min(state->mapper->end_piece(), st.pieces.size());
+                bool added = false;
+                for (int p = state->mapper->first_piece(); p < end; ++p) {
+                    if (!state->avail.is_complete(p) &&
+                        st.pieces.get_bit(lt::piece_index_t{p})) {
+                        state->avail.mark_complete(p);
+                        state->scheduler->on_piece_complete(p);
+                        added = true;
+                    }
+                }
+                if (added && state->source) state->source->notify_piece_complete();
+            }
+
             state->scheduler->tick(handle, st);
 
             // Update cache progress for selected file
