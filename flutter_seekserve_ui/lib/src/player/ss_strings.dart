@@ -1,9 +1,10 @@
 /// The words the player shows. An app gives its own, in its language;
 /// without them the player says what it always said, in English.
 ///
-/// The three with a detail (an HTTP status, the text of an exception, the id
-/// of a track) are builders, so the app chooses whether to say the detail:
-/// the text of an exception can carry the address of the stream.
+/// The ones with a detail (an HTTP status, the text of an exception, the
+/// player's own error, the id of a track) are builders, so the app chooses
+/// whether to say the detail: the text of an exception and the player's own
+/// error can carry the address of the stream.
 class SsStrings {
   const SsStrings({
     this.connecting = 'Connecting...',
@@ -16,6 +17,7 @@ class SsStrings {
         'Audio and seek work — test on a real device.',
     this.serverErrorBuilder,
     this.cannotReachBuilder,
+    this.playerErrorBuilder,
     this.trackBuilder,
   });
 
@@ -39,6 +41,7 @@ class SsStrings {
 
   final String Function(int statusCode)? serverErrorBuilder;
   final String Function(Object error)? cannotReachBuilder;
+  final String Function(String message)? playerErrorBuilder;
   final String Function(String id)? trackBuilder;
 
   /// The stream server answered with an error status.
@@ -49,6 +52,11 @@ class SsStrings {
   /// The stream server did not answer.
   String cannotReach(Object error) =>
       cannotReachBuilder?.call(error) ?? 'Cannot reach stream: $error';
+
+  /// The player's own error, as it words it: in English, and sometimes with
+  /// the address it could not open.
+  String playerError(String message) =>
+      playerErrorBuilder?.call(message) ?? message;
 
   /// The name of a track that has neither a title nor a language.
   String track(String id) => trackBuilder?.call(id) ?? 'Track $id';

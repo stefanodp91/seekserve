@@ -15,6 +15,18 @@ void main() {
     expect(strings.cannotReach('refused'), 'Cannot reach stream: refused');
     expect(strings.track('3'), 'Track 3');
     expect(strings.noVideoFrames, contains('iOS Simulator'));
+    expect(strings.playerError('Failed to open x'), 'Failed to open x');
+  });
+
+  test('the player\'s own error, which can name the stream\'s address, is '
+      'worded by the app too', () {
+    final strings = SsStrings(
+      playerErrorBuilder: (message) => 'Il video non si apre.',
+    );
+    expect(
+      strings.playerError('Failed to open http://127.0.0.1:41234/stream/0'),
+      'Il video non si apre.',
+    );
   });
 
   test('an app gives its own words, also for what carries a detail: it '

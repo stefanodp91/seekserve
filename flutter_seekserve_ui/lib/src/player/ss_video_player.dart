@@ -253,7 +253,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
         });
         return;
       }
-      _fail(err);
+      _fail(widget.strings.playerError(err));
     });
     _player!.stream.buffering.listen((buffering) {
       if (mounted) widget.onBufferingChanged?.call(buffering);
