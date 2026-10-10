@@ -37,6 +37,7 @@ export 'src/player/ss_buffering_overlay.dart';
 export 'src/player/ss_player_status_bar.dart';
 export 'src/player/ss_position_reporter.dart';
 export 'src/player/ss_seek_controls.dart';
+export 'src/player/ss_strings.dart';
 export 'src/player/ss_track_selector.dart';
 export 'src/player/ss_video_player.dart';
 

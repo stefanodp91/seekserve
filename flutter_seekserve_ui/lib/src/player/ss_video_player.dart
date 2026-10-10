@@ -13,6 +13,7 @@ import '../utils/format.dart';
 import 'ss_buffering_overlay.dart';
 import 'ss_player_status_bar.dart';
 import 'ss_position_reporter.dart';
+import 'ss_strings.dart';
 import 'ss_track_selector.dart';
 
 /// Complete video player widget with overlay controls, seek bar,
@@ -71,6 +72,32 @@ class SsVideoPlayer extends StatefulWidget {
   /// Called when the player says the video is over.
   final VoidCallback? onCompleted;
 
+  /// Called when the player starts waiting for data and when it stops:
+  /// true while it waits.
+  final void Function(bool buffering)? onBufferingChanged;
+
+  /// Called with the words of an error the player shows: the stream that
+  /// does not answer, or the player's own. Not for the errors it tries
+  /// again by itself ([ssIsFormatNotReady]).
+  final void Function(String message)? onError;
+
+  /// Pauses playback when the app goes to the background, after saying the
+  /// point reached ([onPosition]). Off by default: the player goes on, as
+  /// before.
+  final bool pauseInBackground;
+
+  /// The words the player shows; in English by default.
+  final SsStrings strings;
+
+  /// Whether the error view also shows the address of the stream. On by
+  /// default, as before; an app that does not want it on the screen turns
+  /// it off, and gives [strings] whose errors do not carry it either.
+  final bool showStreamUrl;
+
+  /// Buttons of the app in the top bar, before the player's own (audio,
+  /// subtitles, fullscreen).
+  final List<Widget> topBarActions;
+
   const SsVideoPlayer({
     super.key,
     required this.streamUrl,
@@ -88,6 +115,12 @@ class SsVideoPlayer extends StatefulWidget {
     this.onPosition,
     this.positionInterval = const Duration(seconds: 5),
     this.onCompleted,
+    this.onBufferingChanged,
+    this.onError,
+    this.pauseInBackground = false,
+    this.strings = const SsStrings(),
+    this.showStreamUrl = true,
+    this.topBarActions = const [],
   });
 
   @override
@@ -132,8 +165,16 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.paused) return;
+    if (widget.pauseInBackground) _player?.pause();
     // In the background the app may be killed without another word.
-    if (state == AppLifecycleState.paused) _positions?.flush();
+    _positions?.flush();
+  }
+
+  /// Shows [message] and tells the app.
+  void _fail(String message) {
+    setState(() => _error = message);
+    widget.onError?.call(message);
   }
 
   @override
@@ -169,15 +210,11 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
       if (statusCode >= 200 && statusCode < 400) {
         _startPlayer(widget.streamUrl);
       } else {
-        setState(() {
-          _error = 'Stream server returned HTTP $statusCode';
-        });
+        _fail(widget.strings.serverError(statusCode));
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = 'Cannot reach stream: $e';
-      });
+      _fail(widget.strings.cannotReach(e));
     }
   }
 
@@ -209,14 +246,17 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
       if (!mounted) return;
       // "Failed to recognize file format" means the torrent hasn't buffered
       // enough data yet. Retry silently after 4 seconds.
-      if (err.contains('recognize file format') || err.contains('Invalid data found')) {
+      if (ssIsFormatNotReady(err)) {
         _formatRetryTimer?.cancel();
         _formatRetryTimer = Timer(const Duration(seconds: 4), () {
           if (mounted) _startPlayer(url);
         });
         return;
       }
-      setState(() => _error = err);
+      _fail(err);
+    });
+    _player!.stream.buffering.listen((buffering) {
+      if (mounted) widget.onBufferingChanged?.call(buffering);
     });
     _player!.stream.width.listen((w) {
       if (w != null && w > 0 && _noVideoFrames && mounted) {
@@ -334,6 +374,8 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
       title: widget.title,
       onBack: widget.onBack,
       onReopenAt: widget.streamUrl.startsWith('file://') ? null : _reopenAt,
+      strings: widget.strings,
+      topBarActions: widget.topBarActions,
     );
   }
 
@@ -373,23 +415,24 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
                   style: theme.bodyStyle.copyWith(color: theme.error),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  widget.streamUrl,
-                  style: theme.monoStyle.copyWith(fontSize: 10),
-                  textAlign: TextAlign.center,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                if (widget.showStreamUrl) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    widget.streamUrl,
+                    style: theme.monoStyle.copyWith(fontSize: 10),
+                    textAlign: TextAlign.center,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ] else if (_noVideoFrames)
                 Text(
-                  'Video rendering not available on iOS Simulator.\n'
-                  'Audio and seek work — test on a real device.',
+                  widget.strings.noVideoFrames,
                   style: theme.captionStyle,
                   textAlign: TextAlign.center,
                 )
               else
-                Text('Connecting...', style: theme.captionStyle),
+                Text(widget.strings.connecting, style: theme.captionStyle),
             ],
           ),
         ),
@@ -423,6 +466,9 @@ class _PlayerOverlay extends StatefulWidget {
   /// waits for data, which a plain seek could not interrupt.
   final Future<void> Function(Duration target)? onReopenAt;
 
+  final SsStrings strings;
+  final List<Widget> topBarActions;
+
   const _PlayerOverlay({
     required this.player,
     this.torrentStatus,
@@ -437,6 +483,8 @@ class _PlayerOverlay extends StatefulWidget {
     this.title,
     this.onBack,
     this.onReopenAt,
+    this.strings = const SsStrings(),
+    this.topBarActions = const [],
   });
 
   @override
@@ -516,7 +564,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
         .where((t) => t.id != 'auto')
         .map((t) => SsTrackOption(
               id: t.id,
-              label: t.title ?? t.language ?? 'Track ${t.id}',
+              label: t.title ?? t.language ?? widget.strings.track(t.id),
               subtitle: t.language,
             ))
         .toList();
@@ -525,7 +573,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
 
     final selected = await SsTrackSelector.show(
       context,
-      title: 'Audio',
+      title: widget.strings.audio,
       options: options,
       selectedId: current.id,
     );
@@ -545,14 +593,14 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
     final current = widget.player.state.track.subtitle;
 
     final options = <SsTrackOption>[
-      const SsTrackOption(id: 'off', label: 'Off'),
+      SsTrackOption(id: 'off', label: widget.strings.subtitlesOff),
     ];
 
     // Add embedded tracks
     for (final t in embeddedTracks) {
       options.add(SsTrackOption(
         id: 'embedded:${t.id}',
-        label: t.title ?? t.language ?? 'Track ${t.id}',
+        label: t.title ?? t.language ?? widget.strings.track(t.id),
         subtitle: t.language,
       ));
     }
@@ -581,7 +629,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
 
     final selected = await SsTrackSelector.show(
       context,
-      title: 'Subtitles',
+      title: widget.strings.subtitles,
       options: options,
       selectedId: selectedId,
     );
@@ -623,15 +671,18 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
           initialData: true,
           builder: (ctx, snap) {
             if (snap.data != true) return const SizedBox.shrink();
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  SsSpinner(),
-                  SizedBox(height: 8),
+                  const SsSpinner(),
+                  const SizedBox(height: 8),
                   Text(
-                    'Buffering...',
-                    style: TextStyle(fontSize: 13, color: Color(0xCCFFFFFF)),
+                    widget.strings.buffering,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xCCFFFFFF),
+                    ),
                   ),
                 ],
               ),
@@ -707,6 +758,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
                     )
                   else
                     const Spacer(),
+                  ...widget.topBarActions,
                   if (showAudio)
                     SsIconButton(
                       icon: _audiotrack,
