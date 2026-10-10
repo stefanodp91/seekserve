@@ -12,6 +12,7 @@ import '../theme/ss_theme.dart';
 import '../utils/format.dart';
 import 'ss_buffering_overlay.dart';
 import 'ss_player_status_bar.dart';
+import 'ss_position_reporter.dart';
 import 'ss_track_selector.dart';
 
 /// Complete video player widget with overlay controls, seek bar,
@@ -46,6 +47,30 @@ class SsVideoPlayer extends StatefulWidget {
   /// Called when the user taps the back button in the overlay.
   final VoidCallback? onBack;
 
+  /// Where playback starts. Zero, the default, is the beginning.
+  ///
+  /// It is applied every time the player opens the stream, also when a
+  /// format that was not recognized yet is tried again: the widget makes a
+  /// new [Player] each time, and a point given once would be lost.
+  final Duration initialPosition;
+
+  /// Called with the point reached and the length of the video: every
+  /// [positionInterval] while the position moves, once when the app goes to
+  /// the background and once when the player is closed, if the point is one
+  /// the app does not have yet. Never before the length is known, and with
+  /// an [initialPosition] never with the "0:00" of a player that is still
+  /// getting there ([SsPositionReporter]).
+  ///
+  /// The last call can come while the widget is being disposed: do not
+  /// touch its context there.
+  final void Function(Duration position, Duration duration)? onPosition;
+
+  /// The least real time between two [onPosition] calls.
+  final Duration positionInterval;
+
+  /// Called when the player says the video is over.
+  final VoidCallback? onCompleted;
+
   const SsVideoPlayer({
     super.key,
     required this.streamUrl,
@@ -59,6 +84,10 @@ class SsVideoPlayer extends StatefulWidget {
     this.onPlayPause,
     this.title,
     this.onBack,
+    this.initialPosition = Duration.zero,
+    this.onPosition,
+    this.positionInterval = const Duration(seconds: 5),
+    this.onCompleted,
   });
 
   @override
@@ -82,17 +111,29 @@ bool _isLocalStream(String url) {
   return host == '127.0.0.1' || host == 'localhost' || host == '::1';
 }
 
-class _SsVideoPlayerState extends State<SsVideoPlayer> {
+class _SsVideoPlayerState extends State<SsVideoPlayer>
+    with WidgetsBindingObserver {
   Player? _player;
   VideoController? _videoController;
   String _error = '';
   bool _noVideoFrames = false;
   Timer? _formatRetryTimer;
 
+  /// Tells the app where the current [_player] is; null without
+  /// [SsVideoPlayer.onPosition].
+  SsPositionReporter? _positions;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _probeAndPlay();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // In the background the app may be killed without another word.
+    if (state == AppLifecycleState.paused) _positions?.flush();
   }
 
   @override
@@ -147,6 +188,23 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
     _player = Player();
     _videoController = VideoController(_player!);
 
+    // A new player starts again from the initial position: what the one
+    // before said no longer counts.
+    final positions = widget.onPosition == null
+        ? null
+        : SsPositionReporter(
+            interval: widget.positionInterval,
+            startAt: widget.initialPosition,
+            onPosition: (position, duration) =>
+                widget.onPosition?.call(position, duration),
+          );
+    _positions = positions;
+    _player!.stream.position.listen((p) => positions?.update(position: p));
+    _player!.stream.duration.listen((d) => positions?.update(duration: d));
+    _player!.stream.completed.listen((completed) {
+      if (completed && mounted) widget.onCompleted?.call();
+    });
+
     _player!.stream.error.listen((err) {
       if (!mounted) return;
       // "Failed to recognize file format" means the torrent hasn't buffered
@@ -194,7 +252,8 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
       }
     }
     if (!mounted || !identical(player, _player)) return;
-    await player.open(Media(url));
+    final start = widget.initialPosition;
+    await player.open(Media(url, start: start > Duration.zero ? start : null));
   }
 
   /// Opens the stream again at [target], keeping the chosen tracks.
@@ -209,6 +268,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
     final audio = player.state.track.audio;
     final subtitle = player.state.track.subtitle;
     final play = player.state.playing;
+    _positions?.restartAt(target);
     try {
       await player.open(Media(widget.streamUrl, start: target), play: play);
     } on AssertionError {
@@ -279,7 +339,10 @@ class _SsVideoPlayerState extends State<SsVideoPlayer> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _formatRetryTimer?.cancel();
+    // The point reached, before the player that knows it goes.
+    _positions?.flush();
     _player?.dispose();
     super.dispose();
   }
