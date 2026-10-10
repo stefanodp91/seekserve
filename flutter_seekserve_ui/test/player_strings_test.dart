@@ -18,6 +18,33 @@ void main() {
     expect(strings.playerError('Failed to open x'), 'Failed to open x');
   });
 
+  test('the entry that turns the audio off has a name, not the player\'s '
+      'inner word for it ("Track no")', () {
+    expect(const SsStrings().audioOff, 'Off');
+    expect(const SsStrings(audioOff: 'Nessuno').audioOff, 'Nessuno');
+    // The names of the tracks in the selector.
+    expect(ssAudioTrackLabel(const SsStrings(), id: 'no'), 'Off');
+    expect(ssAudioTrackLabel(const SsStrings(), id: '1'), 'Track 1');
+    expect(
+      ssAudioTrackLabel(const SsStrings(), id: '1', language: 'ita'),
+      'ita',
+    );
+    expect(
+      ssAudioTrackLabel(
+        const SsStrings(),
+        id: '2',
+        title: 'Commento',
+        language: 'ita',
+      ),
+      'Commento',
+    );
+    // "No audio" stays "Off" whatever the file calls it.
+    expect(
+      ssAudioTrackLabel(const SsStrings(), id: 'no', title: 'x'),
+      'Off',
+    );
+  });
+
   test('the player\'s own error, which can name the stream\'s address, is '
       'worded by the app too', () {
     final strings = SsStrings(

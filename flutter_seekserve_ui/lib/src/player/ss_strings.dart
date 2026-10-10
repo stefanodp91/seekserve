@@ -10,6 +10,7 @@ class SsStrings {
     this.connecting = 'Connecting...',
     this.buffering = 'Buffering...',
     this.audio = 'Audio',
+    this.audioOff = 'Off',
     this.subtitles = 'Subtitles',
     this.subtitlesOff = 'Off',
     this.noVideoFrames =
@@ -29,6 +30,9 @@ class SsStrings {
 
   /// The title of the audio track selector.
   final String audio;
+
+  /// The entry of the audio track selector that turns the audio off.
+  final String audioOff;
 
   /// The title of the subtitle selector.
   final String subtitles;
@@ -67,3 +71,14 @@ class SsStrings {
 bool ssIsFormatNotReady(String error) =>
     error.contains('recognize file format') ||
     error.contains('Invalid data found');
+
+/// The name of an audio track in the selector: "no audio" is
+/// [SsStrings.audioOff], whatever the file calls it (it used to show as
+/// "Track no", the player's inner id); then the track's title, its
+/// language, or [SsStrings.track] with its id.
+String ssAudioTrackLabel(
+  SsStrings strings, {
+  required String id,
+  String? title,
+  String? language,
+}) => id == 'no' ? strings.audioOff : title ?? language ?? strings.track(id);

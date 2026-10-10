@@ -564,7 +564,12 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
         .where((t) => t.id != 'auto')
         .map((t) => SsTrackOption(
               id: t.id,
-              label: t.title ?? t.language ?? widget.strings.track(t.id),
+              label: ssAudioTrackLabel(
+                widget.strings,
+                id: t.id,
+                title: t.title,
+                language: t.language,
+              ),
               subtitle: t.language,
             ))
         .toList();
