@@ -434,6 +434,41 @@ TEST_F(EngineResumeDataTest, RestartsAgainAndAgain) {
     }
 }
 
+// A torrent whose metadata never arrived has resume data too (its hashes and
+// trackers, as libtorrent writes them): it comes back from it as it would
+// from its magnet, under the same id, paused, still without its files. Seen
+// on the phone: the torrents the app restores and pauses without starting.
+TEST_F(EngineResumeDataTest, ATorrentStillWithoutMetadataComesBackTheSame) {
+    const std::string magnet =
+        "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"
+        "&dn=never.started&tr=http%3A%2F%2Ftracker.invalid%2Fannounce";
+    std::string id;
+    {
+        SeekServeEngine engine(config_);
+        auto added = engine.add_torrent(magnet);
+        ASSERT_TRUE(added);
+        id = added.value();
+        ASSERT_TRUE(engine.pause_torrent(id));  // as the service does on restore
+        ASSERT_TRUE(wait_for([&] { return !stored(id).empty(); }))
+            << "no resume data for a torrent without metadata";
+    }
+    auto params = decode(stored(id));
+    EXPECT_FALSE(params.ti);
+    EXPECT_TRUE(params.peers.empty());
+
+    SeekServeEngine engine(config_);
+
+    ASSERT_EQ(engine.list_torrents(), std::vector<std::string>{id});
+    auto st = status(engine, id);
+    EXPECT_FALSE(st.value("has_metadata", true)) << st.dump();
+    EXPECT_TRUE(st.value("paused", false)) << st.dump();
+    EXPECT_FALSE(engine.list_files(id));
+    // It can still be started and removed like any other.
+    EXPECT_TRUE(engine.start_torrent(id));
+    EXPECT_TRUE(engine.remove_torrent(id, false));
+    EXPECT_TRUE(stored(id).empty());
+}
+
 // A torrent added again from its resume data keeps the id it was stored
 // under, whatever its hashes say (a hybrid added by its v1 hash, app BUG-71).
 TEST_F(EngineResumeDataTest, ARestoredTorrentKeepsTheIdItHad) {
