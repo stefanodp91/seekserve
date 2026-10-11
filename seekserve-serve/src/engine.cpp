@@ -28,10 +28,29 @@ SeekServeEngine::SeekServeEngine(const Config& config)
 
     // Auto-restore persisted torrents
     auto saved = cache_->list_torrent_uris();
+    const bool resume = config_.session.resume_data;
+    int from_resume_data = 0;
     for (const auto& [id, uri] : saved) {
+        // From its resume data when there is some: the files and the pieces
+        // it has are known at once, with no peer and no check of the disk.
+        if (resume) {
+            auto data = cache_->load_resume_data(id);
+            if (!data.empty()) {
+                auto params = decode_resume_data(data);
+                if (params && sessions_->restore_torrent(id, std::move(*params))) {
+                    ++from_resume_data;
+                    continue;
+                }
+                spdlog::warn("Engine: resume data of {} not usable, restoring from its URI", id);
+            }
+        }
+
         AddTorrentParams atp;
         atp.uri = uri;
         atp.save_path = config_.session.save_path;
+        // With resume data on, nothing restored starts by itself; without,
+        // a restored torrent runs as it always did.
+        atp.paused = resume;
         auto result = sessions_->add_torrent(atp);
         if (!result) {
             spdlog::warn("Engine: failed to restore torrent {}: {}", id, result.error().message());
@@ -39,7 +58,8 @@ SeekServeEngine::SeekServeEngine(const Config& config)
         }
     }
     if (!saved.empty()) {
-        spdlog::info("Engine: restored {} torrent(s)", saved.size());
+        spdlog::info("Engine: restored {} torrent(s), {} from resume data",
+                     saved.size(), from_resume_data);
     }
 }
 

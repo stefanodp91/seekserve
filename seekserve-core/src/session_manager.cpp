@@ -190,6 +190,8 @@ Result<TorrentId> TorrentSessionManager::add_torrent(const AddTorrentParams& par
     // torrent auto-managed, which is how a background download joins the
     // queue (max_active_downloads).
     atp.flags &= ~(lt::torrent_flags::auto_managed | lt::torrent_flags::paused);
+    // A torrent restored after a restart waits for whoever starts it.
+    if (params.paused) atp.flags |= lt::torrent_flags::paused;
 
     for (const auto& tracker : config_.extra_trackers) {
         atp.trackers.push_back(tracker);
@@ -218,6 +220,42 @@ Result<TorrentId> TorrentSessionManager::add_torrent(const AddTorrentParams& par
     }
 
     spdlog::info("TorrentSessionManager: added torrent {}", id);
+    return id;
+}
+
+Result<TorrentId> TorrentSessionManager::restore_torrent(const TorrentId& id,
+                                                         lt::add_torrent_params atp) {
+    if (id.empty() || (!atp.ti && !atp.info_hashes.has_v1() && !atp.info_hashes.has_v2())) {
+        return make_error_code(errc::invalid_argument);
+    }
+
+    // The files are where this engine keeps them, wherever they were when
+    // the resume data was written.
+    atp.save_path = config_.save_path;
+
+    // Paused and outside the queue, whatever it was doing before: nothing
+    // downloads or seeds after a restart until it is started.
+    atp.flags &= ~lt::torrent_flags::auto_managed;
+    atp.flags |= lt::torrent_flags::paused;
+
+    {
+        std::lock_guard lock(mu_);
+        atp.userdata = lt::client_data_t(&ids_.try_emplace(id, id).first->second);
+    }
+
+    lt::error_code ec;
+    lt::torrent_handle h = session_->add_torrent(std::move(atp), ec);
+    if (ec || !h.is_valid()) {
+        spdlog::error("Failed to restore torrent {}: {}", id, ec.message());
+        return make_error_code(errc::invalid_argument);
+    }
+
+    {
+        std::lock_guard lock(mu_);
+        handles_[id] = h;
+    }
+
+    spdlog::info("TorrentSessionManager: restored torrent {} from its resume data", id);
     return id;
 }
 

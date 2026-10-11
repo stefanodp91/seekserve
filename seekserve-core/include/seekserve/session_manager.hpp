@@ -21,6 +21,7 @@ namespace seekserve {
 struct AddTorrentParams {
     std::string uri;              // magnet: URI or .torrent file path
     std::string save_path;        // override default save path (optional)
+    bool paused = false;          // added without starting (a restored torrent)
 };
 
 class TorrentSessionManager {
@@ -32,6 +33,12 @@ public:
     TorrentSessionManager& operator=(const TorrentSessionManager&) = delete;
 
     Result<TorrentId> add_torrent(const AddTorrentParams& params);
+    // Adds a torrent again from its resume data (decode_resume_data), under
+    // the id it had: the id is not derived from the hashes again, which
+    // for a hybrid torrent added by its v1 hash would give another one
+    // (app BUG-71). Always paused and outside the queue: what starts after
+    // a restart is the caller's decision.
+    Result<TorrentId> restore_torrent(const TorrentId& id, lt::add_torrent_params params);
     Result<void> remove_torrent(const TorrentId& id, bool delete_files = false);
 
     lt::torrent_handle get_handle(const TorrentId& id) const;

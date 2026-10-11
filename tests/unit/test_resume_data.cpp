@@ -69,5 +69,31 @@ TEST(ResumeDataTest, HasNoPeerAddresses) {
     EXPECT_EQ(text.find("13:banned_peers6"), std::string::npos);
 }
 
+TEST(ResumeDataTest, ReadsBackWhatItWrote) {
+    auto in = params_with_peers();
+
+    auto out = decode_resume_data(encode_resume_data(in));
+
+    ASSERT_TRUE(out.has_value());
+    EXPECT_EQ(out->info_hashes.v1, in.info_hashes.v1);
+    EXPECT_EQ(out->name, "a.mkv");
+    EXPECT_TRUE(out->peers.empty());
+}
+
+// Whatever is in the database, the engine must start: bytes that are not
+// resume data are nothing, and the torrent is restored another way.
+TEST(ResumeDataTest, UnreadableBytesAreNothing) {
+    EXPECT_FALSE(decode_resume_data({}).has_value());
+    EXPECT_FALSE(decode_resume_data({'x', 'y', 'z'}).has_value());
+
+    auto cut = encode_resume_data(params_with_peers());
+    cut.resize(cut.size() / 2);
+    EXPECT_FALSE(decode_resume_data(cut).has_value());
+
+    // Well-formed bencoding that is not resume data.
+    std::string other = "d3:fooi1ee";
+    EXPECT_FALSE(decode_resume_data({other.begin(), other.end()}).has_value());
+}
+
 } // namespace
 } // namespace seekserve

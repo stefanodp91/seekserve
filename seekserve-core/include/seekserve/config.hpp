@@ -30,9 +30,11 @@ struct SessionConfig {
     // ignores SSL_CERT_FILE in app processes.
     std::string ca_cert_file;
     // Keeps each torrent's resume data (its metadata, the pieces it has, its
-    // file priorities) in the cache database, without peer addresses, so a
-    // restart can do without the metadata from peers and a full re-check.
-    // Off = nothing is kept beyond the saved URI, as before.
+    // file priorities) in the cache database, without peer addresses, and
+    // restores torrents from it: a restart then needs neither the metadata
+    // from peers nor a full re-check, and every restored torrent comes back
+    // paused. Off = torrents are restored from their saved URI only, and
+    // start at once, as before.
     bool resume_data = false;
     // How often the resume data of a torrent that changed is saved again;
     // 0 = only on events (metadata, a completed file, a pause, shutdown).
