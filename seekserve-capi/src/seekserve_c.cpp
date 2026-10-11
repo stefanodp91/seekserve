@@ -88,6 +88,13 @@ static seekserve::SeekServeEngine::Config parse_config(const char* config_json) 
             config.session.proxy.hostname = j["proxy_hostname"].get<std::string>();
         if (j.contains("proxy_port"))
             config.session.proxy.port = j["proxy_port"].get<int>();
+        // Read after the proxy keys: a value of the wrong type stops the
+        // parsing here, and must not cost the settings above.
+        if (j.contains("resume_data"))
+            config.session.resume_data = j["resume_data"].get<bool>();
+        if (j.contains("resume_save_interval"))
+            config.session.resume_save_interval =
+                std::chrono::seconds(j["resume_save_interval"].get<int>());
     } catch (const std::exception& e) {
         spdlog::warn("C API: failed to parse config JSON: {}", e.what());
     }

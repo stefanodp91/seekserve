@@ -22,6 +22,14 @@ typedef int32_t ss_error_t;
 
 typedef void (*ss_event_callback_t)(const char* event_json, void* user_data);
 
+// config_json keys added for resume data (both optional; without them the
+// engine behaves as before):
+//   "resume_data" (bool): keep each torrent's resume data in the cache
+//     database, without peer addresses, and restore torrents from it; a
+//     restored torrent then has its metadata at once and comes back paused.
+//   "resume_save_interval" (int, seconds): how often a torrent that changed
+//     is saved again while the servers run; 0 or absent = only on events
+//     (metadata, a completed file, a pause, ss_engine_destroy).
 __attribute__((visibility("default")))
 SeekServeEngine* ss_engine_create(const char* config_json);
 

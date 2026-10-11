@@ -65,6 +65,7 @@ add_executable(seekserve-capi-tests
 target_link_libraries(seekserve-capi-tests
     PRIVATE
         seekserve-capi
+        unofficial::sqlite3::sqlite3
         GTest::gtest
         GTest::gtest_main
 )

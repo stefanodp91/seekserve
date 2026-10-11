@@ -5,6 +5,9 @@
 #include <chrono>
 #include <atomic>
 #include <filesystem>
+#include <vector>
+
+#include <sqlite3.h>
 
 #include "seekserve_c.h"
 
@@ -22,9 +25,63 @@ protected:
         fs::remove_all(tmp_dir_);
     }
 
+    // Offline: the fixture torrent has trackers and web seeds, and an engine
+    // restores and starts the torrents of its cache database. So every engine
+    // of these tests is behind a proxy on a closed port (no DHT either) and
+    // keeps its database in the test's own folder, not in the working one.
     std::string make_config(const std::string& extra = "") {
-        return R"({"save_path":")" + tmp_dir_ + R"(","auth_token":"testtoken","log_level":"warn")" +
+        return R"({"save_path":")" + tmp_dir_ + R"(","auth_token":"testtoken","log_level":"warn",)" +
+               R"("proxy_enabled":true,"proxy_hostname":"127.0.0.1","proxy_port":1,)" +
+               R"("cache_db_path":")" + db_path() + R"(")" +
                (extra.empty() ? "" : "," + extra) + "}";
+    }
+
+    std::string db_path() { return tmp_dir_ + "/cache.db"; }
+
+    // A copy of the fixture inside the test's folder, to take away later.
+    std::string torrent_copy() {
+        auto copy = tmp_dir_ + "/copy.torrent";
+        fs::copy_file(torrent_path(), copy, fs::copy_options::overwrite_existing);
+        return copy;
+    }
+
+    // The resume data the cache database holds for a torrent; empty if none.
+    std::vector<char> stored_resume_data(const std::string& id) {
+        std::vector<char> out;
+        sqlite3* db = nullptr;
+        if (sqlite3_open_v2(db_path().c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
+            sqlite3_close(db);
+            return out;
+        }
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db, "SELECT resume_data FROM torrents WHERE torrent_id = ?;", -1,
+                               &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, id.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                auto* bytes = static_cast<const char*>(sqlite3_column_blob(stmt, 0));
+                int size = sqlite3_column_bytes(stmt, 0);
+                if (bytes && size > 0) out.assign(bytes, bytes + size);
+            }
+        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        return out;
+    }
+
+    static std::string list_torrents(SeekServeEngine* engine) {
+        char* json = nullptr;
+        EXPECT_EQ(ss_list_torrents(engine, &json), SS_OK);
+        std::string out = json ? json : "";
+        ss_free_string(json);
+        return out;
+    }
+
+    static std::string status(SeekServeEngine* engine, const std::string& id) {
+        char* json = nullptr;
+        ss_get_status(engine, id.c_str(), &json);
+        std::string out = json ? json : "";
+        ss_free_string(json);
+        return out;
     }
 
     std::string torrent_path() {
@@ -492,6 +549,115 @@ TEST_F(CApiTest, PauseAndResumeTorrent) {
     status_str = std::string(json);
     EXPECT_NE(status_str.find("\"paused\":false"), std::string::npos);
     ss_free_string(json);
+
+    ss_engine_destroy(engine);
+}
+
+// --- Resume data keys (app WORK-29, wave P2b) ---
+
+// "resume_data": the engine keeps what a torrent needs to come back and
+// starts again from it. Here the .torrent file is gone before the second
+// engine: only the resume data can bring the torrent back, and it is paused.
+TEST_F(CApiTest, ResumeDataKeyBringsATorrentBackWithoutItsFile) {
+    auto config = make_config(R"("resume_data":true)");
+    auto copy = torrent_copy();
+    char id_buf[128] = {};
+    {
+        SeekServeEngine* engine = ss_engine_create(config.c_str());
+        ASSERT_NE(engine, nullptr);
+        ASSERT_EQ(ss_add_torrent(engine, copy.c_str(), id_buf, sizeof(id_buf)), SS_OK);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        ss_engine_destroy(engine);
+    }
+    std::string id(id_buf);
+    EXPECT_FALSE(stored_resume_data(id).empty());
+    fs::remove(copy);
+
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    EXPECT_NE(list_torrents(engine).find(id), std::string::npos) << list_torrents(engine);
+    auto st = status(engine, id);
+    EXPECT_NE(st.find("\"has_metadata\":true"), std::string::npos) << st;
+    EXPECT_NE(st.find("\"paused\":true"), std::string::npos) << st;
+
+    ss_engine_destroy(engine);
+}
+
+// Without the key the engine is the one from before: nothing is kept, and a
+// torrent whose .torrent file is gone does not come back.
+TEST_F(CApiTest, WithoutTheResumeDataKeyNothingIsKept) {
+    auto config = make_config();
+    auto copy = torrent_copy();
+    char id_buf[128] = {};
+    {
+        SeekServeEngine* engine = ss_engine_create(config.c_str());
+        ASSERT_NE(engine, nullptr);
+        ASSERT_EQ(ss_add_torrent(engine, copy.c_str(), id_buf, sizeof(id_buf)), SS_OK);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        ss_engine_destroy(engine);
+    }
+    std::string id(id_buf);
+    EXPECT_TRUE(stored_resume_data(id).empty());
+    fs::remove(copy);
+
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+
+    EXPECT_EQ(list_torrents(engine).find(id), std::string::npos) << list_torrents(engine);
+
+    ss_engine_destroy(engine);
+}
+
+// "resume_save_interval" (seconds): a torrent that changed is saved again by
+// the timer, with no pause and no shutdown. Choosing a file changes it (its
+// file priorities) and no event saves that.
+TEST_F(CApiTest, ResumeSaveIntervalKeySavesAChangedTorrentAgain) {
+    auto config = make_config(R"("resume_data":true,"resume_save_interval":1)");
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+    uint16_t port = 0;
+    ASSERT_EQ(ss_start_server(engine, 0, &port), SS_OK);  // the timer runs with the servers
+    char id_buf[128] = {};
+    auto path = torrent_path();
+    ASSERT_EQ(ss_add_torrent(engine, path.c_str(), id_buf, sizeof(id_buf)), SS_OK);
+    std::string id(id_buf);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+    auto before = stored_resume_data(id);
+    ASSERT_FALSE(before.empty());
+
+    ASSERT_EQ(ss_select_file(engine, id.c_str(), 0), SS_OK);
+
+    bool changed = false;
+    for (int i = 0; i < 50 && !changed; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        changed = stored_resume_data(id) != before;
+    }
+    EXPECT_TRUE(changed) << "the timer never saved the new file priorities";
+
+    ss_engine_destroy(engine);
+}
+
+// Without an interval only events save: choosing a file is not one.
+TEST_F(CApiTest, WithoutAnIntervalAChangedTorrentWaitsForAnEvent) {
+    auto config = make_config(R"("resume_data":true)");
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+    uint16_t port = 0;
+    ASSERT_EQ(ss_start_server(engine, 0, &port), SS_OK);
+    char id_buf[128] = {};
+    auto path = torrent_path();
+    ASSERT_EQ(ss_add_torrent(engine, path.c_str(), id_buf, sizeof(id_buf)), SS_OK);
+    std::string id(id_buf);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    auto before = stored_resume_data(id);
+    ASSERT_FALSE(before.empty());
+
+    ASSERT_EQ(ss_select_file(engine, id.c_str(), 0), SS_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+
+    EXPECT_EQ(stored_resume_data(id), before);
 
     ss_engine_destroy(engine);
 }
