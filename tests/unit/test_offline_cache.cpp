@@ -7,6 +7,8 @@
 #include "seekserve/types.hpp"
 #include "seekserve/config.hpp"
 
+#include <sqlite3.h>
+
 namespace fs = std::filesystem;
 
 class OfflineCacheTest : public ::testing::Test {
@@ -290,4 +292,111 @@ TEST_F(OfflineCacheTest, SintelTorrentFiles) {
             EXPECT_NEAR(e.progress, 0.3f, 0.01f);
         }
     }
+}
+
+// --- Resume data (app WORK-29, wave P2b) ---
+
+namespace {
+// Bytes as resume data has them: not text, with zeros inside.
+std::vector<char> blob(std::initializer_list<int> bytes) {
+    std::vector<char> out;
+    for (int b : bytes) out.push_back(static_cast<char>(b));
+    return out;
+}
+} // namespace
+
+TEST_F(OfflineCacheTest, ResumeDataRoundTrip) {
+    seekserve::OfflineCacheManager cache(make_config());
+    cache.save_torrent_uri("abc123", "magnet:?xt=urn:btih:abc123");
+
+    auto data = blob({'d', 0, 1, 2, 0, 255, 'e'});
+    cache.save_resume_data("abc123", data);
+
+    EXPECT_EQ(cache.load_resume_data("abc123"), data);
+}
+
+TEST_F(OfflineCacheTest, ResumeDataEmptyWhenNeverSaved) {
+    seekserve::OfflineCacheManager cache(make_config());
+    cache.save_torrent_uri("abc123", "magnet:?xt=urn:btih:abc123");
+
+    EXPECT_TRUE(cache.load_resume_data("abc123").empty());
+    EXPECT_TRUE(cache.load_resume_data("unknown").empty());
+}
+
+// A late save for a torrent already removed must not bring its row back.
+TEST_F(OfflineCacheTest, ResumeDataNeedsTheTorrentRow) {
+    seekserve::OfflineCacheManager cache(make_config());
+
+    cache.save_resume_data("gone", blob({'d', 'e'}));
+
+    EXPECT_TRUE(cache.load_resume_data("gone").empty());
+    EXPECT_TRUE(cache.list_torrent_uris().empty());
+}
+
+// add_torrent saves the URI every time the same torrent is added again.
+TEST_F(OfflineCacheTest, ResumeDataSurvivesSavingTheUriAgain) {
+    seekserve::OfflineCacheManager cache(make_config());
+    cache.save_torrent_uri("abc123", "magnet:?xt=urn:btih:abc123");
+    auto data = blob({'d', 1, 0, 2, 'e'});
+    cache.save_resume_data("abc123", data);
+
+    cache.save_torrent_uri("abc123", "magnet:?xt=urn:btih:abc123&dn=again");
+
+    EXPECT_EQ(cache.load_resume_data("abc123"), data);
+    auto uris = cache.list_torrent_uris();
+    ASSERT_EQ(uris.size(), 1u);
+    EXPECT_EQ(uris[0].second, "magnet:?xt=urn:btih:abc123&dn=again");
+}
+
+TEST_F(OfflineCacheTest, ResumeDataGoesWithTheTorrent) {
+    seekserve::OfflineCacheManager cache(make_config());
+    cache.save_torrent_uri("abc123", "magnet:?xt=urn:btih:abc123");
+    cache.save_resume_data("abc123", blob({'d', 'e'}));
+
+    cache.remove_torrent_uri("abc123");
+    EXPECT_TRUE(cache.load_resume_data("abc123").empty());
+
+    // Added again later: it starts without the old resume data.
+    cache.save_torrent_uri("abc123", "magnet:?xt=urn:btih:abc123");
+    EXPECT_TRUE(cache.load_resume_data("abc123").empty());
+}
+
+TEST_F(OfflineCacheTest, ResumeDataPersistsAcrossInstances) {
+    auto cfg = make_config();
+    auto data = blob({'d', 0, 0, 7, 'e'});
+    {
+        seekserve::OfflineCacheManager cache(cfg);
+        cache.save_torrent_uri("abc123", "magnet:?xt=urn:btih:abc123");
+        cache.save_resume_data("abc123", data);
+    }
+    {
+        seekserve::OfflineCacheManager cache(cfg);
+        EXPECT_EQ(cache.load_resume_data("abc123"), data);
+    }
+}
+
+// A database written before resume data existed: its torrents stay, and
+// they can get resume data.
+TEST_F(OfflineCacheTest, ResumeDataOnADatabaseFromBefore) {
+    {
+        sqlite3* db = nullptr;
+        ASSERT_EQ(sqlite3_open(db_path_.c_str(), &db), SQLITE_OK);
+        const char* old_schema =
+            "CREATE TABLE torrents (torrent_id TEXT PRIMARY KEY, uri TEXT NOT NULL,"
+            " added_at INTEGER NOT NULL);"
+            "INSERT INTO torrents VALUES ('old1', 'magnet:?xt=urn:btih:old1', 100);";
+        ASSERT_EQ(sqlite3_exec(db, old_schema, nullptr, nullptr, nullptr), SQLITE_OK);
+        sqlite3_close(db);
+    }
+
+    seekserve::OfflineCacheManager cache(make_config());
+
+    auto uris = cache.list_torrent_uris();
+    ASSERT_EQ(uris.size(), 1u);
+    EXPECT_EQ(uris[0].first, "old1");
+    EXPECT_TRUE(cache.load_resume_data("old1").empty());
+
+    auto data = blob({'d', 3, 0, 'e'});
+    cache.save_resume_data("old1", data);
+    EXPECT_EQ(cache.load_resume_data("old1"), data);
 }

@@ -1,4 +1,5 @@
 #include "seekserve/engine.hpp"
+#include "seekserve/resume_data.hpp"
 
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
@@ -45,6 +46,10 @@ SeekServeEngine::SeekServeEngine(const Config& config)
 SeekServeEngine::~SeekServeEngine() {
     stop_server();
 
+    // The last word on what every torrent has, while the alert handlers
+    // that write it are still running.
+    flush_resume_data();
+
     // CRITICAL: Stop alert dispatcher FIRST — handlers reference catalog_, cache_, states_.
     // Must stop before those members are destroyed.
     if (sessions_) {
@@ -74,6 +79,8 @@ void SeekServeEngine::wire_alerts() {
             }
 
             register_metadata(id, ti);
+            // From here a restart can do without the peers for the metadata.
+            request_resume_data(a.handle);
         });
 
     // add_torrent_alert → catalog (for .torrent files with embedded metadata)
@@ -97,6 +104,7 @@ void SeekServeEngine::wire_alerts() {
                 }
 
                 register_metadata(id, ti);
+                request_resume_data(a.handle);
             }
         });
 
@@ -128,6 +136,28 @@ void SeekServeEngine::wire_alerts() {
             cache_->on_file_completed(id, fi);
             fire_event("file_completed",
                 "{\"torrent_id\":\"" + id + "\",\"file_index\":" + std::to_string(fi) + "}");
+            request_resume_data(a.handle);
+        });
+
+    // save_resume_data_alert → cache database
+    sessions_->alert_dispatcher().on<lt::save_resume_data_alert>(
+        [this](const lt::save_resume_data_alert& a) {
+            if (auto found = sessions_->id_of(a.handle)) {
+                bool removed = false;
+                {
+                    std::lock_guard lock(mu_);
+                    removed = removed_ids_.count(*found) > 0;
+                }
+                // The cache only updates the row of a torrent it still has.
+                if (!removed) cache_->save_resume_data(*found, encode_resume_data(a.params));
+            }
+            resume_data_answered();
+        });
+
+    // Nothing changed since the last save, no metadata yet, torrent gone.
+    sessions_->alert_dispatcher().on<lt::save_resume_data_failed_alert>(
+        [this](const lt::save_resume_data_failed_alert&) {
+            resume_data_answered();
         });
 }
 
@@ -155,6 +185,7 @@ Result<TorrentId> SeekServeEngine::add_torrent(const std::string& uri,
             auto ti = handle.is_valid() ? handle.torrent_file() : nullptr;
             if (ti && !catalog_.has_metadata(id)) {
                 register_metadata(id, ti);
+                request_resume_data(handle);
             }
         }
     }
@@ -205,6 +236,7 @@ Result<void> SeekServeEngine::pause_torrent(const TorrentId& id) {
     handle.pause();
     spdlog::info("Engine: paused torrent {}", id);
     fire_event("torrent_paused", "{\"torrent_id\":\"" + id + "\"}");
+    request_resume_data(id);
     return {};
 }
 
@@ -557,10 +589,71 @@ void SeekServeEngine::on_tick(const boost::system::error_code& ec) {
         }
     }
 
+    // Torrents that changed are saved again every resume_save_interval: a
+    // process killed without warning loses at most that much.
+    auto every = config_.session.resume_save_interval.count();
+    if (config_.session.resume_data && every > 0 && ++ticks_since_resume_save_ >= every) {
+        ticks_since_resume_save_ = 0;
+        request_all_resume_data();
+    }
+
     tick_timer_->expires_after(std::chrono::seconds(1));
     tick_timer_->async_wait([this](const boost::system::error_code& ec2) {
         on_tick(ec2);
     });
+}
+
+void SeekServeEngine::request_resume_data(const TorrentId& id, bool flush_to_disk) {
+    if (!config_.session.resume_data) return;
+    request_resume_data(sessions_->get_handle(id), flush_to_disk);
+}
+
+void SeekServeEngine::request_resume_data(const lt::torrent_handle& handle, bool flush_to_disk) {
+    if (!config_.session.resume_data || !handle.is_valid()) return;
+
+    // With the info dictionary, so the files are known at the next start;
+    // only if something changed, so an idle torrent is not written again.
+    auto flags = lt::torrent_handle::save_info_dict | lt::torrent_handle::only_if_modified;
+    if (flush_to_disk) flags |= lt::torrent_handle::flush_disk_cache;
+
+    {
+        std::lock_guard lock(resume_mu_);
+        ++resume_pending_;
+    }
+    try {
+        handle.save_resume_data(flags);
+    } catch (const std::exception& e) {
+        // The torrent left the session meanwhile: no alert will come.
+        spdlog::debug("Engine: no resume data: {}", e.what());
+        resume_data_answered();
+    }
+}
+
+void SeekServeEngine::request_all_resume_data(bool flush_to_disk) {
+    if (!config_.session.resume_data) return;
+    for (const auto& id : sessions_->list_torrents()) {
+        request_resume_data(id, flush_to_disk);
+    }
+}
+
+void SeekServeEngine::resume_data_answered() {
+    {
+        std::lock_guard lock(resume_mu_);
+        if (resume_pending_ > 0) --resume_pending_;
+    }
+    resume_cv_.notify_all();
+}
+
+void SeekServeEngine::flush_resume_data() {
+    if (!config_.session.resume_data || !sessions_) return;
+    request_all_resume_data(/*flush_to_disk=*/true);
+
+    std::unique_lock lock(resume_mu_);
+    bool done = resume_cv_.wait_for(lock, config_.session.resume_flush_timeout,
+                                    [this] { return resume_pending_ == 0; });
+    if (!done) {
+        spdlog::warn("Engine: {} resume data request(s) unanswered at shutdown", resume_pending_);
+    }
 }
 
 SeekServeEngine::TorrentState* SeekServeEngine::find_state(const TorrentId& id) {

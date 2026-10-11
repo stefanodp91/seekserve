@@ -8,6 +8,7 @@ add_library(seekserve-core STATIC
     src/streaming_scheduler.cpp
     src/byte_source.cpp
     src/offline_cache.cpp
+    src/resume_data.cpp
 )
 
 target_include_directories(seekserve-core

@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
+#include <condition_variable>
+#include <cstdint>
 #include <atomic>
 #include <functional>
 #include <thread>
@@ -98,6 +100,20 @@ private:
     void register_metadata(const TorrentId& id,
                            std::shared_ptr<const lt::torrent_info> ti);
 
+    // Resume data (SessionConfig::resume_data): asks libtorrent for what a
+    // torrent needs to start again without its peers; the answer comes as
+    // an alert and goes into the cache database. A no-op when switched off.
+    // By handle where an alert has it: the session manager may not know
+    // the id yet while the torrent is still being added.
+    void request_resume_data(const lt::torrent_handle& handle, bool flush_to_disk = false);
+    void request_resume_data(const TorrentId& id, bool flush_to_disk = false);
+    void request_all_resume_data(bool flush_to_disk = false);
+    // One request was answered, with data or with nothing to write.
+    void resume_data_answered();
+    // Asks for every torrent and waits for the answers, up to
+    // SessionConfig::resume_flush_timeout.
+    void flush_resume_data();
+
     Config config_;
     net::io_context ioc_;
     using work_guard_t = net::executor_work_guard<net::io_context::executor_type>;
@@ -121,6 +137,13 @@ private:
     mutable std::mutex event_mu_;
 
     std::atomic<bool> server_running_{false};
+
+    // Resume data requests libtorrent has not answered yet.
+    int resume_pending_ = 0;
+    std::mutex resume_mu_;
+    std::condition_variable resume_cv_;
+    // Timer ticks (seconds) since the last periodic save.
+    std::int64_t ticks_since_resume_save_ = 0;
 };
 
 } // namespace seekserve

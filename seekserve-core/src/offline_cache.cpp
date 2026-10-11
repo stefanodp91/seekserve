@@ -63,6 +63,27 @@ void OfflineCacheManager::init_db() {
         spdlog::error("OfflineCacheManager: failed to create torrents table: {}", err ? err : "unknown");
         sqlite3_free(err);
     }
+
+    // Resume data lives in the torrent's row. A database written before it
+    // existed gets the column here; its torrents start without any.
+    bool has_resume_column = false;
+    sqlite3_stmt* info = nullptr;
+    if (sqlite3_prepare_v2(db_, "PRAGMA table_info(torrents);", -1, &info, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(info) == SQLITE_ROW) {
+            auto* name = reinterpret_cast<const char*>(sqlite3_column_text(info, 1));
+            if (name && std::string(name) == "resume_data") has_resume_column = true;
+        }
+    }
+    sqlite3_finalize(info);
+    if (!has_resume_column) {
+        err = nullptr;
+        rc = sqlite3_exec(db_, "ALTER TABLE torrents ADD COLUMN resume_data BLOB;",
+                          nullptr, nullptr, &err);
+        if (rc != SQLITE_OK) {
+            spdlog::error("OfflineCacheManager: failed to add resume_data: {}", err ? err : "unknown");
+            sqlite3_free(err);
+        }
+    }
 }
 
 static std::int64_t now_epoch() {
@@ -287,9 +308,14 @@ void OfflineCacheManager::save_torrent_uri(const TorrentId& id, const std::strin
     std::lock_guard lock(mu_);
     if (!db_) return;
 
+    // Not INSERT OR REPLACE: that would drop the row's resume data every
+    // time a torrent the engine already has is added again.
     const char* sql = R"(
-        INSERT OR REPLACE INTO torrents (torrent_id, uri, added_at)
-        VALUES (?, ?, ?);
+        INSERT INTO torrents (torrent_id, uri, added_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(torrent_id) DO UPDATE SET
+            uri = excluded.uri,
+            added_at = excluded.added_at;
     )";
 
     sqlite3_stmt* stmt = nullptr;
@@ -339,6 +365,55 @@ std::vector<std::pair<TorrentId, std::string>> OfflineCacheManager::list_torrent
         auto tid = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
         auto uri = std::string(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)));
         result.emplace_back(std::move(tid), std::move(uri));
+    }
+
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+void OfflineCacheManager::save_resume_data(const TorrentId& id, const std::vector<char>& data) {
+    std::lock_guard lock(mu_);
+    if (!db_) return;
+
+    // An update only: a save that arrives after its torrent was removed
+    // finds no row and writes nothing.
+    const char* sql = R"(
+        UPDATE torrents SET resume_data = ? WHERE torrent_id = ?;
+    )";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        spdlog::error("OfflineCacheManager: prepare failed: {}", sqlite3_errmsg(db_));
+        return;
+    }
+
+    sqlite3_bind_blob(stmt, 1, data.data(), static_cast<int>(data.size()), SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, id.c_str(), static_cast<int>(id.size()), SQLITE_TRANSIENT);
+
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        spdlog::error("OfflineCacheManager: resume data not saved: {}", sqlite3_errmsg(db_));
+    }
+    sqlite3_finalize(stmt);
+}
+
+std::vector<char> OfflineCacheManager::load_resume_data(const TorrentId& id) const {
+    std::lock_guard lock(mu_);
+    std::vector<char> result;
+    if (!db_) return result;
+
+    const char* sql = R"(
+        SELECT resume_data FROM torrents WHERE torrent_id = ?;
+    )";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) return result;
+
+    sqlite3_bind_text(stmt, 1, id.c_str(), static_cast<int>(id.size()), SQLITE_TRANSIENT);
+
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        auto* bytes = static_cast<const char*>(sqlite3_column_blob(stmt, 0));
+        int size = sqlite3_column_bytes(stmt, 0);
+        if (bytes && size > 0) result.assign(bytes, bytes + size);
     }
 
     sqlite3_finalize(stmt);

@@ -29,6 +29,16 @@ struct SessionConfig {
     // only. Needed on Android, where the defaults do not exist and OpenSSL
     // ignores SSL_CERT_FILE in app processes.
     std::string ca_cert_file;
+    // Keeps each torrent's resume data (its metadata, the pieces it has, its
+    // file priorities) in the cache database, without peer addresses, so a
+    // restart can do without the metadata from peers and a full re-check.
+    // Off = nothing is kept beyond the saved URI, as before.
+    bool resume_data = false;
+    // How often the resume data of a torrent that changed is saved again;
+    // 0 = only on events (metadata, a completed file, a pause, shutdown).
+    std::chrono::seconds resume_save_interval{0};
+    // How long shutdown waits for the last resume data to be written.
+    std::chrono::milliseconds resume_flush_timeout{3000};
     ProxyConfig proxy;
 };
 

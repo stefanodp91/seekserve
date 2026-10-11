@@ -11,6 +11,7 @@ add_executable(seekserve-unit-tests
     unit/test_streaming_scheduler.cpp
     unit/test_range_parser.cpp
     unit/test_offline_cache.cpp
+    unit/test_resume_data.cpp
 )
 
 target_link_libraries(seekserve-unit-tests
@@ -38,6 +39,7 @@ add_executable(seekserve-integration-tests
     integration/test_stress.cpp
     integration/test_tracker_cas.cpp
     integration/test_hybrid_torrent.cpp
+    integration/test_engine_resume_data.cpp
 )
 
 target_link_libraries(seekserve-integration-tests

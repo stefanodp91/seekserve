@@ -45,6 +45,12 @@ public:
     void remove_torrent_uri(const TorrentId& id);
     std::vector<std::pair<TorrentId, std::string>> list_torrent_uris() const;
 
+    // Resume data of a saved torrent (see encode_resume_data). Kept in the
+    // torrent's own row: saving needs the row, and it goes when the row goes.
+    void save_resume_data(const TorrentId& id, const std::vector<char>& data);
+    // Empty when the torrent has none.
+    std::vector<char> load_resume_data(const TorrentId& id) const;
+
 private:
     void init_db();
 
