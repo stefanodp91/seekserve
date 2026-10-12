@@ -121,7 +121,8 @@ The app pins this repository by commit and `flutter pub get` fetches it from Git
   `invalid_torrent_handle`. Neither `ss_get_status` nor the app's JNI catches it, so it would end the
   process. The window is very short, and the app's service asks for the status and removes torrents
   on different threads. The `files` part added in `fdc2087` catches it and leaves the key out; the
-  older call is as it was, waiting for the owner's decision.
+  older call is as it was: by the owner's choice it is fixed in the app's step P4-03, which works on
+  the same function (app DEC-255).
 - Also seen there: `offline_ready` in the status is the cache's flag (`cache_entries.offline_ready`),
   set by `file_completed` and never taken back, so it still says ready for a file deleted behind the
   engine and found missing (`MultiFileTorrent.AFileThatWentIsNotWholeAnyMore` shows it next to
