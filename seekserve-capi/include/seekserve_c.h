@@ -80,6 +80,19 @@ ss_error_t ss_select_file(SeekServeEngine* engine,
                           const char* torrent_id,
                           int32_t file_index);
 
+/* The two files a torrent wants from now on: reader_file is the one a player
+ * reads, with the stream and the deadlines, and background_file downloads
+ * behind it. -1 for none; every other file is not downloaded. With both,
+ * the reader's file comes first. A player keeps its stream while only
+ * background_file changes. ss_select_file(fi) is a new reader alone.
+ * SS_ERR_NOT_FOUND for a torrent or a file that is not there (nothing
+ * changes), SS_ERR_METADATA_PENDING before the files are known. */
+__attribute__((visibility("default")))
+ss_error_t ss_set_wanted_files(SeekServeEngine* engine,
+                               const char* torrent_id,
+                               int32_t reader_file,
+                               int32_t background_file);
+
 __attribute__((visibility("default")))
 ss_error_t ss_get_stream_url(SeekServeEngine* engine,
                              const char* torrent_id,

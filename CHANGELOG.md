@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+### Added — Two wanted files per torrent
+
+#### `seekserve-core` / `seekserve-serve`
+
+- **`engine.hpp` / `engine.cpp`**: `set_wanted_files(id, reader, background)` asks for the file a player reads
+  and the file that downloads behind it (`-1` for none). With both, the reader's file and the subtitles get
+  libtorrent's top priority and the other the default one, so the video comes first and the file behind goes
+  on by itself once the reader's is whole. The reader keeps its stream while only the file behind it changes;
+  when it leaves, its stream ends, its deadlines are cleared and its file stops. `select_file(id, fi)` is still
+  that file alone, with a new stream at every call.
+- **Status** (`get_status_json`, `ss_get_status`): `files`, one entry for each file the torrent downloads, with
+  `index`, `size`, `downloaded`, `complete` and, for the files asked for, `role` (`reader` or `background`).
+  `selected_file` is the reader's file, or the background one when no player reads. `progress` still counts the
+  wanted pieces of the whole torrent.
+- **Resume data**: a torrent restored from its resume data comes back without the file a player was reading
+  ahead of a download, and without the piece priorities deadlines left (`drop_reader_priorities`).
+
+#### `seekserve-capi`
+
+- **`seekserve_c.h` / `seekserve_c.cpp`**: new function `ss_set_wanted_files(engine, torrent_id, reader_file,
+  background_file)` (19 functions).
+
+#### Flutter FFI (`flutter_seekserve`)
+
+- **`torrent_status.dart`**: `TorrentStatus.files` (`WantedFile`, `WantedFileRole`).
+- **`seekserve_client.dart`**: `setWantedFiles(torrentId, readerFile:, backgroundFile:)`.
+- **`bindings_generated.dart`**: manual FFI binding for `ss_set_wanted_files`; `native_header/seekserve_c.h`
+  is the C header again.
+
+### Fixed — Calls on a torrent that is being removed
+
+- **`seekserve_c.cpp`**: no call lets a C++ exception out of the library. libtorrent throws on a handle whose
+  torrent another thread removed between the engine's validity check and its call; a caller across the C
+  boundary (the app's JNI, Dart FFI) cannot catch that, and the process would end. Such a torrent is now
+  `SS_ERR_NOT_FOUND`; any other failure inside a call is `SS_ERR_IO`.
+- **`engine.cpp`**: `get_status_json` answers `torrent not found` for a torrent removed while it asked, and
+  choosing files (`select_file`, `set_wanted_files`) returns `torrent_not_found`.
+
+---
+
 ### Added — Torrent Force Reannounce
 
 #### `seekserve-serve`

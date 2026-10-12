@@ -77,10 +77,17 @@ ss_error_t ss_list_files(SeekServeEngine* engine, const char* torrent_id,
 ss_error_t ss_select_file(SeekServeEngine* engine, const char* torrent_id,
                            int32_t file_index);
 
+// The two files the torrent wants from now on: the one a player reads and
+// the one that downloads behind it (-1 for none)
+ss_error_t ss_set_wanted_files(SeekServeEngine* engine, const char* torrent_id,
+                                int32_t reader_file, int32_t background_file);
+
 // Get HTTP stream URL for selected file
 ss_error_t ss_get_stream_url(SeekServeEngine* engine, const char* torrent_id,
                               int32_t file_index, char** out_url);
 ```
+
+`ss_select_file` asks for one file alone: every other file of the torrent stops, and the file gets a new stream each time. A pack that downloads one episode while a player reads another asks for both with `ss_set_wanted_files`: `reader_file` has the stream and the deadlines and comes first (its pieces are asked for before the other file's), `background_file` goes on behind it and takes over by itself once the reader's file is whole; `-1` is no file, for either or for both, and the same index twice is the reader. A player keeps its stream while only `background_file` changes; when `reader_file` changes or goes to `-1`, its stream ends and its file stops unless it is the new `background_file`. A torrent or a file that is not there is `SS_ERR_NOT_FOUND` and changes nothing; before the metadata, `SS_ERR_METADATA_PENDING`. After a restart with `resume_data` no file is a reader's: the one that was comes back unwanted when another downloaded behind it, and wanted as it was when it was alone.
 
 ## Status
 
@@ -92,7 +99,7 @@ ss_error_t ss_get_status(SeekServeEngine* engine, const char* torrent_id,
 
 Status JSON includes: `torrent_id`, `name`, `progress`, `download_rate`, `upload_rate`, `num_peers`, `num_seeds`, `state`, `has_metadata`, `selected_file`, `offline_ready`, `files`, `stream_mode`, `playhead_piece`, `active_deadlines`.
 
-`files` is there once the metadata is known: one entry for each file the torrent downloads (every file until one is selected, then the wanted files and the subtitle files), `{"index", "size", "downloaded", "complete"}`, with `"role"` on the files the engine was asked for: `"reader"` for the one a player reads, which has the stream and the deadlines, and `"background"` for the one that downloads behind it. `ss_select_file` asks for a reader alone; the engine can also want the two together (`SeekServeEngine::set_wanted_files`, no C function yet), and then the reader's file comes first. `selected_file` is the reader's file, or the background one when no player reads; `stream_mode`, `playhead_piece` and `active_deadlines` are there only with a reader. `downloaded` is the bytes of that file that are there, the blocks of unfinished pieces included; `complete` is true when every piece the file has a byte in is checked, which is when `file_completed` fires, and goes back to false if the pieces are lost (a file deleted behind the engine, seen at the next check). `progress` counts the wanted pieces of the whole torrent, which with two wanted files is neither file's own number, and `offline_ready` is a stored note that the selected file completed once: for one file, read its entry in `files`.
+`files` is there once the metadata is known: one entry for each file the torrent downloads (every file until one is selected, then the wanted files and the subtitle files), `{"index", "size", "downloaded", "complete"}`, with `"role"` on the files the engine was asked for: `"reader"` for the one a player reads, which has the stream and the deadlines, and `"background"` for the one that downloads behind it. `ss_select_file` asks for a reader alone, `ss_set_wanted_files` for the two together, and then the reader's file comes first. `selected_file` is the reader's file, or the background one when no player reads; `stream_mode`, `playhead_piece` and `active_deadlines` are there only with a reader. `downloaded` is the bytes of that file that are there, the blocks of unfinished pieces included; `complete` is true when every piece the file has a byte in is checked, which is when `file_completed` fires, and goes back to false if the pieces are lost (a file deleted behind the engine, seen at the next check). `progress` counts the wanted pieces of the whole torrent, which with two wanted files is neither file's own number, and `offline_ready` is a stored note that the selected file completed once: for one file, read its entry in `files`.
 
 ## Server Control
 
@@ -127,6 +134,8 @@ void ss_free_string(char* str);
 **Important**: All `char**` out parameters return library-allocated strings. Callers **must** call `ss_free_string()` on these strings to avoid memory leaks. Passing `NULL` to `ss_free_string()` is safe (`delete[] nullptr` is a no-op per C++ standard).
 
 ## Error Codes
+
+No call lets a C++ exception out of the library: a caller across the C boundary (JNI, Dart FFI) could not catch it. A torrent removed by another thread while a call was working on it is `SS_ERR_NOT_FOUND`, as if it had not been there; any other failure inside a call is `SS_ERR_IO`.
 
 | Code | Value | Meaning |
 |------|-------|---------|

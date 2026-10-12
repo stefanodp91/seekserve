@@ -1,11 +1,13 @@
 #include "seekserve_c.h"
 #include "seekserve/engine.hpp"
 
+#include <libtorrent/error_code.hpp>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
 #include <cstring>
 #include <string>
+#include <utility>
 
 using json = nlohmann::json;
 
@@ -31,6 +33,26 @@ static ss_error_t map_error(const std::error_code& ec) {
         case errc::cancelled:              return SS_ERR_CANCELLED;
         default:                           return SS_ERR_IO;
     }
+}
+
+// No exception leaves the library: nothing beyond it can catch one (the
+// app's JNI, Dart's FFI), and the process would end. libtorrent throws on a
+// handle whose torrent another thread removed between the engine's check
+// and its call (app BUG-199, BUG-200): to the caller that torrent is not
+// there. Anything else is an error of the call.
+template <typename Call>
+static ss_error_t guarded(const char* name, Call&& call) noexcept {
+    try {
+        return std::forward<Call>(call)();
+    } catch (const lt::system_error& e) {
+        if (e.code() == lt::errors::invalid_torrent_handle) return SS_ERR_NOT_FOUND;
+        spdlog::error("C API: {} failed: {}", name, e.what());
+    } catch (const std::exception& e) {
+        spdlog::error("C API: {} failed: {}", name, e.what());
+    } catch (...) {
+        spdlog::error("C API: {} failed", name);
+    }
+    return SS_ERR_IO;
 }
 
 static char* alloc_string(const std::string& s) {
@@ -111,6 +133,9 @@ SeekServeEngine* ss_engine_create(const char* config_json) {
     } catch (const std::exception& e) {
         spdlog::error("C API: ss_engine_create failed: {}", e.what());
         return nullptr;
+    } catch (...) {
+        spdlog::error("C API: ss_engine_create failed");
+        return nullptr;
     }
 }
 
@@ -122,157 +147,195 @@ ss_error_t ss_add_torrent(SeekServeEngine* engine, const char* uri,
                           char* out_torrent_id, int32_t out_torrent_id_len) {
     if (!engine || !uri) return SS_ERR_INVALID_ARG;
 
-    auto result = engine->add_torrent(uri);
-    if (!result) return map_error(result.error());
+    return guarded("ss_add_torrent", [&]() -> ss_error_t {
+        auto result = engine->add_torrent(uri);
+        if (!result) return map_error(result.error());
 
-    const auto& id = result.value();
-    if (out_torrent_id && out_torrent_id_len > 0) {
-        auto copy_len = std::min(static_cast<std::size_t>(out_torrent_id_len - 1), id.size());
-        std::memcpy(out_torrent_id, id.c_str(), copy_len);
-        out_torrent_id[copy_len] = '\0';
-    }
+        const auto& id = result.value();
+        if (out_torrent_id && out_torrent_id_len > 0) {
+            auto copy_len = std::min(static_cast<std::size_t>(out_torrent_id_len - 1), id.size());
+            std::memcpy(out_torrent_id, id.c_str(), copy_len);
+            out_torrent_id[copy_len] = '\0';
+        }
 
-    return SS_OK;
+        return SS_OK;
+    });
 }
 
 ss_error_t ss_remove_torrent(SeekServeEngine* engine, const char* torrent_id,
                              bool delete_files) {
     if (!engine || !torrent_id) return SS_ERR_INVALID_ARG;
 
-    auto result = engine->remove_torrent(torrent_id, delete_files);
-    return result ? SS_OK : map_error(result.error());
+    return guarded("ss_remove_torrent", [&]() -> ss_error_t {
+        auto result = engine->remove_torrent(torrent_id, delete_files);
+        return result ? SS_OK : map_error(result.error());
+    });
 }
 
 ss_error_t ss_pause_torrent(SeekServeEngine* engine, const char* torrent_id) {
     if (!engine || !torrent_id) return SS_ERR_INVALID_ARG;
 
-    auto result = engine->pause_torrent(torrent_id);
-    return result ? SS_OK : map_error(result.error());
+    return guarded("ss_pause_torrent", [&]() -> ss_error_t {
+        auto result = engine->pause_torrent(torrent_id);
+        return result ? SS_OK : map_error(result.error());
+    });
 }
 
 ss_error_t ss_resume_torrent(SeekServeEngine* engine, const char* torrent_id) {
     if (!engine || !torrent_id) return SS_ERR_INVALID_ARG;
 
-    auto result = engine->resume_torrent(torrent_id);
-    return result ? SS_OK : map_error(result.error());
+    return guarded("ss_resume_torrent", [&]() -> ss_error_t {
+        auto result = engine->resume_torrent(torrent_id);
+        return result ? SS_OK : map_error(result.error());
+    });
 }
 
 ss_error_t ss_start_torrent(SeekServeEngine* engine, const char* torrent_id) {
     if (!engine || !torrent_id) return SS_ERR_INVALID_ARG;
 
-    auto result = engine->start_torrent(torrent_id);
-    return result ? SS_OK : map_error(result.error());
+    return guarded("ss_start_torrent", [&]() -> ss_error_t {
+        auto result = engine->start_torrent(torrent_id);
+        return result ? SS_OK : map_error(result.error());
+    });
 }
 
 ss_error_t ss_force_reannounce(SeekServeEngine* engine, const char* torrent_id) {
     if (!engine || !torrent_id) return SS_ERR_INVALID_ARG;
 
-    auto result = engine->force_reannounce(torrent_id);
-    return result ? SS_OK : map_error(result.error());
+    return guarded("ss_force_reannounce", [&]() -> ss_error_t {
+        auto result = engine->force_reannounce(torrent_id);
+        return result ? SS_OK : map_error(result.error());
+    });
 }
 
 ss_error_t ss_list_torrents(SeekServeEngine* engine, char** out_json) {
     if (!engine || !out_json) return SS_ERR_INVALID_ARG;
 
-    auto ids = engine->list_torrents();
-    json arr = json::array();
-    for (const auto& id : ids) {
-        arr.push_back(id);
-    }
+    return guarded("ss_list_torrents", [&]() -> ss_error_t {
+        auto ids = engine->list_torrents();
+        json arr = json::array();
+        for (const auto& id : ids) {
+            arr.push_back(id);
+        }
 
-    *out_json = alloc_string(arr.dump());
-    return *out_json ? SS_OK : SS_ERR_IO;
+        *out_json = alloc_string(arr.dump());
+        return *out_json ? SS_OK : SS_ERR_IO;
+    });
 }
 
 ss_error_t ss_list_files(SeekServeEngine* engine, const char* torrent_id,
                          char** out_json) {
     if (!engine || !torrent_id || !out_json) return SS_ERR_INVALID_ARG;
 
-    auto result = engine->list_files(torrent_id);
-    if (!result) return map_error(result.error());
+    return guarded("ss_list_files", [&]() -> ss_error_t {
+        auto result = engine->list_files(torrent_id);
+        if (!result) return map_error(result.error());
 
-    json arr = json::array();
-    for (const auto& f : result.value()) {
-        arr.push_back(json{
-            {"index", f.index},
-            {"path", f.path},
-            {"size", f.size},
-            {"first_piece", f.first_piece},
-            {"end_piece", f.end_piece}
-        });
-    }
+        json arr = json::array();
+        for (const auto& f : result.value()) {
+            arr.push_back(json{
+                {"index", f.index},
+                {"path", f.path},
+                {"size", f.size},
+                {"first_piece", f.first_piece},
+                {"end_piece", f.end_piece}
+            });
+        }
 
-    json response = {{"files", arr}};
-    *out_json = alloc_string(response.dump());
-    return *out_json ? SS_OK : SS_ERR_IO;
+        json response = {{"files", arr}};
+        *out_json = alloc_string(response.dump());
+        return *out_json ? SS_OK : SS_ERR_IO;
+    });
 }
 
 ss_error_t ss_select_file(SeekServeEngine* engine, const char* torrent_id,
                           int32_t file_index) {
     if (!engine || !torrent_id) return SS_ERR_INVALID_ARG;
 
-    auto result = engine->select_file(torrent_id, file_index);
-    return result ? SS_OK : map_error(result.error());
+    return guarded("ss_select_file", [&]() -> ss_error_t {
+        auto result = engine->select_file(torrent_id, file_index);
+        return result ? SS_OK : map_error(result.error());
+    });
+}
+
+ss_error_t ss_set_wanted_files(SeekServeEngine* engine, const char* torrent_id,
+                               int32_t reader_file, int32_t background_file) {
+    if (!engine || !torrent_id) return SS_ERR_INVALID_ARG;
+
+    return guarded("ss_set_wanted_files", [&]() -> ss_error_t {
+        auto result = engine->set_wanted_files(torrent_id, reader_file, background_file);
+        return result ? SS_OK : map_error(result.error());
+    });
 }
 
 ss_error_t ss_get_stream_url(SeekServeEngine* engine, const char* torrent_id,
                              int32_t file_index, char** out_url) {
     if (!engine || !torrent_id || !out_url) return SS_ERR_INVALID_ARG;
 
-    auto result = engine->get_stream_url(torrent_id, file_index);
-    if (!result) return map_error(result.error());
+    return guarded("ss_get_stream_url", [&]() -> ss_error_t {
+        auto result = engine->get_stream_url(torrent_id, file_index);
+        if (!result) return map_error(result.error());
 
-    *out_url = alloc_string(result.value());
-    return *out_url ? SS_OK : SS_ERR_IO;
+        *out_url = alloc_string(result.value());
+        return *out_url ? SS_OK : SS_ERR_IO;
+    });
 }
 
 ss_error_t ss_get_status(SeekServeEngine* engine, const char* torrent_id,
                          char** out_json) {
     if (!engine || !torrent_id || !out_json) return SS_ERR_INVALID_ARG;
 
-    auto status_str = engine->get_status_json(torrent_id);
-    *out_json = alloc_string(status_str);
-    return *out_json ? SS_OK : SS_ERR_IO;
+    return guarded("ss_get_status", [&]() -> ss_error_t {
+        auto status_str = engine->get_status_json(torrent_id);
+        *out_json = alloc_string(status_str);
+        return *out_json ? SS_OK : SS_ERR_IO;
+    });
 }
 
 ss_error_t ss_set_event_callback(SeekServeEngine* engine,
                                  ss_event_callback_t callback, void* user_data) {
     if (!engine) return SS_ERR_INVALID_ARG;
 
-    if (!callback) {
-        engine->set_event_callback(nullptr);
-        return SS_OK;
-    }
-
-    // Heap-allocate the event string so it survives until the Dart side
-    // processes it (NativeCallable.listener dispatches asynchronously).
-    // The callee frees via ss_free_string().
-    engine->set_event_callback([callback, user_data](const std::string& event_json) {
-        char* buf = alloc_string(event_json);
-        if (buf) {
-            callback(buf, user_data);
+    return guarded("ss_set_event_callback", [&]() -> ss_error_t {
+        if (!callback) {
+            engine->set_event_callback(nullptr);
+            return SS_OK;
         }
-    });
 
-    return SS_OK;
+        // Heap-allocate the event string so it survives until the Dart side
+        // processes it (NativeCallable.listener dispatches asynchronously).
+        // The callee frees via ss_free_string().
+        engine->set_event_callback([callback, user_data](const std::string& event_json) {
+            char* buf = alloc_string(event_json);
+            if (buf) {
+                callback(buf, user_data);
+            }
+        });
+
+        return SS_OK;
+    });
 }
 
 ss_error_t ss_start_server(SeekServeEngine* engine, uint16_t port,
                            uint16_t* out_port) {
     if (!engine) return SS_ERR_INVALID_ARG;
 
-    auto result = engine->start_server(port);
-    if (!result) return map_error(result.error());
+    return guarded("ss_start_server", [&]() -> ss_error_t {
+        auto result = engine->start_server(port);
+        if (!result) return map_error(result.error());
 
-    if (out_port) *out_port = result.value();
-    return SS_OK;
+        if (out_port) *out_port = result.value();
+        return SS_OK;
+    });
 }
 
 ss_error_t ss_stop_server(SeekServeEngine* engine) {
     if (!engine) return SS_ERR_INVALID_ARG;
 
-    engine->stop_server();
-    return SS_OK;
+    return guarded("ss_stop_server", [&]() -> ss_error_t {
+        engine->stop_server();
+        return SS_OK;
+    });
 }
 
 ss_error_t ss_set_proxy(SeekServeEngine* engine, const char* proxy_json) {
@@ -294,8 +357,10 @@ ss_error_t ss_set_proxy(SeekServeEngine* engine, const char* proxy_json) {
         }
     }
 
-    engine->set_proxy(proxy);
-    return SS_OK;
+    return guarded("ss_set_proxy", [&]() -> ss_error_t {
+        engine->set_proxy(proxy);
+        return SS_OK;
+    });
 }
 
 void ss_free_string(char* str) {

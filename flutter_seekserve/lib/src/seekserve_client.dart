@@ -211,6 +211,28 @@ class SeekServeClient {
     }
   }
 
+  /// Sets the two files the torrent wants from now on: [readerFile] is the
+  /// one a player reads, with the stream and the deadlines, and
+  /// [backgroundFile] downloads behind it. Null for none; every other file is
+  /// not downloaded. With both, the reader's file comes first. A player keeps
+  /// its stream while only [backgroundFile] changes; [selectFile] is a new
+  /// reader alone.
+  void setWantedFiles(String torrentId, {int? readerFile, int? backgroundFile}) {
+    _ensureNotDisposed();
+    final idPtr = torrentId.toNativeUtf8().cast<Char>();
+    try {
+      final err = _bindings.ss_set_wanted_files(
+        _engine,
+        idPtr,
+        readerFile ?? -1,
+        backgroundFile ?? -1,
+      );
+      checkError(err);
+    } finally {
+      calloc.free(idPtr);
+    }
+  }
+
   /// Returns the HTTP stream URL for a specific file in a torrent.
   ///
   /// The URL points to the local HTTP Range server and includes the auth token.

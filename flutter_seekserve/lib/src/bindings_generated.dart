@@ -245,6 +245,41 @@ class SeekServeBindings {
         int Function(ffi.Pointer<SeekServeEngine>, ffi.Pointer<ffi.Char>, int)
       >();
 
+  int ss_set_wanted_files(
+    ffi.Pointer<SeekServeEngine> engine,
+    ffi.Pointer<ffi.Char> torrent_id,
+    int reader_file,
+    int background_file,
+  ) {
+    return _ss_set_wanted_files(
+      engine,
+      torrent_id,
+      reader_file,
+      background_file,
+    );
+  }
+
+  late final _ss_set_wanted_filesPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ss_error_t Function(
+            ffi.Pointer<SeekServeEngine>,
+            ffi.Pointer<ffi.Char>,
+            ffi.Int32,
+            ffi.Int32,
+          )
+        >
+      >('ss_set_wanted_files');
+  late final _ss_set_wanted_files = _ss_set_wanted_filesPtr
+      .asFunction<
+        int Function(
+          ffi.Pointer<SeekServeEngine>,
+          ffi.Pointer<ffi.Char>,
+          int,
+          int,
+        )
+      >();
+
   int ss_get_stream_url(
     ffi.Pointer<SeekServeEngine> engine,
     ffi.Pointer<ffi.Char> torrent_id,

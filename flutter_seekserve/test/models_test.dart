@@ -143,6 +143,65 @@ void main() {
       });
       expect(status.isPaused, false);
     });
+
+    // What each wanted file has, and what it is wanted for (the engine's
+    // status since the app's phase P4).
+    test('fromJson parses the wanted files and their roles', () {
+      final status = TorrentStatus.fromJson({
+        'torrent_id': 'abc',
+        'selected_file': 4,
+        'files': [
+          {'index': 4, 'size': 1000, 'downloaded': 250, 'complete': false, 'role': 'reader'},
+          {'index': 5, 'size': 2000, 'downloaded': 2000, 'complete': true, 'role': 'background'},
+          {'index': 6, 'size': 30, 'downloaded': 30, 'complete': true},
+        ],
+      });
+
+      final files = status.files!;
+      expect(files, hasLength(3));
+      expect(files[0].index, 4);
+      expect(files[0].size, 1000);
+      expect(files[0].downloaded, 250);
+      expect(files[0].isComplete, false);
+      expect(files[0].role, WantedFileRole.reader);
+      expect(files[1].index, 5);
+      expect(files[1].isComplete, true);
+      expect(files[1].role, WantedFileRole.background);
+      // Subtitles ride along: wanted, with no role of their own.
+      expect(files[2].role, isNull);
+    });
+
+    test('fromJson leaves files null when the engine does not say', () {
+      // An older library, a torrent without metadata, one just removed.
+      expect(TorrentStatus.fromJson({'torrent_id': 'abc'}).files, isNull);
+    });
+
+    test('fromJson keeps an empty list of files apart from none', () {
+      // Nothing wanted is not the same as not said.
+      expect(TorrentStatus.fromJson({'torrent_id': 'abc', 'files': []}).files, isEmpty);
+    });
+
+    test('fromJson takes a role it does not know for no role', () {
+      final status = TorrentStatus.fromJson({
+        'torrent_id': 'abc',
+        'files': [
+          {'index': 1, 'size': 10, 'downloaded': 0, 'complete': false, 'role': 'later'},
+        ],
+      });
+      expect(status.files!.single.role, isNull);
+    });
+
+    test('toJson writes the wanted files back', () {
+      final json = {
+        'torrent_id': 'abc',
+        'files': [
+          {'index': 4, 'size': 1000, 'downloaded': 250, 'complete': false, 'role': 'reader'},
+          {'index': 6, 'size': 30, 'downloaded': 30, 'complete': true},
+        ],
+      };
+      expect(TorrentStatus.fromJson(json).toJson()['files'], json['files']);
+      expect(TorrentStatus.fromJson({'torrent_id': 'abc'}).toJson().containsKey('files'), false);
+    });
   });
 
   group('SeekServeConfig', () {

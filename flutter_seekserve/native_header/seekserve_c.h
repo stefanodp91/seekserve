@@ -22,6 +22,14 @@ typedef int32_t ss_error_t;
 
 typedef void (*ss_event_callback_t)(const char* event_json, void* user_data);
 
+// config_json keys added for resume data (both optional; without them the
+// engine behaves as before):
+//   "resume_data" (bool): keep each torrent's resume data in the cache
+//     database, without peer addresses, and restore torrents from it; a
+//     restored torrent then has its metadata at once and comes back paused.
+//   "resume_save_interval" (int, seconds): how often a torrent that changed
+//     is saved again while the servers run; 0 or absent = only on events
+//     (metadata, a completed file, a pause, ss_engine_destroy).
 __attribute__((visibility("default")))
 SeekServeEngine* ss_engine_create(const char* config_json);
 
@@ -47,6 +55,17 @@ __attribute__((visibility("default")))
 ss_error_t ss_resume_torrent(SeekServeEngine* engine,
                              const char* torrent_id);
 
+/* Resumes a torrent outside the download queue (max_concurrent_torrents),
+ * as ss_add_torrent adds it: for streaming. ss_resume_torrent puts it back
+ * into the queue. */
+__attribute__((visibility("default")))
+ss_error_t ss_start_torrent(SeekServeEngine* engine,
+                            const char* torrent_id);
+
+__attribute__((visibility("default")))
+ss_error_t ss_force_reannounce(SeekServeEngine* engine,
+                               const char* torrent_id);
+
 __attribute__((visibility("default")))
 ss_error_t ss_list_torrents(SeekServeEngine* engine,
                             char** out_json);
@@ -60,6 +79,19 @@ __attribute__((visibility("default")))
 ss_error_t ss_select_file(SeekServeEngine* engine,
                           const char* torrent_id,
                           int32_t file_index);
+
+/* The two files a torrent wants from now on: reader_file is the one a player
+ * reads, with the stream and the deadlines, and background_file downloads
+ * behind it. -1 for none; every other file is not downloaded. With both,
+ * the reader's file comes first. A player keeps its stream while only
+ * background_file changes. ss_select_file(fi) is a new reader alone.
+ * SS_ERR_NOT_FOUND for a torrent or a file that is not there (nothing
+ * changes), SS_ERR_METADATA_PENDING before the files are known. */
+__attribute__((visibility("default")))
+ss_error_t ss_set_wanted_files(SeekServeEngine* engine,
+                               const char* torrent_id,
+                               int32_t reader_file,
+                               int32_t background_file);
 
 __attribute__((visibility("default")))
 ss_error_t ss_get_stream_url(SeekServeEngine* engine,

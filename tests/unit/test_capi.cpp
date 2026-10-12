@@ -661,3 +661,179 @@ TEST_F(CApiTest, WithoutAnIntervalAChangedTorrentWaitsForAnEvent) {
 
     ss_engine_destroy(engine);
 }
+
+// --- The two files a torrent may want at once (app WORK-29, phase P4) ---
+
+namespace {
+
+std::string status_json(SeekServeEngine* engine, const std::string& id) {
+    char* json = nullptr;
+    if (ss_get_status(engine, id.c_str(), &json) != SS_OK || !json) return "";
+    std::string out(json);
+    ss_free_string(json);
+    return out;
+}
+
+// Waits for a status that has every text of `with` and none of `without`.
+bool status_becomes(SeekServeEngine* engine, const std::string& id,
+                    const std::vector<std::string>& with,
+                    const std::vector<std::string>& without = {}) {
+    for (int i = 0; i < 100; ++i) {
+        const auto status = status_json(engine, id);
+        bool ok = !status.empty();
+        for (const auto& text : with) ok = ok && status.find(text) != std::string::npos;
+        for (const auto& text : without) ok = ok && status.find(text) == std::string::npos;
+        if (ok) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST_F(CApiTest, SetWantedFilesNullArgs) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+
+    EXPECT_EQ(ss_set_wanted_files(nullptr, "abc", 0, 1), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_set_wanted_files(engine, nullptr, 0, 1), SS_ERR_INVALID_ARG);
+
+    ss_engine_destroy(engine);
+}
+
+// The file a player reads and the one that downloads behind it, each said
+// in the status; the player leaves; nothing is wanted; and ss_select_file
+// after it is that file alone.
+TEST_F(CApiTest, SetWantedFilesSaysWhichFileIsWhose) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+    char id_buf[128] = {};
+    auto path = torrent_path();
+    ASSERT_EQ(ss_add_torrent(engine, path.c_str(), id_buf, sizeof(id_buf)), SS_OK);
+    std::string id(id_buf);
+    ASSERT_TRUE(status_becomes(engine, id, {"\"has_metadata\":true"})) << status_json(engine, id);
+
+    // Files 2 and 3 of the fixture: neither is a subtitle file.
+    ASSERT_EQ(ss_set_wanted_files(engine, id.c_str(), 2, 3), SS_OK);
+    EXPECT_TRUE(status_becomes(engine, id,
+                               {"\"index\":2,\"role\":\"reader\"",
+                                "\"index\":3,\"role\":\"background\"",
+                                "\"selected_file\":2"}))
+        << status_json(engine, id);
+
+    ASSERT_EQ(ss_set_wanted_files(engine, id.c_str(), -1, 3), SS_OK);
+    EXPECT_TRUE(status_becomes(engine, id,
+                               {"\"index\":3,\"role\":\"background\"", "\"selected_file\":3"},
+                               {"\"role\":\"reader\""}))
+        << status_json(engine, id);
+
+    ASSERT_EQ(ss_set_wanted_files(engine, id.c_str(), -1, -1), SS_OK);
+    EXPECT_TRUE(status_becomes(engine, id, {"\"files\":[]", "\"selected_file\":null"}))
+        << status_json(engine, id);
+
+    ASSERT_EQ(ss_set_wanted_files(engine, id.c_str(), 2, 3), SS_OK);
+    ASSERT_EQ(ss_select_file(engine, id.c_str(), 3), SS_OK);
+    EXPECT_TRUE(status_becomes(engine, id,
+                               {"\"index\":3,\"role\":\"reader\"", "\"selected_file\":3"},
+                               {"\"role\":\"background\""}))
+        << status_json(engine, id);
+
+    ss_engine_destroy(engine);
+}
+
+// A torrent or a file that is not there, or files not known yet: an error
+// code, and what was wanted stays wanted.
+TEST_F(CApiTest, SetWantedFilesThatAreNotThereAreErrors) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+
+    EXPECT_EQ(ss_set_wanted_files(engine, "nonexistent_torrent_id", 0, -1), SS_ERR_NOT_FOUND);
+
+    // A magnet nobody answers: its files are never known.
+    char bare[128] = {};
+    const std::string magnet = "magnet:?xt=urn:btih:" + std::string(40, 'a');
+    ASSERT_EQ(ss_add_torrent(engine, magnet.c_str(), bare, sizeof(bare)), SS_OK);
+    EXPECT_EQ(ss_set_wanted_files(engine, bare, 0, -1), SS_ERR_METADATA_PENDING);
+
+    char id_buf[128] = {};
+    auto path = torrent_path();
+    ASSERT_EQ(ss_add_torrent(engine, path.c_str(), id_buf, sizeof(id_buf)), SS_OK);
+    std::string id(id_buf);
+    ASSERT_TRUE(status_becomes(engine, id, {"\"has_metadata\":true"})) << status_json(engine, id);
+    ASSERT_EQ(ss_set_wanted_files(engine, id.c_str(), 2, 3), SS_OK);
+
+    EXPECT_EQ(ss_set_wanted_files(engine, id.c_str(), 2, 99999), SS_ERR_NOT_FOUND);
+    EXPECT_EQ(ss_set_wanted_files(engine, id.c_str(), 99999, 3), SS_ERR_NOT_FOUND);
+    EXPECT_EQ(ss_set_wanted_files(engine, id.c_str(), -2, 3), SS_ERR_NOT_FOUND);
+    EXPECT_TRUE(status_becomes(engine, id,
+                               {"\"index\":2,\"role\":\"reader\"",
+                                "\"index\":3,\"role\":\"background\"",
+                                "\"selected_file\":2"}))
+        << status_json(engine, id);
+
+    ss_engine_destroy(engine);
+}
+
+// No call lets an exception out of the library: nothing beyond it (the
+// app's JNI, Dart's FFI) can catch one, and the process would end.
+// libtorrent throws on a handle whose torrent another thread removed between
+// the engine's check and its call (app BUG-199, BUG-200); to the caller that
+// torrent is not there. The moment is short: this goes round many times.
+TEST_F(CApiTest, CallsOnATorrentBeingRemovedAreErrors) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+    char id_buf[128] = {};
+    auto path = torrent_path();
+    ASSERT_EQ(ss_add_torrent(engine, path.c_str(), id_buf, sizeof(id_buf)), SS_OK);
+    const std::string id(id_buf);
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> thrown{0};
+    std::atomic<int> unexpected{0};
+    std::atomic<long> calls{0};
+    std::vector<std::thread> callers;
+    for (int i = 0; i < 4; ++i) {
+        callers.emplace_back([&, i] {
+            while (!stop) {
+                try {
+                    ss_error_t err = SS_OK;
+                    switch (i) {
+                        case 0: err = ss_pause_torrent(engine, id.c_str()); break;
+                        case 1: err = ss_start_torrent(engine, id.c_str()); break;
+                        case 2: err = ss_resume_torrent(engine, id.c_str()); break;
+                        default: err = ss_force_reannounce(engine, id.c_str()); break;
+                    }
+                    // There, or not there: nothing else.
+                    if (err != SS_OK && err != SS_ERR_NOT_FOUND) ++unexpected;
+                } catch (...) {
+                    ++thrown;
+                }
+                ++calls;
+                // Often, not flat out: every call is a message to
+                // libtorrent's thread, which has the removals to do too.
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
+            }
+        });
+    }
+
+    int rounds = 0;
+    for (; rounds < 200; ++rounds) {
+        if (ss_remove_torrent(engine, id.c_str(), false) != SS_OK) break;
+        char again[128] = {};
+        if (ss_add_torrent(engine, path.c_str(), again, sizeof(again)) != SS_OK) break;
+        if (id != again) break;
+    }
+    stop = true;
+    for (auto& caller : callers) caller.join();
+
+    EXPECT_EQ(rounds, 200);
+    EXPECT_GT(calls.load(), 200);
+    EXPECT_EQ(thrown.load(), 0);
+    EXPECT_EQ(unexpected.load(), 0);
+
+    ss_engine_destroy(engine);
+}
