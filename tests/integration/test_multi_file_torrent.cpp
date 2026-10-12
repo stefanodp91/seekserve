@@ -1,7 +1,8 @@
 // A torrent with several files, as a season pack is: what selecting one of
-// them does today (app WORK-29, phase P4, step P4-01). Tests only: they fix
-// what must stay while the engine learns to want two files of a torrent, the
-// one a player reads and the one that downloads behind it (app DEC-42).
+// them does today (app WORK-29, phase P4, step P4-01), and what the status
+// says of each wanted file (step P4-02). They fix what must stay while the
+// engine learns to want two files of a torrent, the one a player reads and
+// the one that downloads behind it (app DEC-42).
 // Offline: a second session seeds the torrent on 127.0.0.1 and the engine
 // reaches it only through LoopbackSocks5, with no DHT and no trackers.
 
@@ -175,6 +176,31 @@ int peers_of(SeekServeEngine& engine, const TorrentId& id) {
     return status_of(engine, id).value("num_peers", -1);
 }
 
+// What the status says of file `fi` among the files the torrent wants; null
+// when the file is not among them.
+json wanted_file(const json& status, FileIndex fi) {
+    if (!status.contains("files")) return nullptr;
+    for (const auto& file : status["files"]) {
+        if (file.value("index", -1) == fi) return file;
+    }
+    return nullptr;
+}
+
+std::int64_t bytes_of(const json& file) {
+    return file.is_object() ? file.value("downloaded", std::int64_t{-1}) : -1;
+}
+
+bool whole(const json& file) {
+    return file.is_object() && file.value("complete", false);
+}
+
+int size_of(const std::string& name) {
+    for (const auto& file : kPack) {
+        if (name == file.name) return file.size;
+    }
+    return -1;
+}
+
 class MultiFileTorrent : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -329,6 +355,71 @@ TEST_F(MultiFileTorrent, ASelectedFileDownloadsAloneWithTheSubtitles) {
     EXPECT_FALSE(completed.has(e03));
     EXPECT_NE(downloaded(kE02), seeded(kE02));
     EXPECT_NE(downloaded(kE03), seeded(kE03));
+}
+
+// The status says, for each file the torrent wants, how big it is, how much
+// of it is there and whether it is whole (app WORK-29, phase P4, step P4-02).
+// `progress` counts the wanted pieces of the whole torrent: with two wanted
+// files, as P4 will have, it is no file's own number.
+TEST_F(MultiFileTorrent, TheStatusSaysWhatEachWantedFileHas) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+    CompletedFiles completed(engine);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e01 = index_of(engine, id, kE01);
+    const FileIndex subtitles = index_of(engine, id, kE01Subtitles);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e01, 0);
+    ASSERT_GE(subtitles, 0);
+    ASSERT_GE(e02, 0);
+    ASSERT_GE(e03, 0);
+
+    // Until a file is selected every file is wanted: the four of them.
+    {
+        const auto status = status_of(engine, id);
+        ASSERT_TRUE(status.contains("files")) << status.dump();
+        EXPECT_EQ(status["files"].size(), std::size(kPack)) << status.dump();
+        for (const auto& file : kPack) {
+            const auto listed = wanted_file(status, index_of(engine, id, file.name));
+            ASSERT_TRUE(listed.is_object()) << file.name;
+            EXPECT_EQ(listed["size"], file.size) << file.name;
+        }
+    }
+
+    ASSERT_TRUE(engine.select_file(id, e02));
+    ASSERT_TRUE(wait_for([&] { return bytes_of(wanted_file(status_of(engine, id), e02)) > 0; }))
+        << engine.get_status_json(id);
+    {
+        // Still slow: the file is far from whole.
+        const auto status = status_of(engine, id);
+        const auto video = wanted_file(status, e02);
+        EXPECT_LT(bytes_of(video), size_of(kE02)) << status.dump();
+        EXPECT_FALSE(whole(video)) << status.dump();
+        // The selected file and the subtitles, no other.
+        EXPECT_EQ(status["files"].size(), 2u) << status.dump();
+        EXPECT_TRUE(wanted_file(status, subtitles).is_object()) << status.dump();
+        EXPECT_TRUE(wanted_file(status, e01).is_null()) << status.dump();
+        EXPECT_TRUE(wanted_file(status, e03).is_null()) << status.dump();
+    }
+
+    proxy.limit_download(0);
+    ASSERT_TRUE(wait_for([&] { return completed.has(e02) && completed.has(subtitles); }))
+        << engine.get_status_json(id);
+    const auto status = status_of(engine, id);
+    const auto video = wanted_file(status, e02);
+    EXPECT_EQ(bytes_of(video), size_of(kE02)) << status.dump();
+    EXPECT_TRUE(whole(video)) << status.dump();
+    // The subtitles' only piece is also the last of the video before them
+    // and the first of the one after: each file is told its own bytes of it.
+    const auto text = wanted_file(status, subtitles);
+    EXPECT_EQ(bytes_of(text), size_of(kE01Subtitles)) << status.dump();
+    EXPECT_TRUE(whole(text)) << status.dump();
+    EXPECT_EQ(status["files"].size(), 2u) << status.dump();
 }
 
 // With every wanted piece there, libtorrent closes its connections to the
@@ -491,6 +582,69 @@ TEST_F(MultiFileTorrent, ResumeDataKeepsTheFilePrioritiesNotTheSelection) {
     auto status = status_of(restored, id);
     EXPECT_EQ(status.value("paused", false), true);
     EXPECT_TRUE(status["selected_file"].is_null()) << status.dump();
+
+    // The files of the status go by those priorities, not by the selection:
+    // paused and with no file selected, it still says what the torrent has.
+    ASSERT_TRUE(wait_for([&] { return whole(wanted_file(status_of(restored, id), e01)); }))
+        << restored.get_status_json(id);
+    status = status_of(restored, id);
+    EXPECT_EQ(bytes_of(wanted_file(status, e01)), size_of(kE01)) << status.dump();
+    EXPECT_TRUE(whole(wanted_file(status, subtitles))) << status.dump();
+    EXPECT_TRUE(wanted_file(status, e02).is_null()) << status.dump();
+    EXPECT_TRUE(wanted_file(status, e03).is_null()) << status.dump();
+}
+
+// A file deleted behind the engine (the app frees space) is not whole any
+// more, and the status says so: "complete" goes by the pieces libtorrent has
+// now. "offline_ready", the older flag of the selected file, is the cache's
+// note that the file completed once: nothing takes it back, and it still
+// says ready.
+TEST_F(MultiFileTorrent, AFileThatWentIsNotWholeAnyMore) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port());
+    config.session.resume_data = true;
+
+    TorrentId id;
+    FileIndex e01 = -1;
+    {
+        SeekServeEngine engine(config);
+        CompletedFiles completed(engine);
+        id = add(engine, *seeder);
+        e01 = index_of(engine, id, kE01);
+        ASSERT_GE(e01, 0);
+        ASSERT_TRUE(engine.select_file(id, e01));
+        proxy.limit_download(0);
+        ASSERT_TRUE(wait_for([&] { return completed.has(e01); })) << engine.get_status_json(id);
+        ASSERT_TRUE(whole(wanted_file(status_of(engine, id), e01))) << engine.get_status_json(id);
+    }
+    // Nobody to take it from again.
+    seeder.reset();
+    fs::remove(dir_ / "engine" / kFolder / kE01);
+
+    SeekServeEngine restored(config);
+    ASSERT_TRUE(wait_for([&] { return status_of(restored, id).value("has_metadata", false); }))
+        << restored.get_status_json(id);
+    ASSERT_TRUE(restored.select_file(id, e01));
+    ASSERT_TRUE(restored.start_torrent(id));
+    // libtorrent sees the file is gone and checks what is there.
+    ASSERT_TRUE(wait_for([&] {
+        const auto status = status_of(restored, id);
+        const int state = status.value("state", 0);
+        return state != static_cast<int>(lt::torrent_status::checking_files) &&
+               state != static_cast<int>(lt::torrent_status::checking_resume_data) &&
+               status.value("progress", 1.0) < 1.0;
+    })) << restored.get_status_json(id);
+
+    const auto status = status_of(restored, id);
+    const auto video = wanted_file(status, e01);
+    ASSERT_TRUE(video.is_object()) << status.dump();
+    EXPECT_EQ(video["size"], size_of(kE01)) << status.dump();
+    EXPECT_EQ(bytes_of(video), 0) << status.dump();
+    EXPECT_FALSE(whole(video)) << status.dump();
+    EXPECT_EQ(status["offline_ready"], true) << status.dump();
 }
 
 }  // namespace

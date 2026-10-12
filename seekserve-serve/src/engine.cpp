@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include <libtorrent/alert_types.hpp>
+#include <libtorrent/download_priority.hpp>
 #include <libtorrent/hex.hpp>
 #include <libtorrent/torrent_status.hpp>
 #include <libtorrent/torrent_flags.hpp>
@@ -18,6 +19,37 @@ namespace seekserve {
 
 namespace net = boost::asio;
 using json = nlohmann::json;
+
+namespace {
+
+// One entry for each file libtorrent downloads (any priority above
+// dont_download): its index, its size, the bytes of it that are there and
+// whether it is whole.
+json wanted_files_json(const lt::torrent_handle& handle, const std::vector<FileInfo>& files) {
+    const auto priorities = handle.get_file_priorities();
+    // As exact as libtorrent can say: the blocks of unfinished pieces count.
+    const auto downloaded = handle.file_progress();
+    // Checked pieces only, which is what file_completed goes by: a file is
+    // whole when every piece it has a byte in is there, never before. Asked
+    // second, it may be a piece ahead of the count above.
+    const auto checked = handle.file_progress(lt::torrent_handle::piece_granularity);
+
+    json wanted = json::array();
+    for (const auto& file : files) {
+        const auto i = static_cast<std::size_t>(file.index);
+        if (i >= priorities.size() || i >= downloaded.size() || i >= checked.size()) continue;
+        if (priorities[i] == lt::dont_download) continue;
+        wanted.push_back({
+            {"index", file.index},
+            {"size", file.size},
+            {"downloaded", std::max(downloaded[i], checked[i])},
+            {"complete", checked[i] >= file.size},
+        });
+    }
+    return wanted;
+}
+
+} // namespace
 
 SeekServeEngine::SeekServeEngine(const Config& config)
     : config_(config)
@@ -431,6 +463,17 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
 
     if (selected.has_value()) {
         status_json["offline_ready"] = cache_->is_offline_ready(id, *selected);
+    }
+
+    // What each wanted file has. "progress" above counts the wanted pieces of
+    // the whole torrent: with more than one wanted file it is no file's own.
+    if (auto files = catalog_.list_files(id)) {
+        try {
+            status_json["files"] = wanted_files_json(handle, files.value());
+        } catch (const std::exception& e) {
+            // The torrent went between two questions to libtorrent.
+            spdlog::debug("Engine: no file status for {}: {}", id, e.what());
+        }
     }
 
     {

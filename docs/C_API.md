@@ -90,7 +90,9 @@ ss_error_t ss_get_status(SeekServeEngine* engine, const char* torrent_id,
                           char** out_json);
 ```
 
-Status JSON includes: `torrent_id`, `name`, `progress`, `download_rate`, `upload_rate`, `num_peers`, `num_seeds`, `state`, `has_metadata`, `selected_file`, `offline_ready`, `stream_mode`, `playhead_piece`, `active_deadlines`.
+Status JSON includes: `torrent_id`, `name`, `progress`, `download_rate`, `upload_rate`, `num_peers`, `num_seeds`, `state`, `has_metadata`, `selected_file`, `offline_ready`, `files`, `stream_mode`, `playhead_piece`, `active_deadlines`.
+
+`files` is there once the metadata is known: one entry for each file the torrent downloads (every file until one is selected, then the selected file and the subtitle files), `{"index", "size", "downloaded", "complete"}`. `downloaded` is the bytes of that file that are there, the blocks of unfinished pieces included; `complete` is true when every piece the file has a byte in is checked, which is when `file_completed` fires, and goes back to false if the pieces are lost (a file deleted behind the engine, seen at the next check). `progress` counts the wanted pieces of the whole torrent, and `offline_ready` is a stored note that the selected file completed once: for one file, read its entry in `files`.
 
 ## Server Control
 
