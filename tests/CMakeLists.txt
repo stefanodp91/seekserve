@@ -40,6 +40,7 @@ add_executable(seekserve-integration-tests
     integration/test_tracker_cas.cpp
     integration/test_hybrid_torrent.cpp
     integration/test_engine_resume_data.cpp
+    integration/test_multi_file_torrent.cpp
 )
 
 target_link_libraries(seekserve-integration-tests
