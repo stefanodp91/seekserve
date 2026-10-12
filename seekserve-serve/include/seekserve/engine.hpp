@@ -66,6 +66,12 @@ public:
     // File management
     Result<std::vector<FileInfo>> list_files(const TorrentId& id);
     Result<void> select_file(const TorrentId& id, FileIndex fi);
+    // The two files a torrent may want at once (app DEC-42): `reader` is
+    // the one a player reads, with the stream and the deadlines, and
+    // `background` downloads behind it; -1 for none, and every other file
+    // is not downloaded. The reader keeps its stream while only the file
+    // behind it changes. select_file(id, fi) is a new reader alone.
+    Result<void> set_wanted_files(const TorrentId& id, FileIndex reader, FileIndex background);
 
     // Streaming
     Result<std::string> get_stream_url(const TorrentId& id, FileIndex fi);
@@ -83,13 +89,22 @@ public:
     void set_event_callback(EventCallback cb);
 
 private:
+    // What the file a player reads needs: where its bytes are, the stream
+    // that serves them and the scheduler that asks for them in time. One
+    // for each torrent with a reader; a file that only downloads has none.
     struct TorrentState {
         PieceAvailabilityIndex avail;
         std::unique_ptr<ByteRangeMapper> mapper;
         std::shared_ptr<ByteSource> source;
         std::unique_ptr<StreamingScheduler> scheduler;
-        FileIndex selected_file{-1};
+        FileIndex selected_file{-1};  // the reader's file
     };
+
+    // The files `id` wants from now on. With `new_reader` the reader gets a
+    // new state and a new stream even if it is the file a player has now,
+    // which is what select_file has always done.
+    Result<void> want_files(const TorrentId& id, FileIndex reader,
+                            FileIndex background, bool new_reader);
 
     void wire_alerts();
     void start_tick_timer();

@@ -168,5 +168,67 @@ TEST_F(MetadataCatalogTest, FileOffsetsAreOrdered) {
     }
 }
 
+// The priorities of a pack that wants two files at most: the one a player
+// reads and the one that downloads behind it (app WORK-29, phase P4).
+namespace {
+
+const FileIndex kEpisode1 = 0;
+const FileIndex kSubtitles = 1;
+const FileIndex kEpisode2 = 2;
+const FileIndex kEpisode3 = 3;
+
+std::vector<FileInfo> pack() {
+    return {
+        {kEpisode1, "Show.S01/Show.S01E01.mkv", 1000, 0, 0, 1},
+        {kSubtitles, "Show.S01/Show.S01E01.SRT", 10, 1000, 0, 1},
+        {kEpisode2, "Show.S01/Show.S01E02.mkv", 1000, 1010, 0, 2},
+        {kEpisode3, "Show.S01/Show.S01E03.mkv", 1000, 2010, 2, 3},
+    };
+}
+
+using Priorities = std::vector<lt::download_priority_t>;
+
+}  // namespace
+
+// What select_file has always asked for: the file and the subtitles as a
+// download, nothing else.
+TEST(WantedFilePriorities, AReaderAloneIsWantedAsADownloadIs) {
+    EXPECT_EQ(wanted_file_priorities(pack(), kEpisode1, -1),
+              (Priorities{lt::default_priority, lt::default_priority,
+                          lt::dont_download, lt::dont_download}));
+}
+
+TEST(WantedFilePriorities, ADownloadAloneIsWantedTheSameWay) {
+    EXPECT_EQ(wanted_file_priorities(pack(), -1, kEpisode3),
+              (Priorities{lt::dont_download, lt::default_priority,
+                          lt::dont_download, lt::default_priority}));
+}
+
+// The video first (app DEC-246): libtorrent asks for the pieces of a higher
+// priority before the others, and the subtitles come with the video.
+TEST(WantedFilePriorities, WithAFileBehindItTheReaderComesFirst) {
+    EXPECT_EQ(wanted_file_priorities(pack(), kEpisode2, kEpisode3),
+              (Priorities{lt::dont_download, lt::top_priority,
+                          lt::top_priority, lt::default_priority}));
+}
+
+TEST(WantedFilePriorities, TheSameFileTwiceIsTheReaderAlone) {
+    EXPECT_EQ(wanted_file_priorities(pack(), kEpisode2, kEpisode2),
+              wanted_file_priorities(pack(), kEpisode2, -1));
+}
+
+// Nothing wanted is nothing downloaded, the subtitles too.
+TEST(WantedFilePriorities, WithNoFileWantedNothingIs) {
+    EXPECT_EQ(wanted_file_priorities(pack(), -1, -1),
+              Priorities(4, lt::dont_download));
+}
+
+TEST(WantedFilePriorities, ASubtitleFileIsKnownByItsExtension) {
+    EXPECT_TRUE(is_subtitle_file("Show.S01/Show.S01E01.srt"));
+    EXPECT_TRUE(is_subtitle_file("Show.S01/Show.S01E01.ASS"));
+    EXPECT_FALSE(is_subtitle_file("Show.S01/Show.S01E01.mkv"));
+    EXPECT_FALSE(is_subtitle_file("Show.S01/srt"));
+}
+
 }  // namespace
 }  // namespace seekserve

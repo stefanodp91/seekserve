@@ -1,8 +1,8 @@
 // A torrent with several files, as a season pack is: what selecting one of
-// them does today (app WORK-29, phase P4, step P4-01), and what the status
-// says of each wanted file (step P4-02). They fix what must stay while the
-// engine learns to want two files of a torrent, the one a player reads and
-// the one that downloads behind it (app DEC-42).
+// them does (app WORK-29, phase P4, step P4-01), what the status says of
+// each wanted file (step P4-02), and the two files a torrent may want at
+// once, the one a player reads and the one that downloads behind it (step
+// P4-03, app DEC-42).
 // Offline: a second session seeds the torrent on 127.0.0.1 and the engine
 // reaches it only through LoopbackSocks5, with no DHT and no trackers.
 
@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -106,8 +107,9 @@ std::string read_file(const fs::path& path) {
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-// GET with a Range on a stream URL (http://127.0.0.1:PORT/...); the body.
-std::string http_get_body(const std::string& url, const std::string& range) {
+// GET with a Range on a stream URL (http://127.0.0.1:PORT/...); the whole
+// answer, status line and headers first.
+std::string http_get(const std::string& url, const std::string& range) {
     auto rest = url.substr(std::string("http://127.0.0.1:").size());
     auto slash = rest.find('/');
     int port = std::stoi(rest.substr(0, slash));
@@ -129,8 +131,19 @@ std::string http_get_body(const std::string& url, const std::string& range) {
     ssize_t n;
     while ((n = ::recv(fd, buf, sizeof(buf), 0)) > 0) out.append(buf, static_cast<std::size_t>(n));
     ::close(fd);
+    return out;
+}
+
+std::string http_get_body(const std::string& url, const std::string& range) {
+    auto out = http_get(url, range);
     auto body = out.find("\r\n\r\n");
     return body == std::string::npos ? "" : out.substr(body + 4);
+}
+
+// The status code of the answer ("HTTP/1.1 206 ..."), or 0.
+int http_status(const std::string& url, const std::string& range) {
+    auto out = http_get(url, range);
+    return out.size() >= 12 ? std::atoi(out.c_str() + 9) : 0;
 }
 
 // The files the engine said complete, in the order it said so.
@@ -194,6 +207,12 @@ bool whole(const json& file) {
     return file.is_object() && file.value("complete", false);
 }
 
+// What a wanted file is wanted for: "reader", "background", or nothing for
+// the subtitles and for a file no call has named.
+std::string role_of(const json& file) {
+    return file.is_object() ? file.value("role", std::string()) : std::string();
+}
+
 int size_of(const std::string& name) {
     for (const auto& file : kPack) {
         if (name == file.name) return file.size;
@@ -223,7 +242,8 @@ protected:
                   [](const auto& a, const auto& b) { return a.filename < b.filename; });
         lt::create_torrent ct(std::move(files), kPiece, lt::create_torrent::v1_only);
         lt::set_piece_hashes(ct, (dir_ / "seed").string());
-        ti_ = lt::load_torrent_buffer(ct.generate_buf()).ti;
+        torrent_file_ = ct.generate_buf();
+        ti_ = lt::load_torrent_buffer(torrent_file_).ti;
     }
 
     void TearDown() override {
@@ -302,8 +322,24 @@ protected:
         return read_file(dir_ / "engine" / kFolder / name);
     }
 
+    // How many of the first `pieces` piece-long stretches of `name` the
+    // engine has on disk as the seeder has them.
+    int stretches_there(const std::string& name, int pieces) const {
+        const auto mine = downloaded(name);
+        const auto theirs = seeded(name);
+        int there = 0;
+        for (int i = 0; i < pieces; ++i) {
+            const auto from = static_cast<std::size_t>(i) * kPiece;
+            if (from + kPiece > mine.size() || from + kPiece > theirs.size()) break;
+            if (mine.compare(from, kPiece, theirs, from, kPiece) == 0) ++there;
+        }
+        return there;
+    }
+
     fs::path dir_;
     std::shared_ptr<lt::torrent_info const> ti_;
+    // The same torrent as a .torrent file would hold it.
+    std::vector<char> torrent_file_;
 };
 
 TEST_F(MultiFileTorrent, EachFileSharesAPieceWithTheNext) {
@@ -487,10 +523,10 @@ TEST_F(MultiFileTorrent, TheReaderGetsTheBytesOfTheSelectedFile) {
               expected.substr(size - 100));
 }
 
-// Today a torrent has one selection: selecting another file takes the first
-// one out, and what it had stays where it was.
-// P4 changes this (app DEC-42, DEC-246): with a file for the player and one
-// that downloads behind it, both are wanted, and the second goes on.
+// select_file is one selection: selecting another file takes the first one
+// out, and what it had stays where it was. A torrent that wants two files,
+// one for the player and one that downloads behind it, asks for them with
+// set_wanted_files (below; app DEC-42, DEC-246).
 TEST_F(MultiFileTorrent, SelectingAnotherFileStopsTheFirst) {
     LoopbackSocks5 proxy;
     ASSERT_NE(proxy.port(), 0);
@@ -645,6 +681,483 @@ TEST_F(MultiFileTorrent, AFileThatWentIsNotWholeAnyMore) {
     EXPECT_EQ(bytes_of(video), 0) << status.dump();
     EXPECT_FALSE(whole(video)) << status.dump();
     EXPECT_EQ(status["offline_ready"], true) << status.dump();
+}
+
+// A pack may want two files at once (app WORK-29, phase P4, step P4-03; app
+// DEC-42): the one a player reads and the one that downloads behind it. Both
+// come, each whole, the piece they share too, and nothing else does.
+TEST_F(MultiFileTorrent, TheFileBehindThePlayerDownloadsToo) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+    CompletedFiles completed(engine);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e01 = index_of(engine, id, kE01);
+    const FileIndex subtitles = index_of(engine, id, kE01Subtitles);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e01, 0);
+    ASSERT_GE(subtitles, 0);
+    ASSERT_GE(e02, 0);
+    ASSERT_GE(e03, 0);
+
+    ASSERT_TRUE(engine.set_wanted_files(id, e02, e03));
+    proxy.limit_download(0);
+    ASSERT_TRUE(wait_for([&] { return completed.has(e02) && completed.has(e03); }))
+        << engine.get_status_json(id);
+    // Finished, not seeding: the first episode is not wanted.
+    ASSERT_TRUE(wait_for([&] { return finished(engine, id); })) << engine.get_status_json(id);
+
+    const auto status = status_of(engine, id);
+    // The file a player reads is the selected one, as select_file makes it.
+    EXPECT_EQ(status["selected_file"], e02) << status.dump();
+    EXPECT_EQ(role_of(wanted_file(status, e02)), "reader") << status.dump();
+    EXPECT_EQ(role_of(wanted_file(status, e03)), "background") << status.dump();
+    EXPECT_EQ(role_of(wanted_file(status, subtitles)), "") << status.dump();
+    EXPECT_TRUE(whole(wanted_file(status, e02))) << status.dump();
+    EXPECT_TRUE(whole(wanted_file(status, e03))) << status.dump();
+    EXPECT_TRUE(wanted_file(status, e01).is_null()) << status.dump();
+    EXPECT_TRUE(downloaded(kE02) == seeded(kE02));
+    EXPECT_TRUE(downloaded(kE03) == seeded(kE03));
+    EXPECT_FALSE(completed.has(e01));
+    EXPECT_FALSE(downloaded(kE01) == seeded(kE01));
+}
+
+// The video first (app DEC-246): while the file a player reads is not whole,
+// the one behind it gets what is left, which with one seeder is next to
+// nothing; once the reader's file is whole it goes on by itself, with no
+// other call.
+TEST_F(MultiFileTorrent, ThePlayersFileComesFirst) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(256 * 1024);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+    CompletedFiles completed(engine);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e01 = index_of(engine, id, kE01);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    ASSERT_GE(e01, 0);
+    ASSERT_GE(e02, 0);
+
+    // The small one in the player, the big one behind it.
+    ASSERT_TRUE(engine.set_wanted_files(id, e01, e02));
+    ASSERT_TRUE(wait_for([&] { return completed.has(e01); })) << engine.get_status_json(id);
+    {
+        const auto status = status_of(engine, id);
+        EXPECT_LT(bytes_of(wanted_file(status, e02)), size_of(kE02) / 4) << status.dump();
+        EXPECT_FALSE(whole(wanted_file(status, e02))) << status.dump();
+        EXPECT_LT(status.value("progress", 1.0), 1.0) << status.dump();
+    }
+
+    proxy.limit_download(0);
+    ASSERT_TRUE(wait_for([&] { return completed.has(e02); })) << engine.get_status_json(id);
+    ASSERT_TRUE(wait_for([&] { return finished(engine, id); })) << engine.get_status_json(id);
+    EXPECT_TRUE(downloaded(kE02) == seeded(kE02));
+}
+
+// The player is not disturbed when the queue moves on: the file behind the
+// reader changes, and the stream the player holds goes on to its last byte.
+TEST_F(MultiFileTorrent, TheReaderKeepsItsStreamWhenTheFileBehindItChanges) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(256 * 1024);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+    ASSERT_TRUE(engine.start_server());
+    CompletedFiles completed(engine);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e01 = index_of(engine, id, kE01);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e01, 0);
+    ASSERT_GE(e02, 0);
+    ASSERT_GE(e03, 0);
+
+    ASSERT_TRUE(engine.set_wanted_files(id, e02, e01));
+    auto url = engine.get_stream_url(id, e02);
+    ASSERT_TRUE(url);
+
+    std::string body;
+    std::thread player([&] { body = http_get_body(url.value(), "bytes=0-"); });
+    // Under way, and far from its end.
+    const bool under_way = wait_for([&] {
+        return bytes_of(wanted_file(status_of(engine, id), e02)) > size_of(kE02) / 10;
+    });
+    const bool early = bytes_of(wanted_file(status_of(engine, id), e02)) < size_of(kE02) / 2;
+    const bool changed = static_cast<bool>(engine.set_wanted_files(id, e02, e03));
+    proxy.limit_download(0);
+    player.join();
+    ASSERT_TRUE(under_way) << engine.get_status_json(id);
+    ASSERT_TRUE(early) << "too fast to act in time";
+    ASSERT_TRUE(changed);
+
+    const std::string expected = seeded(kE02);
+    EXPECT_EQ(body.size(), expected.size());
+    EXPECT_TRUE(body == expected);
+
+    ASSERT_TRUE(wait_for([&] { return completed.has(e03); })) << engine.get_status_json(id);
+    const auto status = status_of(engine, id);
+    EXPECT_EQ(status["selected_file"], e02) << status.dump();
+    EXPECT_EQ(role_of(wanted_file(status, e03)), "background") << status.dump();
+    EXPECT_TRUE(wanted_file(status, e01).is_null()) << status.dump();
+    EXPECT_FALSE(completed.has(e01));
+}
+
+// The player closes: its file is not wanted any more, not even the pieces
+// its deadlines were waiting for, nobody serves it, and the file behind it
+// goes on to its end, the piece it shares with the reader's file included.
+TEST_F(MultiFileTorrent, WhenThePlayerLeavesItsFileStops) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port());
+    // Deadlines far ahead of what the trickle brings: a hundred pieces wait
+    // for theirs when the player leaves.
+    config.scheduler.lookahead_pieces = 100;
+    config.scheduler.deadline_budget = 120;
+    SeekServeEngine engine(config);
+    ASSERT_TRUE(engine.start_server());
+    CompletedFiles completed(engine);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e02, 0);
+    ASSERT_GE(e03, 0);
+
+    ASSERT_TRUE(engine.set_wanted_files(id, e02, e03));
+    auto url = engine.get_stream_url(id, e02);
+    ASSERT_TRUE(url);
+    ASSERT_TRUE(wait_for([&] { return status_of(engine, id).value("active_deadlines", 0) >= 90; }))
+        << engine.get_status_json(id);
+
+    ASSERT_TRUE(engine.set_wanted_files(id, -1, e03));
+    proxy.limit_download(0);
+    ASSERT_TRUE(wait_for([&] { return completed.has(e03); })) << engine.get_status_json(id);
+    ASSERT_TRUE(wait_for([&] { return finished(engine, id); })) << engine.get_status_json(id);
+    // And it stays so: nothing of the reader's file comes any more.
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    const auto status = status_of(engine, id);
+    EXPECT_TRUE(finished(engine, id)) << status.dump();
+    EXPECT_EQ(status["selected_file"], e03) << status.dump();
+    EXPECT_EQ(role_of(wanted_file(status, e03)), "background") << status.dump();
+    EXPECT_TRUE(wanted_file(status, e02).is_null()) << status.dump();
+    EXPECT_FALSE(status.contains("active_deadlines")) << status.dump();
+    EXPECT_TRUE(downloaded(kE03) == seeded(kE03));
+    EXPECT_FALSE(completed.has(e02));
+    // Of the hundred pieces with a deadline, only what was on its way.
+    EXPECT_LT(stretches_there(kE02, 100), 60);
+    EXPECT_EQ(http_status(url.value(), "bytes=0-99"), 404);
+}
+
+// The player closes on the file the queue is downloading: the file goes on
+// as a download, without the stream and without the deadlines. A piece that
+// keeps its deadline is asked for before any other, so the file would still
+// come in the order the player wanted; without it, the pieces that had one
+// are the last (libtorrent leaves them at the lowest priority).
+TEST_F(MultiFileTorrent, TheReadersFileGoesOnAsADownload) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port());
+    // Deadlines far ahead of what the trickle brings.
+    config.scheduler.lookahead_pieces = 100;
+    config.scheduler.deadline_budget = 120;
+    SeekServeEngine engine(config);
+    ASSERT_TRUE(engine.start_server());
+    CompletedFiles completed(engine);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    ASSERT_GE(e02, 0);
+
+    ASSERT_TRUE(engine.set_wanted_files(id, e02, -1));
+    auto url = engine.get_stream_url(id, e02);
+    ASSERT_TRUE(url);
+    ASSERT_TRUE(wait_for([&] { return status_of(engine, id).value("active_deadlines", 0) >= 90; }))
+        << engine.get_status_json(id);
+    EXPECT_EQ(role_of(wanted_file(status_of(engine, id), e02)), "reader");
+
+    ASSERT_TRUE(engine.set_wanted_files(id, -1, e02));
+    {
+        const auto status = status_of(engine, id);
+        EXPECT_EQ(status["selected_file"], e02) << status.dump();
+        EXPECT_EQ(role_of(wanted_file(status, e02)), "background") << status.dump();
+        EXPECT_FALSE(status.contains("active_deadlines")) << status.dump();
+        EXPECT_EQ(http_status(url.value(), "bytes=0-99"), 404);
+    }
+
+    // Half of the file later, the hundred pieces that had a deadline are
+    // not the ones that came.
+    proxy.limit_download(512 * 1024);
+    ASSERT_TRUE(wait_for([&] {
+        return bytes_of(wanted_file(status_of(engine, id), e02)) >= size_of(kE02) / 2;
+    })) << engine.get_status_json(id);
+    EXPECT_LT(stretches_there(kE02, 100), 60) << engine.get_status_json(id);
+
+    proxy.limit_download(0);
+    ASSERT_TRUE(wait_for([&] { return completed.has(e02); })) << engine.get_status_json(id);
+    EXPECT_TRUE(downloaded(kE02) == seeded(kE02));
+}
+
+// select_file still means this file and no other: after it, neither of the
+// two files wanted before is.
+TEST_F(MultiFileTorrent, SelectingAFileStillMeansOnlyThatFile) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+    CompletedFiles completed(engine);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e01 = index_of(engine, id, kE01);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e01, 0);
+    ASSERT_GE(e02, 0);
+    ASSERT_GE(e03, 0);
+
+    ASSERT_TRUE(engine.set_wanted_files(id, e02, e03));
+    ASSERT_TRUE(wait_for([&] {
+        const auto status = status_of(engine, id);
+        return role_of(wanted_file(status, e02)) == "reader" &&
+               role_of(wanted_file(status, e03)) == "background";
+    })) << engine.get_status_json(id);
+
+    ASSERT_TRUE(engine.select_file(id, e01));
+    proxy.limit_download(0);
+    ASSERT_TRUE(wait_for([&] { return completed.has(e01); })) << engine.get_status_json(id);
+    ASSERT_TRUE(wait_for([&] { return finished(engine, id); })) << engine.get_status_json(id);
+
+    const auto status = status_of(engine, id);
+    EXPECT_EQ(status["selected_file"], e01) << status.dump();
+    EXPECT_EQ(role_of(wanted_file(status, e01)), "reader") << status.dump();
+    EXPECT_EQ(status["files"].size(), 2u) << status.dump();
+    EXPECT_TRUE(wanted_file(status, e02).is_null()) << status.dump();
+    EXPECT_TRUE(wanted_file(status, e03).is_null()) << status.dump();
+    EXPECT_FALSE(completed.has(e02));
+    EXPECT_FALSE(completed.has(e03));
+}
+
+// A file that is not there, or a torrent that is not, or one whose files are
+// not known yet, is an error that changes nothing: what was wanted stays
+// wanted and the player keeps its stream.
+TEST_F(MultiFileTorrent, WantedFilesThatAreNotThereChangeNothing) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+    ASSERT_TRUE(engine.start_server());
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e02, 0);
+    ASSERT_GE(e03, 0);
+    ASSERT_TRUE(engine.set_wanted_files(id, e02, e03));
+    auto url = engine.get_stream_url(id, e02);
+    ASSERT_TRUE(url);
+
+    auto no_such_torrent = engine.set_wanted_files(std::string(40, 'f'), 0, -1);
+    ASSERT_FALSE(no_such_torrent);
+    EXPECT_EQ(no_such_torrent.error(), make_error_code(errc::torrent_not_found));
+
+    // A magnet nobody answers: its files are never known.
+    auto bare = engine.add_torrent("magnet:?xt=urn:btih:" + std::string(40, 'a'));
+    ASSERT_TRUE(bare);
+    auto no_files_yet = engine.set_wanted_files(bare.value(), 0, -1);
+    ASSERT_FALSE(no_files_yet);
+    EXPECT_EQ(no_files_yet.error(), make_error_code(errc::metadata_not_ready));
+
+    for (const auto& [reader, background] :
+         {std::pair<FileIndex, FileIndex>{e02, 99}, {99, e03}, {-2, e03}, {e02, -2}}) {
+        auto no_such_file = engine.set_wanted_files(id, reader, background);
+        ASSERT_FALSE(no_such_file) << reader << ", " << background;
+        EXPECT_EQ(no_such_file.error(), make_error_code(errc::file_not_found));
+    }
+
+    const auto status = status_of(engine, id);
+    EXPECT_EQ(status["selected_file"], e02) << status.dump();
+    ASSERT_TRUE(wait_for([&] {
+        const auto now = status_of(engine, id);
+        return role_of(wanted_file(now, e02)) == "reader" &&
+               role_of(wanted_file(now, e03)) == "background";
+    })) << engine.get_status_json(id);
+    proxy.limit_download(0);
+    EXPECT_EQ(http_status(url.value(), "bytes=0-99"), 206);
+}
+
+// No player survives a restart (resume data, app WORK-29 wave P2b): the file
+// one was reading ahead of a download is not wanted when the torrent comes
+// back, so it cannot download by itself when the queue starts the torrent
+// again; the file that downloaded behind it still is.
+TEST_F(MultiFileTorrent, ARestartLeavesThePlayersFileOff) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port());
+    config.session.resume_data = true;
+
+    TorrentId id;
+    FileIndex e01 = -1;
+    FileIndex subtitles = -1;
+    FileIndex e02 = -1;
+    FileIndex e03 = -1;
+    {
+        SeekServeEngine engine(config);
+        id = add(engine, *seeder);
+        e01 = index_of(engine, id, kE01);
+        subtitles = index_of(engine, id, kE01Subtitles);
+        e02 = index_of(engine, id, kE02);
+        e03 = index_of(engine, id, kE03);
+        ASSERT_GE(e02, 0);
+        ASSERT_GE(e03, 0);
+        ASSERT_TRUE(engine.set_wanted_files(id, e02, e03));
+        // Known to libtorrent, which is what the resume data keeps.
+        ASSERT_TRUE(wait_for([&] {
+            const auto status = status_of(engine, id);
+            return status.contains("files") && status["files"].size() == 3 &&
+                   role_of(wanted_file(status, e02)) == "reader";
+        })) << engine.get_status_json(id);
+        // The engine's destructor writes the last resume data.
+    }
+
+    std::vector<char> stored;
+    {
+        OfflineCacheManager reader(config.cache);
+        stored = reader.load_resume_data(id);
+    }
+    ASSERT_FALSE(stored.empty());
+    lt::error_code ec;
+    auto params = lt::read_resume_data(stored, ec);
+    ASSERT_FALSE(ec) << ec.message();
+    ASSERT_EQ(params.file_priorities.size(), std::size(kPack));
+    // On disk the reader's file is ahead of the other.
+    EXPECT_EQ(params.file_priorities[static_cast<std::size_t>(e02)], lt::top_priority);
+    EXPECT_EQ(params.file_priorities[static_cast<std::size_t>(e03)], lt::default_priority);
+
+    SeekServeEngine restored(config);
+    ASSERT_TRUE(wait_for([&] { return status_of(restored, id).value("has_metadata", false); }))
+        << restored.get_status_json(id);
+    const auto status = status_of(restored, id);
+    EXPECT_EQ(status.value("paused", false), true) << status.dump();
+    EXPECT_TRUE(status["selected_file"].is_null()) << status.dump();
+    ASSERT_TRUE(status.contains("files")) << status.dump();
+    EXPECT_TRUE(wanted_file(status, e03).is_object()) << status.dump();
+    EXPECT_TRUE(wanted_file(status, subtitles).is_object()) << status.dump();
+    EXPECT_TRUE(wanted_file(status, e02).is_null()) << status.dump();
+    EXPECT_TRUE(wanted_file(status, e01).is_null()) << status.dump();
+    // Whose file it was is the engine's own note, gone with the restart.
+    EXPECT_EQ(role_of(wanted_file(status, e03)), "") << status.dump();
+}
+
+// Asking for the status of a torrent at the moment it is removed is an
+// answer, never an exception (app BUG-199): the status call checked the
+// handle and then asked libtorrent, which throws once the torrent is gone,
+// and nothing between there and the app's service catches it. The moment is
+// short: this goes round many times, with several askers.
+TEST_F(MultiFileTorrent, TheStatusOfATorrentBeingRemovedIsAnAnswer) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    SeekServeEngine engine(engine_config(proxy.port()));
+    // Nobody to ask for it: the torrent only has to be there.
+    const auto& v1 = ti_->info_hashes().v1;
+    const TorrentId id = lt::aux::to_hex({v1.data(), static_cast<std::ptrdiff_t>(v1.size())});
+    const std::string uri = "magnet:?xt=urn:btih:" + id;
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> thrown{0};
+    std::atomic<long> asked{0};
+    std::vector<std::thread> askers;
+    for (int i = 0; i < 4; ++i) {
+        askers.emplace_back([&] {
+            while (!stop) {
+                try {
+                    engine.get_status_json(id);
+                } catch (const std::exception&) {
+                    ++thrown;
+                }
+                ++asked;
+            }
+        });
+    }
+
+    int added = 0;
+    for (int round = 0; round < 400; ++round) {
+        auto result = engine.add_torrent(uri);
+        if (!result || result.value() != id) break;
+        ++added;
+        engine.remove_torrent(id, false);
+    }
+    stop = true;
+    for (auto& asker : askers) asker.join();
+
+    EXPECT_EQ(added, 400);
+    EXPECT_GT(asked.load(), 400);
+    EXPECT_EQ(thrown.load(), 0);
+}
+
+// The same for the files of a torrent that is being removed: choosing them
+// asks libtorrent several things, any of which throws once the torrent is
+// gone. An error then, as for a torrent that is not there.
+TEST_F(MultiFileTorrent, ChoosingTheFilesOfATorrentBeingRemovedIsAnError) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    SeekServeEngine engine(engine_config(proxy.port()));
+    // From a .torrent file: its files are known as soon as it is added, and
+    // nobody is asked for anything.
+    const auto path = (dir_ / "pack.torrent").string();
+    std::ofstream(path, std::ios::binary)
+        .write(torrent_file_.data(), static_cast<std::streamsize>(torrent_file_.size()));
+    const auto& v1 = ti_->info_hashes().v1;
+    const TorrentId id = lt::aux::to_hex({v1.data(), static_cast<std::ptrdiff_t>(v1.size())});
+
+    std::atomic<bool> stop{false};
+    std::atomic<int> thrown{0};
+    std::atomic<long> chosen{0};
+    std::vector<std::thread> choosers;
+    for (int i = 0; i < 4; ++i) {
+        choosers.emplace_back([&, i] {
+            while (!stop) {
+                try {
+                    if (i % 2 == 0) {
+                        if (engine.set_wanted_files(id, 2, 0)) ++chosen;
+                    } else {
+                        if (engine.select_file(id, 0)) ++chosen;
+                    }
+                } catch (const std::exception&) {
+                    ++thrown;
+                }
+            }
+        });
+    }
+
+    int rounds = 0;
+    for (; rounds < 150; ++rounds) {
+        auto result = engine.add_torrent(path);
+        if (!result || result.value() != id) break;
+        // Its files are there and somebody chose among them.
+        const long before = chosen;
+        if (!wait_for([&] { return chosen > before; })) break;
+        engine.remove_torrent(id, false);
+    }
+    stop = true;
+    for (auto& chooser : choosers) chooser.join();
+
+    EXPECT_EQ(rounds, 150);
+    EXPECT_EQ(thrown.load(), 0);
 }
 
 }  // namespace

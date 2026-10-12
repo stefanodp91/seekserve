@@ -23,9 +23,11 @@ using json = nlohmann::json;
 namespace {
 
 // One entry for each file libtorrent downloads (any priority above
-// dont_download): its index, its size, the bytes of it that are there and
-// whether it is whole.
-json wanted_files_json(const lt::torrent_handle& handle, const std::vector<FileInfo>& files) {
+// dont_download): its index, its size, the bytes of it that are there,
+// whether it is whole and, for the two files the engine was asked for, what
+// each is wanted for.
+json wanted_files_json(const lt::torrent_handle& handle, const std::vector<FileInfo>& files,
+                       const WantedFiles& roles) {
     const auto priorities = handle.get_file_priorities();
     // As exact as libtorrent can say: the blocks of unfinished pieces count.
     const auto downloaded = handle.file_progress();
@@ -39,12 +41,18 @@ json wanted_files_json(const lt::torrent_handle& handle, const std::vector<FileI
         const auto i = static_cast<std::size_t>(file.index);
         if (i >= priorities.size() || i >= downloaded.size() || i >= checked.size()) continue;
         if (priorities[i] == lt::dont_download) continue;
-        wanted.push_back({
+        json entry = {
             {"index", file.index},
             {"size", file.size},
             {"downloaded", std::max(downloaded[i], checked[i])},
             {"complete", checked[i] >= file.size},
-        });
+        };
+        if (file.index == roles.reader) {
+            entry["role"] = "reader";
+        } else if (file.index == roles.background) {
+            entry["role"] = "background";
+        }
+        wanted.push_back(std::move(entry));
     }
     return wanted;
 }
@@ -69,6 +77,8 @@ SeekServeEngine::SeekServeEngine(const Config& config)
             auto data = cache_->load_resume_data(id);
             if (!data.empty()) {
                 auto params = decode_resume_data(data);
+                // Whoever was reading a file of it is gone.
+                if (params) drop_reader_priorities(*params);
                 if (params && sessions_->restore_torrent(id, std::move(*params))) {
                     ++from_resume_data;
                     continue;
@@ -345,81 +355,133 @@ Result<std::vector<FileInfo>> SeekServeEngine::list_files(const TorrentId& id) {
 }
 
 Result<void> SeekServeEngine::select_file(const TorrentId& id, FileIndex fi) {
+    // To want_files -1 is "no file"; here it is no file of the torrent.
+    if (fi < 0) {
+        if (!sessions_->get_handle(id).is_valid()) {
+            return make_error_code(errc::torrent_not_found);
+        }
+        return make_error_code(catalog_.has_metadata(id) ? errc::file_not_found
+                                                         : errc::metadata_not_ready);
+    }
+    return want_files(id, fi, -1, /*new_reader=*/true);
+}
+
+Result<void> SeekServeEngine::set_wanted_files(const TorrentId& id, FileIndex reader,
+                                               FileIndex background) {
+    return want_files(id, reader, background, /*new_reader=*/false);
+}
+
+Result<void> SeekServeEngine::want_files(const TorrentId& id, FileIndex reader,
+                                         FileIndex background, bool new_reader) {
     auto handle = sessions_->get_handle(id);
     if (!handle.is_valid()) {
         return make_error_code(errc::torrent_not_found);
-    }
-
-    auto result = catalog_.select_file(id, fi, handle);
-    if (!result) return result;
-
-    // Clean up previous file selection's ByteSource from HttpRangeServer
-    // before we destroy the old TorrentState (which owns avail_ and mapper_).
-    {
-        FileIndex old_fi = -1;
-        {
-            std::lock_guard lock(mu_);
-            auto* old_state = find_state(id);
-            if (old_state && old_state->selected_file >= 0) {
-                old_fi = old_state->selected_file;
-            }
-        }
-        if (old_fi >= 0 && http_server_) {
-            http_server_->remove_byte_source(id, old_fi);
-        }
     }
 
     auto ti = catalog_.torrent_info(id);
     if (!ti) {
         return make_error_code(errc::metadata_not_ready);
     }
-
-    // Create per-torrent state for this file selection
-    auto state = std::make_unique<TorrentState>();
-
-    int num_pieces = ti->num_pieces();
-    int piece_length = ti->piece_length();
-    int last_piece_size = static_cast<int>(
-        ti->total_size() - static_cast<std::int64_t>(num_pieces - 1) * piece_length);
-
-    state->avail.reset(num_pieces, piece_length, last_piece_size);
-
-    // Pre-populate availability with already-downloaded pieces.
-    // Without this, ByteSource::read() would block waiting for pieces
-    // that are already on disk, since piece_finished_alert only fires
-    // for NEW completions after this point.
-    {
-        auto st = handle.status(lt::torrent_handle::query_pieces);
-        for (int p = 0; p < num_pieces; ++p) {
-            if (st.pieces.get_bit(lt::piece_index_t{p})) {
-                state->avail.mark_complete(static_cast<PieceIndex>(p));
-            }
-        }
+    // Before anything changes: -1 is no file, anything else has to be one.
+    for (FileIndex fi : {reader, background}) {
+        if (fi == -1) continue;
+        if (auto file = catalog_.get_file(id, fi); !file) return file.error();
     }
 
-    state->mapper = std::make_unique<ByteRangeMapper>(ti->layout(), fi);
-    state->selected_file = fi;
-
-    // Build file path on disk
-    auto file_info = catalog_.get_file(id, fi);
-    auto file_path = (std::filesystem::path(config_.session.save_path) /
-                      file_info.value().path).string();
-
-    state->source = std::make_shared<ByteSource>(
-        handle, fi, file_path, *state->mapper, state->avail,
-        std::chrono::duration_cast<std::chrono::milliseconds>(config_.server.read_timeout));
-
-    state->scheduler = std::make_unique<StreamingScheduler>(
-        config_.scheduler, state->avail, *state->mapper);
-
-    // Register byte source on HTTP server if running
-    if (http_server_) {
-        http_server_->set_byte_source(state->source, id, fi, file_info.value().path);
-    }
-
+    FileIndex old_reader = -1;
     {
         std::lock_guard lock(mu_);
-        states_[id] = std::move(state);
+        if (auto* state = find_state(id)) old_reader = state->selected_file;
+    }
+    // A player keeps its stream while only the file behind it changes.
+    const bool keeps_reader = !new_reader && reader >= 0 && reader == old_reader;
+
+    // libtorrent throws on a handle whose torrent is gone: another thread
+    // may remove it at any point from here on.
+    try {
+        if (old_reader >= 0 && !keeps_reader) {
+            // The reader that was there leaves. Its ByteSource goes from the
+            // HttpRangeServer first, which unblocks the reads in flight
+            // before the state they use (avail_ and mapper_) is destroyed.
+            if (http_server_) {
+                http_server_->remove_byte_source(id, old_reader);
+            }
+            std::unique_ptr<TorrentState> gone;
+            {
+                std::lock_guard lock(mu_);
+                auto it = states_.find(id);
+                if (it != states_.end()) {
+                    gone = std::move(it->second);
+                    states_.erase(it);
+                }
+            }
+            gone.reset();
+            // Deadlines are a reader's alone: the ones its scheduler left in
+            // libtorrent go with it, whether its file stops or goes on as a
+            // download. (The same file selected again keeps them, as ever.)
+            if (reader != old_reader) {
+                handle.clear_piece_deadlines();
+            }
+        }
+
+        // The priorities of the files. libtorrent works the pieces' out
+        // again from them, which also takes back the low priority it leaves
+        // on a piece that lost its deadline.
+        auto result = catalog_.set_wanted_files(id, reader, background, handle);
+        if (!result) return result;
+
+        if (reader >= 0 && !keeps_reader) {
+            auto state = std::make_unique<TorrentState>();
+
+            int num_pieces = ti->num_pieces();
+            int piece_length = ti->piece_length();
+            int last_piece_size = static_cast<int>(
+                ti->total_size() - static_cast<std::int64_t>(num_pieces - 1) * piece_length);
+
+            state->avail.reset(num_pieces, piece_length, last_piece_size);
+
+            // Pre-populate availability with already-downloaded pieces.
+            // Without this, ByteSource::read() would block waiting for pieces
+            // that are already on disk, since piece_finished_alert only fires
+            // for NEW completions after this point.
+            {
+                auto st = handle.status(lt::torrent_handle::query_pieces);
+                for (int p = 0; p < num_pieces; ++p) {
+                    if (st.pieces.get_bit(lt::piece_index_t{p})) {
+                        state->avail.mark_complete(static_cast<PieceIndex>(p));
+                    }
+                }
+            }
+
+            state->mapper = std::make_unique<ByteRangeMapper>(ti->layout(), reader);
+            state->selected_file = reader;
+
+            // Build file path on disk
+            auto file_info = catalog_.get_file(id, reader);
+            if (!file_info) return file_info.error();
+            auto file_path = (std::filesystem::path(config_.session.save_path) /
+                              file_info.value().path).string();
+
+            state->source = std::make_shared<ByteSource>(
+                handle, reader, file_path, *state->mapper, state->avail,
+                std::chrono::duration_cast<std::chrono::milliseconds>(config_.server.read_timeout));
+
+            state->scheduler = std::make_unique<StreamingScheduler>(
+                config_.scheduler, state->avail, *state->mapper);
+
+            // Register byte source on HTTP server if running
+            if (http_server_) {
+                http_server_->set_byte_source(state->source, id, reader, file_info.value().path);
+            }
+
+            {
+                std::lock_guard lock(mu_);
+                states_[id] = std::move(state);
+            }
+        }
+    } catch (const std::exception& e) {
+        spdlog::debug("Engine: torrent {} went while its files were chosen: {}", id, e.what());
+        return make_error_code(errc::torrent_not_found);
     }
 
     return {};
@@ -444,7 +506,16 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
         return status_json.dump();
     }
 
-    auto st = handle.status();
+    lt::torrent_status st;
+    try {
+        st = handle.status();
+    } catch (const std::exception&) {
+        // Removed by another thread since the check above: libtorrent
+        // throws on a handle whose torrent is gone, and nothing between
+        // here and the app's service would catch it (app BUG-199).
+        status_json["error"] = "torrent not found";
+        return status_json.dump();
+    }
     auto selected = catalog_.selected_file(id);
 
     status_json["torrent_id"] = id;
@@ -469,7 +540,8 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
     // the whole torrent: with more than one wanted file it is no file's own.
     if (auto files = catalog_.list_files(id)) {
         try {
-            status_json["files"] = wanted_files_json(handle, files.value());
+            status_json["files"] =
+                wanted_files_json(handle, files.value(), catalog_.wanted_files(id));
         } catch (const std::exception& e) {
             // The torrent went between two questions to libtorrent.
             spdlog::debug("Engine: no file status for {}: {}", id, e.what());
