@@ -30,6 +30,15 @@ typedef void (*ss_event_callback_t)(const char* event_json, void* user_data);
 //   "resume_save_interval" (int, seconds): how often a torrent that changed
 //     is saved again while the servers run; 0 or absent = only on events
 //     (metadata, a completed file, a pause, ss_engine_destroy).
+// config_json keys for the peers of a complete torrent (both optional;
+// without them libtorrent's defaults hold):
+//   "close_redundant_connections" (bool, default true): with every wanted
+//     piece there, disconnect the seeds; false keeps them, so the next file
+//     of a pack starts at once (app BUG-198).
+//   "min_reconnect_time" (int, seconds, default 60): how long a peer that
+//     was let go waits before it is taken back.
+// Both are read after every other key: a value of the wrong type cannot
+// cost the proxy or the resume settings.
 __attribute__((visibility("default")))
 SeekServeEngine* ss_engine_create(const char* config_json);
 

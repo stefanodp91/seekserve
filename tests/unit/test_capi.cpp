@@ -585,6 +585,22 @@ TEST_F(CApiTest, ResumeDataKeyBringsATorrentBackWithoutItsFile) {
     ss_engine_destroy(engine);
 }
 
+// "close_redundant_connections" is read after the other keys (app BUG-198):
+// a value of the wrong type costs none of them. Here the resume data shows
+// it, without network; the proxy keys are read before the resume ones.
+TEST_F(CApiTest, ABadSeedersChoiceCostsNoOtherKey) {
+    auto config = make_config(R"("resume_data":true,"close_redundant_connections":"no")");
+    auto copy = torrent_copy();
+    char id_buf[128] = {};
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+    ASSERT_EQ(ss_add_torrent(engine, copy.c_str(), id_buf, sizeof(id_buf)), SS_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    ss_engine_destroy(engine);
+
+    EXPECT_FALSE(stored_resume_data(std::string(id_buf)).empty());
+}
+
 // Without the key the engine is the one from before: nothing is kept, and a
 // torrent whose .torrent file is gone does not come back.
 TEST_F(CApiTest, WithoutTheResumeDataKeyNothingIsKept) {
