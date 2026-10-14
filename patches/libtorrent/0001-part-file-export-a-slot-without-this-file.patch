@@ -1,0 +1,47 @@
+seekserve's patch to libtorrent (app BUG-202), applied by the top CMakeLists.txt
+before libtorrent is built, on top of the submodule's commit.
+
+part_file::export_file: a slot of the part file may hold only the part of a
+piece that belongs to another file. That happens when the piece came while this
+file was wanted (its part went to its own file) and the other file was not (its
+part went to the part file). If this file is then deleted, a check of the torrent
+moves it to the part file (mmap_storage::initialize: a file with priority 0 that
+does not exist uses the part file), and wanting it again copies its pieces out of
+the part file (mmap_storage::set_file_priority). Reading this file's part of such
+a slot reached the end of the part file: "End of file", and the torrent went into
+error, paused, with its file priorities unchanged. Nothing of this file is in that
+slot: nothing to copy, and the piece, which the check found missing, comes again.
+
+diff --git a/src/part_file.cpp b/src/part_file.cpp
+index d2228f511..75019dfae 100644
+--- a/src/part_file.cpp
++++ b/src/part_file.cpp
+@@ -47,6 +47,8 @@ see LICENSE file.
+ #include "libtorrent/aux_/vector.hpp"
+ #include "libtorrent/aux_/path.hpp"
+ 
++#include <boost/asio/error.hpp>
++
+ #include <functional> // for std::function
+ #include <cstdint>
+ 
+@@ -345,6 +347,19 @@ namespace libtorrent::aux {
+ 
+ 				span<char> v = {buf.get(), block_to_copy};
+ 				auto bytes_read = aux::pread_all(file.fd(), v, slot_offset(slot) + piece_offset, ec);
++				// seekserve: a slot may hold only the part of a piece that
++				// belongs to another file, written while this file was wanted
++				// and went to its own file. Nothing of this file is in the slot:
++				// there is nothing to copy, and the piece comes again.
++				if ((ec == boost::asio::error::eof || (!ec && bytes_read < std::int64_t(block_to_copy))))
++				{
++					ec.clear();
++					l.lock();
++					file_offset += block_to_copy;
++					piece_offset = 0;
++					size -= block_to_copy;
++					continue;
++				}
+ 				v = v.first(static_cast<std::ptrdiff_t>(bytes_read));
+ 				if (ec || v.empty()) return;
+ 

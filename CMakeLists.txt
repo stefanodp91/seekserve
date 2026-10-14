@@ -19,6 +19,29 @@ set(deprecated-functions OFF CACHE BOOL "" FORCE)
 if(SEEKSERVE_ENABLE_WEBTORRENT)
     set(webtorrent ON CACHE BOOL "" FORCE)
 endif()
+# seekserve's patches to libtorrent (patches/libtorrent, app BUG-202), applied
+# to the submodule's sources before they are built, once: a patch already there
+# is left as it is, and one that applies neither way stops the configure.
+find_package(Git REQUIRED)
+file(GLOB SEEKSERVE_LIBTORRENT_PATCHES "${CMAKE_CURRENT_SOURCE_DIR}/patches/libtorrent/*.patch")
+list(SORT SEEKSERVE_LIBTORRENT_PATCHES)
+foreach(patch IN LISTS SEEKSERVE_LIBTORRENT_PATCHES)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${patch}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extern/libtorrent
+        RESULT_VARIABLE patch_there OUTPUT_QUIET ERROR_QUIET)
+    if(NOT patch_there EQUAL 0)
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} apply ${patch}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extern/libtorrent
+            RESULT_VARIABLE patch_applied)
+        if(NOT patch_applied EQUAL 0)
+            message(FATAL_ERROR "seekserve: ${patch} does not apply to extern/libtorrent")
+        endif()
+        message(STATUS "seekserve: applied ${patch}")
+    endif()
+endforeach()
+
 add_subdirectory(extern/libtorrent EXCLUDE_FROM_ALL)
 
 # --- vcpkg-managed dependencies ---

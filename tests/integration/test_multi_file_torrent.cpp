@@ -772,6 +772,50 @@ TEST_F(MultiFileTorrent, AFileDeletedWhileTheEngineRunsComesAgainAfterARecheck) 
         << engine.get_status_json(id);
 }
 
+// App BUG-202, the order of the owner's phone test (app P6-04): a file whose
+// part of a shared piece went to its own file is deleted while the queue
+// downloads another file, and checked again; that file comes, then the deleted
+// one is wanted again. The check moves the deleted file to the part file,
+// which holds only the other file's part of the shared piece: libtorrent's
+// copy out of it reached the end of the part file, and the torrent went into
+// error, paused, with no peer (seekserve's patch to libtorrent,
+// patches/libtorrent). Not every run made that slot the last one, so the test
+// failed about one run in two before the patch.
+TEST_F(MultiFileTorrent, AfterARecheckTheDeletedFileComesAgainAfterTheNext) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port());
+    config.session.close_redundant_connections = false;
+    config.session.min_reconnect_time = std::chrono::seconds(1);
+    SeekServeEngine engine(config);
+    CompletedFiles completed(engine);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e01 = index_of(engine, id, kE01);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e01, 0);
+    ASSERT_GE(e03, 0);
+    ASSERT_TRUE(engine.select_file(id, e03));
+    proxy.limit_download(0);
+    ASSERT_TRUE(wait_for([&] { return completed.has(e03); })) << engine.get_status_json(id);
+
+    proxy.limit_download(kTrickle);
+    ASSERT_TRUE(engine.select_file(id, e01));
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    fs::remove(dir_ / "engine" / kFolder / kE03);
+    ASSERT_TRUE(engine.recheck_torrent(id));
+    proxy.limit_download(0);
+    ASSERT_TRUE(wait_for([&] { return completed.has(e01); })) << engine.get_status_json(id);
+
+    ASSERT_TRUE(engine.select_file(id, e03));
+    EXPECT_TRUE(wait_for([&] { return downloaded(kE03) == seeded(kE03); }))
+        << engine.get_status_json(id);
+    EXPECT_TRUE(wait_for([&] { return whole(wanted_file(status_of(engine, id), e03)); }))
+        << engine.get_status_json(id);
+}
+
 // A pack may want two files at once (app WORK-29, phase P4, step P4-03; app
 // DEC-42): the one a player reads and the one that downloads behind it. Both
 // come, each whole, the piece they share too, and nothing else does.

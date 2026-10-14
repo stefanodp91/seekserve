@@ -2,3 +2,5 @@
 	path = extern/libtorrent
 	url = https://github.com/arvidn/libtorrent.git
 	branch = master
+	# seekserve's patches (patches/libtorrent) are applied to it at configure time
+	ignore = dirty
