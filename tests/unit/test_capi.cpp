@@ -448,6 +448,22 @@ TEST_F(CApiTest, StartTorrentNotFound) {
     ss_engine_destroy(engine);
 }
 
+TEST_F(CApiTest, RecheckTorrentNullArgs) {
+    EXPECT_EQ(ss_recheck_torrent(nullptr, "abc"), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_recheck_torrent(reinterpret_cast<SeekServeEngine*>(0x1), nullptr),
+              SS_ERR_INVALID_ARG);
+}
+
+TEST_F(CApiTest, RecheckTorrentNotFound) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+
+    EXPECT_EQ(ss_recheck_torrent(engine, "nonexistent"), SS_ERR_NOT_FOUND);
+
+    ss_engine_destroy(engine);
+}
+
 // A paused torrent started outside the queue runs even when the only queue
 // slot is set, and no network is used (proxy on port 0).
 TEST_F(CApiTest, PauseAndStartTorrentOutsideQueue) {

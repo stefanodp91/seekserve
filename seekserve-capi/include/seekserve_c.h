@@ -75,6 +75,15 @@ __attribute__((visibility("default")))
 ss_error_t ss_force_reannounce(SeekServeEngine* engine,
                                const char* torrent_id);
 
+/* Checks the pieces of a torrent on disk again. libtorrent keeps the pieces
+ * it had in memory: a file deleted while the torrent is in the engine stays
+ * whole for it until this is called. The torrent leaves its peers while it
+ * checks, then downloads what is missing. SS_ERR_NOT_FOUND for a torrent the
+ * engine does not have. */
+__attribute__((visibility("default")))
+ss_error_t ss_recheck_torrent(SeekServeEngine* engine,
+                              const char* torrent_id);
+
 __attribute__((visibility("default")))
 ss_error_t ss_list_torrents(SeekServeEngine* engine,
                             char** out_json);

@@ -720,6 +720,58 @@ TEST_F(MultiFileTorrent, AFileThatWentIsNotWholeAnyMore) {
     EXPECT_EQ(status["offline_ready"], true) << status.dump();
 }
 
+// App BUG-202: a file deleted while the engine has its torrent stays whole
+// for libtorrent, which keeps the pieces it had in memory, and the app took
+// the empty file for a finished download. Asked to check the torrent again,
+// the engine finds the file gone and downloads it again. The check lets every
+// peer go, and libtorrent takes one back only after min_reconnect_time: here
+// a second, with the app's other choice (the seeder kept when a file is
+// whole, app BUG-198), so the test waits for the check and not for that.
+TEST_F(MultiFileTorrent, AFileDeletedWhileTheEngineRunsComesAgainAfterARecheck) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port());
+    config.session.close_redundant_connections = false;
+    config.session.min_reconnect_time = std::chrono::seconds(1);
+    SeekServeEngine engine(config);
+    CompletedFiles completed(engine);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e01 = index_of(engine, id, kE01);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e01, 0);
+    ASSERT_GE(e03, 0);
+    ASSERT_TRUE(engine.select_file(id, e03));
+    proxy.limit_download(0);
+    ASSERT_TRUE(wait_for([&] { return completed.has(e03); })) << engine.get_status_json(id);
+
+    // The queue moves on to another file of the pack, and the user deletes
+    // the one that came: libtorrent still says it whole.
+    proxy.limit_download(kTrickle);
+    ASSERT_TRUE(engine.select_file(id, e01));
+    fs::remove(dir_ / "engine" / kFolder / kE03);
+    ASSERT_TRUE(engine.select_file(id, e03));
+    ASSERT_TRUE(wait_for([&] { return whole(wanted_file(status_of(engine, id), e03)); }))
+        << engine.get_status_json(id);
+
+    ASSERT_TRUE(engine.recheck_torrent(id));
+    ASSERT_TRUE(wait_for([&] {
+        const auto status = status_of(engine, id);
+        const int state = status.value("state", 0);
+        return state != static_cast<int>(lt::torrent_status::checking_files) &&
+               state != static_cast<int>(lt::torrent_status::checking_resume_data) &&
+               !whole(wanted_file(status, e03));
+    })) << engine.get_status_json(id);
+
+    proxy.limit_download(0);
+    ASSERT_TRUE(wait_for([&] { return downloaded(kE03) == seeded(kE03); }))
+        << engine.get_status_json(id);
+    EXPECT_TRUE(wait_for([&] { return whole(wanted_file(status_of(engine, id), e03)); }))
+        << engine.get_status_json(id);
+}
+
 // A pack may want two files at once (app WORK-29, phase P4, step P4-03; app
 // DEC-42): the one a player reads and the one that downloads behind it. Both
 // come, each whole, the piece they share too, and nothing else does.

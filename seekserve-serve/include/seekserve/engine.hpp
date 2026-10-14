@@ -62,6 +62,11 @@ public:
     // must not wait for (or push out) a queued download.
     Result<void> start_torrent(const TorrentId& id);
     Result<void> force_reannounce(const TorrentId& id);
+    // Checks the pieces on disk again (app BUG-202): libtorrent keeps the
+    // pieces it had in memory, so a file deleted while the torrent is here
+    // stays whole for it until it reads the files again. The torrent leaves
+    // its peers while it checks, then downloads what is missing.
+    Result<void> recheck_torrent(const TorrentId& id);
 
     // File management
     Result<std::vector<FileInfo>> list_files(const TorrentId& id);

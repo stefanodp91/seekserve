@@ -216,6 +216,15 @@ ss_error_t ss_force_reannounce(SeekServeEngine* engine, const char* torrent_id) 
     });
 }
 
+ss_error_t ss_recheck_torrent(SeekServeEngine* engine, const char* torrent_id) {
+    if (!engine || !torrent_id) return SS_ERR_INVALID_ARG;
+
+    return guarded("ss_recheck_torrent", [&]() -> ss_error_t {
+        auto result = engine->recheck_torrent(torrent_id);
+        return result ? SS_OK : map_error(result.error());
+    });
+}
+
 ss_error_t ss_list_torrents(SeekServeEngine* engine, char** out_json) {
     if (!engine || !out_json) return SS_ERR_INVALID_ARG;
 
