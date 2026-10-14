@@ -104,6 +104,12 @@ static seekserve::SeekServeEngine::Config parse_config(const char* config_json) 
             config.session.max_active_downloads = j["max_concurrent_torrents"].get<int>();
         if (j.contains("ca_cert_file"))
             config.session.ca_cert_file = j["ca_cert_file"].get<std::string>();
+        if (j.contains("close_redundant_connections"))
+            config.session.close_redundant_connections =
+                j["close_redundant_connections"].get<bool>();
+        if (j.contains("min_reconnect_time"))
+            config.session.min_reconnect_time =
+                std::chrono::seconds(j["min_reconnect_time"].get<int>());
         if (j.contains("proxy_enabled"))
             config.session.proxy.enabled = j["proxy_enabled"].get<bool>();
         if (j.contains("proxy_hostname"))

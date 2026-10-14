@@ -87,6 +87,10 @@ lt::settings_pack TorrentSessionManager::make_settings(const SessionConfig& conf
 
     sp.set_int(lt::settings_pack::request_timeout, 10);
     sp.set_int(lt::settings_pack::peer_timeout, 30);
+    sp.set_bool(lt::settings_pack::close_redundant_connections,
+        config.close_redundant_connections);
+    sp.set_int(lt::settings_pack::min_reconnect_time,
+        static_cast<int>(config.min_reconnect_time.count()));
     sp.set_bool(lt::settings_pack::strict_end_game_mode, false);
     sp.set_bool(lt::settings_pack::announce_to_all_tiers, true);
     sp.set_bool(lt::settings_pack::announce_to_all_trackers, true);

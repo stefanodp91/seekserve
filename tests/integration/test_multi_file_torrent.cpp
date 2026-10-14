@@ -498,6 +498,43 @@ TEST_F(MultiFileTorrent, WithEveryWantedPieceThereTheSeederIsLetGo) {
     EXPECT_EQ(downloaded(kE01), seeded(kE01));
 }
 
+// The same pack with the app's configuration (app BUG-198, phase P5, step
+// P5-03): the seeder is kept after the file is complete, so the next file of
+// the pack starts at once. The 20 seconds are the limit of this test.
+TEST_F(MultiFileTorrent, SecondFileOfAPackStartsWithinSecondsWithTheAppSettings) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port());
+    config.session.close_redundant_connections = false;
+    SeekServeEngine engine(config);
+    CompletedFiles completed(engine);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e01 = index_of(engine, id, kE01);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e01, 0);
+    ASSERT_GE(e03, 0);
+
+    ASSERT_TRUE(engine.select_file(id, e01));
+    proxy.limit_download(0);
+    ASSERT_TRUE(wait_for([&] { return completed.has(e01) && finished(engine, id); }))
+        << engine.get_status_json(id);
+
+    ASSERT_TRUE(engine.select_file(id, e03));
+    const auto before = bytes_of(wanted_file(status_of(engine, id), e03));
+    ASSERT_LT(before, size_of(kE03)) << "the next file was whole before it was selected";
+    const auto started = std::chrono::steady_clock::now();
+    ASSERT_TRUE(wait_for([&] { return bytes_of(wanted_file(status_of(engine, id), e03)) > before; },
+                         std::chrono::seconds(60)))
+        << engine.get_status_json(id);
+    const auto waited = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - started);
+    EXPECT_LT(waited.count(), 20) << "the next file of the pack waited " << waited.count()
+                                  << " s for its first byte";
+}
+
 // A player reads the selected file from the stream server while it comes,
 // its last piece too, which is also the first of the next file.
 TEST_F(MultiFileTorrent, TheReaderGetsTheBytesOfTheSelectedFile) {

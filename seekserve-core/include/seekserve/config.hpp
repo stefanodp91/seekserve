@@ -29,6 +29,13 @@ struct SessionConfig {
     // only. Needed on Android, where the defaults do not exist and OpenSSL
     // ignores SSL_CERT_FILE in app processes.
     std::string ca_cert_file;
+    // libtorrent's close_redundant_connections: when a torrent has every
+    // wanted piece, libtorrent disconnects the seeds. Off = the connections
+    // stay, so the next file of a pack starts at once (app BUG-198).
+    bool close_redundant_connections = true;
+    // libtorrent's min_reconnect_time: how long a peer that was let go waits
+    // before it is taken back (multiplied by its failure count).
+    std::chrono::seconds min_reconnect_time{60};
     // Keeps each torrent's resume data (its metadata, the pieces it has, its
     // file priorities) in the cache database, without peer addresses, and
     // restores torrents from it: a restart then needs neither the metadata
