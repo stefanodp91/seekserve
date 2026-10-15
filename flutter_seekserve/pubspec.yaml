@@ -1,7 +1,7 @@
 name: flutter_seekserve
 description: "Flutter FFI plugin for SeekServe torrent streaming SDK."
-version: 0.1.0
-homepage: https://github.com/mapo80/seekserve
+version: 0.2.0
+homepage: https://github.com/stefanodp91/seekserve
 
 environment:
   sdk: ^3.10.8

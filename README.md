@@ -1,6 +1,9 @@
 # SeekServe
 
-**Edge-first torrent streaming SDK with HTTP Range support, intelligent piece scheduling, offline caching, WebTorrent, and a full Flutter toolkit.**
+**Edge-first torrent streaming SDK with HTTP Range support, intelligent piece scheduling, offline caching, resume data, optional WebTorrent, and a full Flutter toolkit.**
+
+> **Version 0.2.0** (2026-10-15, see [CHANGELOG.md](CHANGELOG.md)); work happens on `dev`, handoff notes in [RESUME.md](RESUME.md).
+> Its consumer is the Android app Obsidian Eclipse: the engine runs in the app's foreground service through `libseekserve.so` and JNI, `flutter_seekserve` supplies the Dart types and `flutter_seekserve_ui` the player. The app pins a commit of this repository by SHA. In the mobile builds WebTorrent is off by default (WebRTC ignores the SOCKS proxy that carries every peer connection through Tor), and libtorrent is built with the patch in `patches/libtorrent/`.
 
 SeekServe is a C++17 library that downloads torrent content and serves it locally via an HTTP Range-compliant server on loopback. Video players like VLC can connect to it and play, seek, and scrub through torrent video as if it were a regular HTTP stream. An intelligent piece scheduler ensures the right pieces are downloaded first for instant playback and fast seek.
 
@@ -67,14 +70,18 @@ The SDK ships with three Flutter packages:
 ### C++ SDK
 - **HTTP Range streaming** (RFC 7233) — 200 OK, 206 Partial Content, 416 Range Not Satisfiable
 - **Intelligent piece scheduler** — hot window, lookahead, seek boost, adaptive mode switching
-- **Multi-file torrent support** — enumerate files, select one for streaming, correct per-file byte mapping
+- **Multi-file torrent support** — enumerate files, select one for streaming, correct per-file byte mapping; two wanted files per torrent (`ss_set_wanted_files`: the reader's first, one more behind it)
+- **Torrent control** — pause, resume into the download queue or start outside it for streaming, force reannounce, recheck the pieces on disk, list torrents
+- **Resume data** — each torrent's resume data kept in the cache database without peer addresses, and torrents restored from it at start (paused, with their metadata)
+- **Proxy** — a SOCKS5 proxy for every peer and tracker connection (`proxy_*` config keys, `ss_set_proxy`); a CA file for HTTPS trackers (`ca_cert_file`)
+- **libtorrent patch** — `patches/libtorrent/0001-part-file-export-a-slot-without-this-file.patch`, applied by CMake: exporting a part-file slot that holds only another file's part no longer fails with "End of file"
 - **Offline cache** — SQLite-backed, LRU eviction, quota enforcement, offline-ready detection
 - **C API** — opaque handle, JSON data exchange, callback events — ready for Flutter FFI / Dart `ffigen`
 - **REST control API** — add/remove torrents, list files, select streams, monitor status via JSON
 - **Hardened servers** — connection limits, socket timeouts, body size limits, token auth, CORS
 - **Loopback-only binding** — secure by default, no network exposure
 - **Sanitizer support** — ASan and TSan build presets out of the box
-- **189 tests** — 138 unit + 32 integration + 19 C API
+- **Tests** — unit, integration and C API suites (counts and the offline filters in [RESUME.md](RESUME.md))
 
 ### Flutter Plugin
 - **FFI bindings** — auto-generated via `ffigen` from `seekserve_c.h`
@@ -89,7 +96,7 @@ The SDK ships with three Flutter packages:
 - **Theme system** — `SsThemeData` + `SsTheme` (InheritedWidget), dark/light presets, torrent-semantic colours, `copyWith()` customization
 - **9 atom widgets** — `SsButton`, `SsIconButton`, `SsTextField`, `SsProgressBar`, `SsBadge`, `SsChip`, `SsSlider`, `SsCard`, `SsDialog`
 - **11 composite widgets** — `SsTorrentTile`, `SsFileTile`, `SsFileTree`, `SsTransferStats`, `SsStreamModeBadge`, `SsAddTorrentBar`, `SsAddTorrentDialog`, `SsTorrentList`, `SsTorrentDetail`, `SsDeleteConfirm`, `SsServerStatusPanel`
-- **4 player widgets** — `SsSeekControls`, `SsBufferingOverlay`, `SsPlayerStatusBar`, `SsVideoPlayer`
+- **4 player widgets** — `SsSeekControls`, `SsBufferingOverlay`, `SsPlayerStatusBar`, `SsVideoPlayer`; the player starts from a given position, reports where it is, buffering and errors, and takes the host app's words and buttons
 - **1 controller** — `SsTorrentManager` (ChangeNotifier wrapping `SeekServeClient`)
 - **32 Dart unit tests** for theme, atoms, utils
 
@@ -750,7 +757,7 @@ seekserve/
 |-- seekserve-demo/             EXECUTABLE: CLI demo
 |   +-- src/main.cpp                Add torrent, list files, select, stream URL
 |
-|-- tests/                      189 tests (138 unit + 32 integration + 19 C API)
+|-- tests/                      unit, integration and C API tests
 |   |-- unit/                       ByteRangeMapper, PieceAvailability, Scheduler, etc.
 |   +-- integration/                HTTP server, session lifecycle, stress tests
 |
@@ -925,7 +932,7 @@ The demo will:
 ### Run Tests
 
 ```bash
-cd build/debug && ctest    # All 189 tests
+cd build/debug && ctest    # All tests
 ```
 
 ---
@@ -975,9 +982,9 @@ The main entry point for building the C++ SDK from scratch. It handles all depen
 ```
 build/{debug|release|asan|tsan}/
   seekserve-demo/seekserve-demo           # CLI demo executable
-  tests/seekserve-unit-tests              # 138 unit tests
-  tests/seekserve-integration-tests       # 32 integration tests
-  tests/seekserve-capi-tests              # 19 C API tests
+  tests/seekserve-unit-tests              # unit tests
+  tests/seekserve-integration-tests       # integration tests
+  tests/seekserve-capi-tests              # C API tests (run with the offline filter of RESUME.md)
   seekserve-capi/libseekserve.dylib       # Shared library (macOS)
 ```
 
@@ -1518,16 +1525,24 @@ void             ss_engine_destroy(SeekServeEngine* engine);
 // Torrents
 ss_error_t ss_add_torrent(engine, uri, out_id, id_len);
 ss_error_t ss_remove_torrent(engine, torrent_id, delete_files);
+ss_error_t ss_pause_torrent(engine, torrent_id);
+ss_error_t ss_resume_torrent(engine, torrent_id);   // back into the download queue
+ss_error_t ss_start_torrent(engine, torrent_id);    // outside the queue, for streaming
+ss_error_t ss_force_reannounce(engine, torrent_id);
+ss_error_t ss_recheck_torrent(engine, torrent_id);  // check the pieces on disk again
+ss_error_t ss_list_torrents(engine, &out_json);
 
 // Files
 ss_error_t ss_list_files(engine, torrent_id, &out_json);
 ss_error_t ss_select_file(engine, torrent_id, file_index);
+ss_error_t ss_set_wanted_files(engine, torrent_id, reader_file, background_file);  // -1 = none
 ss_error_t ss_get_stream_url(engine, torrent_id, file_index, &out_url);
 ss_error_t ss_get_status(engine, torrent_id, &out_json);
 
-// Server
+// Server and network
 ss_error_t ss_start_server(engine, port, &out_port);
 ss_error_t ss_stop_server(engine);
+ss_error_t ss_set_proxy(engine, proxy_json);
 
 // Events
 ss_error_t ss_set_event_callback(engine, callback_fn, user_data);
@@ -1595,6 +1610,12 @@ Engine configuration is passed as JSON to `ss_engine_create()` (C API) or via `S
 | `enable_webtorrent` | `false` | Enable WebRTC-based BitTorrent peers |
 | `extra_trackers` | `[]` | Additional tracker URLs (including `wss://` for WebTorrent) |
 | `ca_cert_file` | (empty) | PEM file of CAs for HTTPS trackers and web seeds, added to OpenSSL's defaults; required on Android, which has no default CA locations for OpenSSL |
+| `max_concurrent_torrents` | libtorrent's | Active downloads at a time (the download queue); `ss_start_torrent` bypasses it |
+| `proxy_enabled`, `proxy_hostname`, `proxy_port` | off | SOCKS5 proxy for peers and trackers, also set later with `ss_set_proxy` |
+| `resume_data` | `false` | Keep each torrent's resume data (no peer addresses) and restore torrents from it, paused |
+| `resume_save_interval` | `0` | Seconds between saves of a torrent that changed while the servers run; `0` = only on events |
+| `close_redundant_connections` | `true` | With every wanted piece there, disconnect the seeds; `false` keeps them for the next file of a pack |
+| `min_reconnect_time` | `60` | Seconds before a peer that was let go is taken back |
 
 ---
 
@@ -1603,13 +1624,15 @@ Engine configuration is passed as JSON to `ss_engine_create()` (C API) or via `S
 ### Run All Tests
 
 ```bash
-cd build/debug && ctest          # All 189 tests at once
+cd build/debug && ctest          # All tests at once
 
 # Or individually:
-./build/debug/tests/seekserve-unit-tests          # 138 unit tests
-./build/debug/tests/seekserve-integration-tests    # 32 integration tests
-./build/debug/tests/seekserve-capi-tests           # 19 C API tests
+./build/debug/tests/seekserve-unit-tests          # unit tests
+./build/debug/tests/seekserve-integration-tests    # integration tests
+./build/debug/tests/seekserve-capi-tests           # C API tests (off the network only with the filter of RESUME.md)
 ```
+
+The current counts, and the filters that keep a run off the network, are in [RESUME.md](RESUME.md). The breakdown below is the one of the first release (189 tests); the suites have grown since.
 
 ### Test Breakdown
 
@@ -1725,8 +1748,10 @@ When WebTorrent is enabled:
 
 **Build time** (CMake):
 ```bash
--DSEEKSERVE_ENABLE_WEBTORRENT=ON    # Default when libdatachannel is detected
+-DSEEKSERVE_ENABLE_WEBTORRENT=ON    # Default of CMakeLists.txt (desktop builds)
 ```
+
+The mobile scripts (`scripts/build-android.sh`, `scripts/build-ios.sh`, `scripts/dev-ios-sim.sh`) pass `OFF` unless `SEEKSERVE_ENABLE_WEBTORRENT=ON` is set: WebRTC connections do not go through the SOCKS proxy.
 
 **Runtime** (config JSON):
 ```json
@@ -1781,7 +1806,7 @@ The SDK falls back to standard BitTorrent only. Binary size decreases by ~30%.
 
 | Dependency | Source | Purpose |
 |------------|--------|---------|
-| [libtorrent](https://github.com/arvidn/libtorrent) | Git submodule (master) | BitTorrent protocol, piece management, WebTorrent |
+| [libtorrent](https://github.com/arvidn/libtorrent) | Git submodule (master), with `patches/libtorrent/` applied by CMake | BitTorrent protocol, piece management, WebTorrent |
 | [libdatachannel](https://github.com/nicknacknow/libdatachannel) | Nested submodule (via libtorrent) | WebRTC Data Channels for WebTorrent |
 | Boost (Asio, Beast, JSON, System) | vcpkg | HTTP server, async I/O, JSON parsing |
 | [OpenSSL](https://www.openssl.org/) | vcpkg | TLS for libtorrent + libdatachannel |

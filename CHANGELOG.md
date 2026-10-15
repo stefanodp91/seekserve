@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.2.0 - 2026-10-15
+
+The first numbered release after 0.1.0: every change recorded below, up to `ac3c1a0`. The version is in `CMakeLists.txt`, `vcpkg.json`, `flutter_seekserve/pubspec.yaml` and `flutter_seekserve_ui/pubspec.yaml`.
+
 ### Added — Two wanted files per torrent
 
 #### `seekserve-core` / `seekserve-serve`
