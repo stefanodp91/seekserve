@@ -302,11 +302,37 @@ Result<void> SeekServeEngine::pause_torrent(const TorrentId& id) {
     return {};
 }
 
+namespace {
+
+// libtorrent's error keeps a torrent paused until it is cleared, and
+// clear_error alone checks the files against the sizes libtorrent remembers
+// of them: what made the error, a file it could not open, is there again
+// (its stat cache goes only when the files are released). A recheck clears
+// the error, releases the files and reads them again. A torrent in error has
+// no peers to lose.
+void try_again_after_error(const lt::torrent_handle& handle, const TorrentId& id) {
+    lt::torrent_status st;
+    try {
+        st = handle.status();
+    } catch (const std::exception&) {
+        return;  // Removed meanwhile: the resume answers for it.
+    }
+    if (!st.errc) return;
+    spdlog::warn("Engine: torrent {} in error ({}), checked again", id, st.errc.message());
+    handle.force_recheck();
+}
+
+}  // namespace
+
 Result<void> SeekServeEngine::resume_torrent(const TorrentId& id) {
     auto handle = sessions_->get_handle(id);
     if (!handle.is_valid()) {
         return make_error_code(errc::torrent_not_found);
     }
+    // A torrent libtorrent put into error stays paused through a resume
+    // until the error goes: the app's queue resumes it to try again (app
+    // DEC-323).
+    try_again_after_error(handle, id);
     handle.set_flags(lt::torrent_flags::auto_managed);
     handle.resume();
     spdlog::info("Engine: resumed torrent {}", id);
@@ -322,6 +348,8 @@ Result<void> SeekServeEngine::start_torrent(const TorrentId& id) {
     // Out of auto-management libtorrent's queue neither holds it back nor
     // counts it, so a download already running keeps its slot.
     handle.unset_flags(lt::torrent_flags::auto_managed);
+    // As resume_torrent: starting it again is trying again.
+    try_again_after_error(handle, id);
     handle.resume();
     spdlog::info("Engine: started torrent {} outside the queue", id);
     fire_event("torrent_resumed", "{\"torrent_id\":\"" + id + "\"}");
@@ -539,6 +567,16 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
     status_json["total_upload"] = st.total_upload;
     status_json["state"] = static_cast<int>(st.state);
     status_json["paused"] = !!(st.flags & lt::torrent_flags::paused);
+    // libtorrent's own error, which keeps the torrent paused until it is
+    // cleared (app BUG-202, P6-04; app DEC-323). Not under "error", which
+    // says the engine does not have the torrent. "file" is libtorrent's
+    // index, or one of its negative values when no file is to blame.
+    if (st.errc) {
+        status_json["torrent_error"] = {
+            {"message", st.errc.message()},
+            {"file", static_cast<int>(st.error_file)},
+        };
+    }
     status_json["has_metadata"] = catalog_.has_metadata(id);
     status_json["selected_file"] = selected.has_value() ? json(*selected) : json(nullptr);
 

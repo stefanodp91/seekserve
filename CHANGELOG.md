@@ -2,7 +2,20 @@
 
 ## Unreleased
 
-Nothing yet.
+### Fixed — A torrent libtorrent put into error
+
+#### `seekserve-serve`
+
+- **Status** (`get_status_json`, `ss_get_status`): `torrent_error`, with `message` and `file` (libtorrent's index,
+  or one of its negative values), when libtorrent put the torrent into error. libtorrent pauses such a torrent, and
+  the status only said `paused` (app BUG-202, P6-04; app DEC-323). `error` still means a torrent the engine does
+  not have.
+- **`resume_torrent` / `start_torrent`** (`ss_resume_torrent`, `ss_start_torrent`): a torrent in error is checked
+  again first (`force_recheck`), which clears the error and reads the files again. A plain resume left it in error,
+  and `clear_error` alone checked the files against libtorrent's stat cache, which still held what made the error.
+  The check lets the peers go; they come back after `min_reconnect_time`.
+- Tests: `MultiFileTorrent.TheStatusSaysLibtorrentsError`, `.StartingATorrentInErrorTriesAgain`,
+  `.ResumingATorrentInErrorTriesAgain` (a folder in a file's place puts the torrent into error).
 
 ## 0.2.0 - 2026-10-15
 

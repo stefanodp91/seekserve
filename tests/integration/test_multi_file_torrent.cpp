@@ -816,6 +816,91 @@ TEST_F(MultiFileTorrent, AfterARecheckTheDeletedFileComesAgainAfterTheNext) {
         << engine.get_status_json(id);
 }
 
+// libtorrent puts a torrent into error, and pauses it, when it cannot write a
+// file: here a folder takes the file's place. Nothing said so, and the app saw
+// a download with no data (app BUG-202, after the phone test P6-04; app
+// DEC-323). The status says it under its own key: "error" already means a
+// torrent the engine does not have.
+TEST_F(MultiFileTorrent, TheStatusSaysLibtorrentsError) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+
+    fs::create_directories(dir_ / "engine" / kFolder / kE03);
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e03, 0);
+    ASSERT_TRUE(engine.select_file(id, e03));
+    ASSERT_TRUE(wait_for([&] { return status_of(engine, id).contains("torrent_error"); }))
+        << engine.get_status_json(id);
+
+    const auto status = status_of(engine, id);
+    const auto& error = status["torrent_error"];
+    EXPECT_FALSE(error.value("message", std::string()).empty()) << status.dump();
+    EXPECT_EQ(error.value("file", -1), e03) << status.dump();
+    EXPECT_TRUE(status.value("paused", false)) << status.dump();
+    EXPECT_FALSE(status.contains("error")) << status.dump();
+}
+
+// A torrent in error stays in error through a plain resume: libtorrent wants
+// clear_error first. The app's queue starts a download again after a stall,
+// so starting it is trying again (app DEC-323).
+TEST_F(MultiFileTorrent, StartingATorrentInErrorTriesAgain) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    auto seeder = start_seeder();
+    // The recheck lets the seeder go; with the app's settings it comes back
+    // after min_reconnect_time, a second here.
+    auto config = engine_config(proxy.port());
+    config.session.close_redundant_connections = false;
+    config.session.min_reconnect_time = std::chrono::seconds(1);
+    SeekServeEngine engine(config);
+
+    fs::create_directories(dir_ / "engine" / kFolder / kE03);
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e03, 0);
+    ASSERT_TRUE(engine.select_file(id, e03));
+    ASSERT_TRUE(wait_for([&] { return status_of(engine, id).contains("torrent_error"); }))
+        << engine.get_status_json(id);
+
+    fs::remove(dir_ / "engine" / kFolder / kE03);
+    ASSERT_FALSE(fs::exists(dir_ / "engine" / kFolder / kE03));
+    ASSERT_TRUE(engine.start_torrent(id));
+    EXPECT_TRUE(wait_for([&] { return downloaded(kE03) == seeded(kE03); }))
+        << engine.get_status_json(id);
+    EXPECT_FALSE(status_of(engine, id).contains("torrent_error")) << engine.get_status_json(id);
+}
+
+// The same through the queue's own way in (resume_torrent, auto managed).
+TEST_F(MultiFileTorrent, ResumingATorrentInErrorTriesAgain) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    auto seeder = start_seeder();
+    // The recheck lets the seeder go; with the app's settings it comes back
+    // after min_reconnect_time, a second here.
+    auto config = engine_config(proxy.port());
+    config.session.close_redundant_connections = false;
+    config.session.min_reconnect_time = std::chrono::seconds(1);
+    SeekServeEngine engine(config);
+
+    fs::create_directories(dir_ / "engine" / kFolder / kE03);
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e03, 0);
+    ASSERT_TRUE(engine.select_file(id, e03));
+    ASSERT_TRUE(wait_for([&] { return status_of(engine, id).contains("torrent_error"); }))
+        << engine.get_status_json(id);
+
+    fs::remove(dir_ / "engine" / kFolder / kE03);
+    ASSERT_FALSE(fs::exists(dir_ / "engine" / kFolder / kE03));
+    ASSERT_TRUE(engine.resume_torrent(id));
+    EXPECT_TRUE(wait_for([&] { return downloaded(kE03) == seeded(kE03); }))
+        << engine.get_status_json(id);
+    EXPECT_FALSE(status_of(engine, id).contains("torrent_error")) << engine.get_status_json(id);
+}
+
 // A pack may want two files at once (app WORK-29, phase P4, step P4-03; app
 // DEC-42): the one a player reads and the one that downloads behind it. Both
 // come, each whole, the piece they share too, and nothing else does.

@@ -60,13 +60,17 @@ __attribute__((visibility("default")))
 ss_error_t ss_pause_torrent(SeekServeEngine* engine,
                             const char* torrent_id);
 
+/* Resumes a torrent in the download queue. A torrent libtorrent put into
+ * error ("torrent_error" in ss_get_status) is checked again first: the
+ * check clears the error and reads the files again, and lets its peers go
+ * (they come back after min_reconnect_time). */
 __attribute__((visibility("default")))
 ss_error_t ss_resume_torrent(SeekServeEngine* engine,
                              const char* torrent_id);
 
 /* Resumes a torrent outside the download queue (max_concurrent_torrents),
  * as ss_add_torrent adds it: for streaming. ss_resume_torrent puts it back
- * into the queue. */
+ * into the queue. A torrent in error is checked again first, as there. */
 __attribute__((visibility("default")))
 ss_error_t ss_start_torrent(SeekServeEngine* engine,
                             const char* torrent_id);
@@ -117,6 +121,10 @@ ss_error_t ss_get_stream_url(SeekServeEngine* engine,
                              int32_t file_index,
                              char** out_url);
 
+/* The torrent's status as JSON. "error" means the engine does not have the
+ * torrent; "torrent_error" ({"message", "file"}) is libtorrent's own error,
+ * which keeps the torrent paused until it is resumed or started again;
+ * "file" is the file's index, or a negative value when no file is to blame. */
 __attribute__((visibility("default")))
 ss_error_t ss_get_status(SeekServeEngine* engine,
                          const char* torrent_id,
