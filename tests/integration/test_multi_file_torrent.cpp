@@ -17,6 +17,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -27,6 +28,7 @@
 #include <vector>
 
 #include <libtorrent/add_torrent_params.hpp>
+#include <libtorrent/alert_types.hpp>
 #include <libtorrent/create_torrent.hpp>
 #include <libtorrent/download_priority.hpp>
 #include <libtorrent/file_storage.hpp>
@@ -1074,6 +1076,87 @@ TEST_F(MultiFileTorrent, WhenThePlayerLeavesItsFileStops) {
     // Of the hundred pieces with a deadline, only what was on its way.
     EXPECT_LT(stretches_there(kE02, 100), 60);
     EXPECT_EQ(http_status(url.value(), "bytes=0-99"), 404);
+}
+
+// When the player leaves, what it asked for and has not come yet is
+// cancelled (app BUG-201, DEC-330): libtorrent keeps the requests a deadline
+// made when the deadline goes or the file's priority drops, and on the phone
+// the file left went on coming for 5 to 10 seconds after the close (app
+// P5-06, P5-09). Counted by the cancels the seeder gets for the pieces of the
+// file left, not by the bytes that still come: the bytes already on their
+// way come anyway, and how many depends on the speed.
+TEST_F(MultiFileTorrent, WhenThePlayerLeavesWhatItAskedForIsCancelled) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    lt::settings_pack log;
+    log.set_int(lt::settings_pack::alert_mask, lt::alert_category::peer_log);
+    seeder->apply_settings(log);
+    auto config = engine_config(proxy.port());
+    config.session.close_redundant_connections = false;
+    // Deadlines far ahead of what the trickle brings, as in the test above.
+    config.scheduler.lookahead_pieces = 100;
+    config.scheduler.deadline_budget = 120;
+    SeekServeEngine engine(config);
+    ASSERT_TRUE(engine.start_server());
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    const FileIndex e03 = index_of(engine, id, kE03);
+    ASSERT_GE(e02, 0);
+    ASSERT_GE(e03, 0);
+    // The pieces of the reader's file alone, none shared with another file.
+    auto const& files = ti_->layout();
+    const int first = static_cast<int>(
+        files.map_file(lt::file_index_t{e02}, 0, 1).piece) + 1;
+    const int last = static_cast<int>(
+        files.map_file(lt::file_index_t{e02}, files.file_size(lt::file_index_t{e02}) - 1, 1).piece) - 1;
+    ASSERT_LT(first, last);
+
+    ASSERT_TRUE(engine.set_wanted_files(id, e02, e03));
+    auto url = engine.get_stream_url(id, e02);
+    ASSERT_TRUE(url);
+    ASSERT_TRUE(wait_for([&] { return status_of(engine, id).value("active_deadlines", 0) >= 90; }))
+        << engine.get_status_json(id);
+
+    // The cancels of the pieces of the reader's file the seeder got since
+    // the last call.
+    std::vector<lt::alert*> alerts;
+    auto cancels = [&] {
+        int count = 0;
+        seeder->pop_alerts(&alerts);
+        for (lt::alert* a : alerts) {
+            auto* entry = lt::alert_cast<lt::peer_log_alert>(a);
+            if (!entry || entry->direction != lt::peer_log_alert::incoming_message ||
+                entry->event_type != lt::peer_log_alert::cancel) {
+                continue;
+            }
+            int piece = -1;
+            if (std::sscanf(entry->log_message(), "piece: %d", &piece) == 1 &&
+                piece >= first && piece <= last) {
+                ++count;
+            }
+        }
+        return count;
+    };
+    // A first deadline cancels what was asked before it, while the player
+    // starts: a whole second without a cancel first, so none of those is
+    // counted as the leave's.
+    cancels();
+    ASSERT_TRUE(wait_for([&] {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        return cancels() == 0;
+    })) << "the seeder kept getting cancels while the player read";
+
+    ASSERT_TRUE(engine.set_wanted_files(id, -1, e03));
+
+    int cancelled = 0;
+    wait_for([&] {
+        cancelled += cancels();
+        return cancelled > 0;
+    }, std::chrono::seconds(3));
+    EXPECT_GT(cancelled, 0) << engine.get_status_json(id);
 }
 
 // The player closes on the file the queue is downloading: the file goes on

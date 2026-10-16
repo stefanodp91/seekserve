@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed — What a player that leaves asked for
+
+#### `seekserve-serve`
+
+- **`want_files`** (`select_file`, `set_wanted_files`, `ss_set_wanted_files`): when the reader leaves, the requests it
+  made and that have not come yet are cancelled (`cancel_requests`: a deadline set and taken away at once on a piece
+  still wanted, which makes libtorrent cancel every request that is not time critical; the file priorities are set
+  again afterwards). libtorrent kept them when the deadlines went or the file's priority dropped, and the peers went
+  on sending: on the app's phone the file left kept coming for 5 to 10 seconds after the player closed, 3 with this
+  (app BUG-201, P5-09, DEC-330).
+- Test: `MultiFileTorrent.WhenThePlayerLeavesWhatItAskedForIsCancelled`, counting the cancels the seeder gets for the
+  reader's pieces (none before the fix).
+
 ### Fixed — A torrent libtorrent put into error
 
 #### `seekserve-serve`

@@ -57,6 +57,26 @@ json wanted_files_json(const lt::torrent_handle& handle, const std::vector<FileI
     return wanted;
 }
 
+// Cancels what the peers were asked for and has not come yet, but for the
+// pieces with a deadline: with no other deadline, a deadline set makes
+// libtorrent cancel every request that is not time critical
+// (torrent::set_piece_deadline, cancel_non_critical). It goes at once, on a
+// piece still wanted and missing; libtorrent leaves that piece at a low
+// priority, which the caller sets again. False when no piece is wanted and
+// missing, and nothing was done.
+bool cancel_requests(const lt::torrent_handle& handle) {
+    auto st = handle.status(lt::torrent_handle::query_pieces);
+    auto priorities = handle.get_piece_priorities();
+    for (int p = 0; p < static_cast<int>(priorities.size()); ++p) {
+        if (priorities[p] != lt::dont_download && !st.pieces.get_bit(lt::piece_index_t{p})) {
+            handle.set_piece_deadline(lt::piece_index_t{p}, 0);
+            handle.reset_piece_deadline(lt::piece_index_t{p});
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 SeekServeEngine::SeekServeEngine(const Config& config)
@@ -467,6 +487,19 @@ Result<void> SeekServeEngine::want_files(const TorrentId& id, FileIndex reader,
         // on a piece that lost its deadline.
         auto result = catalog_.set_wanted_files(id, reader, background, handle);
         if (!result) return result;
+
+        // What the reader that left asked for and has not come yet goes too
+        // (app BUG-201, DEC-330): libtorrent keeps the requests a deadline
+        // made when the deadline goes or the file's priority drops, and the
+        // peers go on sending them. On the phone the file left kept coming
+        // for 5 to 10 seconds after the player closed, and the file behind it
+        // waited (app P5-06, P5-09). What the requests of the files still
+        // wanted lose, libtorrent asks again.
+        if (old_reader >= 0 && !keeps_reader && reader != old_reader &&
+            cancel_requests(handle)) {
+            result = catalog_.set_wanted_files(id, reader, background, handle);
+            if (!result) return result;
+        }
 
         if (reader >= 0 && !keeps_reader) {
             auto state = std::make_unique<TorrentState>();
