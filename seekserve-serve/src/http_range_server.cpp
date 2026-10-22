@@ -55,7 +55,10 @@ static bool would_block(const boost::system::error_code& ec) {
 // The socket of one connection, non-blocking underneath, for Beast and Asio's
 // blocking calls: each wait for the client goes through wait_ready, so it can
 // end. Asio's own blocking calls wait in poll() without a limit, whatever
-// SO_RCVTIMEO and SO_SNDTIMEO say (app BUG-88).
+// SO_RCVTIMEO and SO_SNDTIMEO say (app BUG-88). The policies are also asked,
+// with a zero wait, before every read and write: a client that sends or
+// reads a byte at a time never makes a wait long, and must not outlive a
+// limit that counts from elsewhere.
 class ConnectionStream {
 public:
     using Policy = std::function<bool(Clock::duration)>;
@@ -68,6 +71,10 @@ public:
     template <typename Buffers>
     std::size_t read_some(const Buffers& buffers, boost::system::error_code& ec) {
         for (;;) {
+            if (!keep_reading_(Clock::duration::zero())) {
+                ec = net::error::timed_out;
+                return 0;
+            }
             auto n = socket_.read_some(buffers, ec);
             if (!would_block(ec)) return n;
             if (!wait_ready(socket_.native_handle(), POLLIN, keep_reading_)) {
@@ -88,6 +95,10 @@ public:
     template <typename Buffers>
     std::size_t write_some(const Buffers& buffers, boost::system::error_code& ec) {
         for (;;) {
+            if (!keep_writing_(Clock::duration::zero())) {
+                ec = net::error::timed_out;
+                return 0;
+            }
             auto n = socket_.write_some(buffers, ec);
             if (!would_block(ec)) return n;
             if (!wait_ready(socket_.native_handle(), POLLOUT, keep_writing_)) {
@@ -510,8 +521,21 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
 
     // The whole request has read_timeout to arrive.
     const auto request_deadline = Clock::now() + config_.read_timeout;
-    // Set once the connection is a stream's reader, for the write waits.
+    // Set once the connection is a stream's reader.
     std::optional<std::pair<std::string, std::uint64_t>> reading;
+    // Since when a newer request of the stream owns its position: the limit
+    // counts from then, whatever the client reads meanwhile.
+    std::optional<Clock::time_point> left_behind_since;
+    auto left_behind_too_long = [&]() {
+        if (!reading || !is_left_behind(reading->first, reading->second)) {
+            left_behind_since.reset();
+            return false;
+        }
+        auto now = Clock::now();
+        if (!left_behind_since) left_behind_since = now;
+        return config_.stale_reader_timeout.count() > 0 &&
+               now - *left_behind_since >= config_.stale_reader_timeout;
+    };
     ConnectionStream stream(
         socket,
         [&](Clock::duration) {
@@ -520,14 +544,11 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
         },
         [&](Clock::duration stalled) {
             if (!running_.load()) return false;
-            if (reading && is_left_behind(reading->first, reading->second)) {
-                if (config_.stale_reader_timeout.count() > 0 &&
-                    stalled >= config_.stale_reader_timeout) {
-                    spdlog::info("HttpRangeServer: closing a reader left behind that stopped reading");
-                    return false;
-                }
-                return true;
+            if (left_behind_too_long()) {
+                spdlog::info("HttpRangeServer: closing a reader left behind");
+                return false;
             }
+            if (left_behind_since) return true;
             if (config_.connection_timeout.count() > 0 && stalled >= config_.connection_timeout) {
                 spdlog::info("HttpRangeServer: closing a client that stopped reading");
                 return false;
@@ -656,9 +677,7 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
                                   offset);
                     return;
                 }
-                if (config_.stale_reader_timeout.count() > 0 &&
-                    now - *waiting_since >= config_.stale_reader_timeout &&
-                    is_left_behind(key, reader)) {
+                if (left_behind_too_long()) {
                     spdlog::info("HttpRangeServer: closing a reader left behind that waits at offset {}",
                                  offset);
                     return;

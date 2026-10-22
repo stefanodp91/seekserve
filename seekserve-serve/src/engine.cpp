@@ -737,8 +737,6 @@ void SeekServeEngine::update_shares(const TorrentId& id, FileIndex fi,
 Result<SeekServeEngine::Share> SeekServeEngine::open_share(const TorrentId& id, FileIndex fi,
                                                            const std::string& bind_address,
                                                            const std::string& peer_address) {
-    if (!server_running_.load()) return make_error_code(errc::session_not_started);
-
     // Two real addresses: never every network of the device, nor any client.
     for (const auto* address : {&bind_address, &peer_address}) {
         boost::system::error_code ec;
@@ -746,6 +744,11 @@ Result<SeekServeEngine::Share> SeekServeEngine::open_share(const TorrentId& id, 
         if (ec || parsed.is_unspecified()) return make_error_code(errc::invalid_argument);
     }
 
+    // Held until the share is in shares_: stop_server, which takes it after
+    // clearing server_running_, then closes it too, and update_shares, which
+    // takes it when the file gets a new stream or loses it, then updates it.
+    std::lock_guard shares_lock(shares_mu_);
+    if (!server_running_.load()) return make_error_code(errc::session_not_started);
     if (!sessions_->has_torrent(id)) return make_error_code(errc::torrent_not_found);
     std::shared_ptr<ByteSource> source;
     {
@@ -776,10 +779,7 @@ Result<SeekServeEngine::Share> SeekServeEngine::open_share(const TorrentId& id, 
     if (!started) return started.error();
 
     Share share{share_id, server->stream_url(share_id, 0)};
-    {
-        std::lock_guard lock(shares_mu_);
-        shares_[share_id] = ShareState{std::move(server), id, fi};
-    }
+    shares_[share_id] = ShareState{std::move(server), id, fi};
     spdlog::info("Engine: share opened on {} for one client", bind_address);
     return share;
 }

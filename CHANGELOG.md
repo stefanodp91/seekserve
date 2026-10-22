@@ -18,6 +18,9 @@
   `.AnIpv6StreamUrlHasItsAddressInBrackets`, `CApiTest.ShareNullArgs`, `.ShareNotFound`,
   `.AShareOpensClosesAndTakesTheReadTimeoutKey`. Two deliberate faults (no address check; a share that does not
   follow its file) were each caught, then removed.
+- `open_share` holds the shares' lock from its check that the servers run until the share is listed, so a
+  `stop_server` or a new stream for the file at that moment cannot leave a share open after the stop or on the old
+  stream (from an automated security review of the first version; not covered by a test).
 
 ### Fixed — Connections that hold a stream slot without moving
 
@@ -27,15 +30,17 @@
   calls wait in `poll()` whatever `SO_RCVTIMEO` and `SO_SNDTIMEO` say. A connection that sent no request, or a
   reader its client stopped reading, kept one of the `max_concurrent_streams` slots for good. Each connection's
   socket is now non-blocking underneath, and every wait for the client is a `poll()` in 500 ms slices that can
-  end: the whole request has `read_timeout` to arrive; a write to the newest reader of a stream may wait
-  `connection_timeout` (now 0 by default = no limit, which is what it was in fact, so a paused player keeps its
-  connection); a reader that a newer request of its stream left behind is closed once it has waited
-  `stale_reader_timeout` (new, 0 = no limit) for its client or for pieces. A connection over the limit takes the
+  end: the whole request has `read_timeout` to arrive, counted from the connection even if it comes a byte at a
+  time; a write to the newest reader of a stream may wait `connection_timeout` (now 0 by default = no limit,
+  which is what it was in fact, so a paused player keeps its connection); a reader that a newer request of its
+  stream left behind is closed `stale_reader_timeout` (new, 0 = no limit) after the newer request took over,
+  whatever its client reads meanwhile. A connection over the limit takes the
   place of the oldest reader left behind instead of being turned away: when the app's TV seeks it keeps up to four
   connections to the file (app WORK-37, DEC-609).
 - C API keys `read_timeout`, `connection_timeout`, `stale_reader_timeout` (seconds), read after every other key.
-- Tests: `HttpRangeServerLimitsTest.*` (7 for this, 5 seen failing first; the other 2 check that what was right
-  stays so).
+- Tests: `HttpRangeServerLimitsTest.*` (9 for this, 7 seen failing first; the other 2 check that what was right
+  stays so). Two of them (a request a byte at a time, a reader left behind that reads a little at a time) came
+  from an automated security review of the first version, which measured each limit from the last byte.
 
 ### Fixed — What a player that leaves asked for
 

@@ -76,14 +76,16 @@ Content-Length and Content-Range are relative to the **selected file**, not the 
   `poll()` in 500 ms slices that can end (Asio's blocking calls ignore `SO_RCVTIMEO` and
   `SO_SNDTIMEO`: before, these limits never applied; app BUG-88):
   - Request: the whole request has `ServerConfig::read_timeout` (default 30 s; 0 = no
-    limit) to arrive, then the connection is closed.
+    limit) to arrive, counted from the connection even if it comes a byte at a time; then
+    the connection is closed.
   - Newest reader of a stream: a write may wait `ServerConfig::connection_timeout` for the
     client to read (default 0 = as long as it stays connected: a paused player keeps its
     connection).
   - Reader left behind (a newer request of the same stream owns its position, as after a
-    seek): it is closed once it has waited `ServerConfig::stale_reader_timeout`, for its
-    client or for pieces (default 0 = no limit). A TV leaves its old connection open
-    without reading it when it seeks.
+    seek): it is closed `ServerConfig::stale_reader_timeout` after the newer request took
+    over, whatever its client reads meanwhile and whether it waits for its client or for
+    pieces (default 0 = no limit). A TV leaves its old connection open without reading it
+    when it seeks.
 
 ## Connection Limits
 

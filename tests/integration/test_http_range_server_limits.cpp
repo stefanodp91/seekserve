@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -183,6 +184,70 @@ TEST_F(HttpRangeServerLimitsTest, AHalfSentRequestIsClosedAfterTheReadTimeout) {
 
     EXPECT_TRUE(eventually([&] { return server_->active_connections() == 0; }))
         << "a request that never ended kept its slot";
+}
+
+// A client that sends its request a byte at a time never lets a wait for it
+// run long: the deadline counts from the connection, not from the last byte.
+TEST_F(HttpRangeServerLimitsTest, ARequestSentAByteAtATimeIsClosedAfterTheReadTimeout) {
+    ServerConfig config;
+    config.read_timeout = 1s;
+    start_server(config);
+
+    auto socket = connect();
+    ASSERT_TRUE(eventually([&] { return server_->active_connections() == 1; }));
+    std::atomic<bool> stop{false};
+    std::thread trickle([&] {
+        const std::string header = "GET /stream/abc123/0?token=testtoken HTTP/1.1\r\nX-Pad: ";
+        std::size_t i = 0;
+        while (!stop.load()) {
+            char c = i < header.size() ? header[i] : 'x';
+            ++i;
+            boost::system::error_code ec;
+            net::write(socket, net::buffer(&c, 1), ec);
+            if (ec) return;
+            std::this_thread::sleep_for(200ms);
+        }
+    });
+
+    EXPECT_TRUE(eventually([&] { return server_->active_connections() == 0; }, 4000ms))
+        << "a request that never ended kept its slot, one byte at a time";
+    stop.store(true);
+    trickle.join();
+}
+
+// A reader left behind whose client reads a little at a time is closed too:
+// the time counts from when a newer request took over, not from its last read.
+TEST_F(HttpRangeServerLimitsTest, AReaderLeftBehindThatReadsALittleAtATimeIsClosed) {
+    ServerConfig config;
+    config.stale_reader_timeout = 1s;
+    start_server(config);
+
+    auto old_reader = send_get("bytes=0-");
+    ASSERT_EQ(read_status(old_reader), "HTTP/1.1 206 Partial Content");
+    auto new_reader = send_get("bytes=8388608-");
+    ASSERT_EQ(read_status(new_reader), "HTTP/1.1 206 Partial Content");
+    ASSERT_TRUE(eventually([&] { return server_->active_connections() == 2; }));
+
+    std::atomic<bool> stop{false};
+    std::atomic<std::int64_t> received{0};
+    std::thread trickle([&] {
+        std::vector<char> buf(16384);
+        while (!stop.load()) {
+            boost::system::error_code ec;
+            auto n = old_reader.read_some(net::buffer(buf), ec);
+            if (ec) return;
+            received += static_cast<std::int64_t>(n);
+            std::this_thread::sleep_for(50ms);
+        }
+    });
+
+    EXPECT_TRUE(eventually([&] { return server_->active_connections() == 1; }, 4000ms))
+        << "the reader left behind kept its slot, reading a little at a time";
+    EXPECT_GT(received.load(), 256 * 1024) << "the client did not keep reading";
+    stop.store(true);
+    boost::system::error_code ignored;
+    old_reader.shutdown(tcp::socket::shutdown_both, ignored);  // already closed when it passed
+    trickle.join();
 }
 
 // After a seek the TV leaves its old connection open without reading it.
