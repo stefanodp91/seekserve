@@ -109,6 +109,13 @@ network, a TV (app WORK-37). Each share is a stream server of its own:
 - it follows its file when the file is selected again, answers 404 once the file is no
   longer the reader's, and lasts until `close_share` or `stop_server`.
 
+`open_file_share` (`ss_open_file_share`) does the same for a whole file on disk that is no
+torrent's, a download already complete (app WORK-37, DEC-627): the server reads it through a
+`FileSource` (no pieces, nothing to wait for, no scheduler), and it needs no torrent and no
+peer. Only a regular file inside the save path is taken, once every link and `..` is resolved
+(`std::filesystem::canonical`); the file is opened by its resolved path, without following a
+last link, and held open, so what is read is the file that was checked.
+
 The control API stays on 127.0.0.1.
 
 ## Authentication

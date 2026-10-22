@@ -182,6 +182,23 @@ ss_error_t ss_open_share(SeekServeEngine* engine,
                          const char* peer_address,
                          char** out_json);
 
+/* Opens a share of a whole file on disk that is no torrent's (app WORK-37,
+ * DEC-627): a download already complete, served like ss_open_share's file,
+ * to peer_address only, on bind_address only, with a random path and token.
+ * It needs no torrent and no peer, so it works while the session cannot
+ * reach the network. file_path must be an absolute path to a regular file
+ * inside save_path, once links and ".." are resolved. out_json as for
+ * ss_open_share. SS_ERR_INVALID_ARG for a missing argument, an address that
+ * is not one or a wildcard, a relative path, a path outside save_path, a
+ * folder; SS_ERR_NOT_FOUND for a path with nothing there; SS_ERR_IO before
+ * ss_start_server. Closed with ss_close_share. */
+__attribute__((visibility("default")))
+ss_error_t ss_open_file_share(SeekServeEngine* engine,
+                              const char* file_path,
+                              const char* bind_address,
+                              const char* peer_address,
+                              char** out_json);
+
 /* Closes a share and the connections it has; SS_ERR_NOT_FOUND for a share
  * that is not open. */
 __attribute__((visibility("default")))

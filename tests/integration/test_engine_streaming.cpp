@@ -303,5 +303,90 @@ TEST_F(EngineShareTest, AShareNeedsAFileAPlayerReadsAndTwoAddresses) {
               make_error_code(errc::session_not_started));
 }
 
+// A share of a file that is no torrent's (app WORK-37, DEC-627): a download
+// already complete, served from disk, with the engine holding no torrent at
+// all (as in the app's DoH mode, with the proxy closed). Only a file inside
+// the save path is served.
+class EngineFileShareTest : public EngineStreamingTest {
+protected:
+    void SetUp() override {
+        EngineStreamingTest::SetUp();
+        fs::create_directories(dir_ / "engine" / "Film (2024)");
+        film_ = (dir_ / "engine" / "Film (2024)" / "film.mkv").string();
+        std::vector<char> data(kSize);
+        for (int i = 0; i < kSize; ++i) data[i] = static_cast<char>(i * 17 + 3);
+        std::ofstream(film_, std::ios::binary).write(data.data(), kSize);
+        engine_ = std::make_unique<SeekServeEngine>(config_);
+        ASSERT_TRUE(engine_->start_server(0));
+    }
+
+    void TearDown() override {
+        engine_.reset();
+        EngineStreamingTest::TearDown();
+    }
+
+    std::unique_ptr<SeekServeEngine> engine_;
+    std::string film_;
+};
+
+TEST_F(EngineFileShareTest, AFileShareServesAFileWithoutAnyTorrent) {
+    ASSERT_TRUE(engine_->list_torrents().empty());
+    auto share = engine_->open_file_share(film_, "127.0.0.1", "127.0.0.1");
+    ASSERT_TRUE(share) << share.error().message();
+    const auto& url = share.value().url;
+    EXPECT_EQ(url.find("film"), std::string::npos) << url;
+    EXPECT_EQ(url.find("Film"), std::string::npos) << url;
+
+    auto reply = http_get(url, "bytes=" + std::to_string(3 * kPiece) + "-");
+    ASSERT_NE(reply.find("206"), std::string::npos) << reply.substr(0, 200);
+    EXPECT_NE(reply.find("video/x-matroska"), std::string::npos) << reply.substr(0, 300);
+    auto body = reply.substr(reply.find("\r\n\r\n") + 4);
+    ASSERT_EQ(static_cast<int>(body.size()), kSize - 3 * kPiece);
+    for (int i = 0; i < kSize - 3 * kPiece; ++i) {
+        ASSERT_EQ(body[i], static_cast<char>((3 * kPiece + i) * 17 + 3)) << "byte " << i;
+    }
+    EXPECT_TRUE(engine_->list_torrents().empty());
+
+    ASSERT_TRUE(engine_->close_share(share.value().id));
+    EXPECT_EQ(http_get(url, "bytes=0-"), "");
+}
+
+TEST_F(EngineFileShareTest, AFileShareTakesOnlyAFileInsideTheSavePath) {
+    auto outside = (dir_ / "outside.mkv").string();
+    std::ofstream(outside, std::ios::binary) << "not a download";
+    auto link = (dir_ / "engine" / "link.mkv").string();
+    fs::create_symlink(outside, link);
+    auto invalid = make_error_code(errc::invalid_argument);
+
+    EXPECT_EQ(engine_->open_file_share(outside, "127.0.0.1", "127.0.0.1").error(), invalid);
+    EXPECT_EQ(engine_->open_file_share((dir_ / "engine" / ".." / "outside.mkv").string(),
+                                       "127.0.0.1", "127.0.0.1").error(), invalid);
+    EXPECT_EQ(engine_->open_file_share(link, "127.0.0.1", "127.0.0.1").error(), invalid)
+        << "a link that leads out of the save path";
+    EXPECT_EQ(engine_->open_file_share((dir_ / "engine" / "Film (2024)").string(),
+                                       "127.0.0.1", "127.0.0.1").error(), invalid)
+        << "a folder";
+    EXPECT_EQ(engine_->open_file_share("relative/film.mkv", "127.0.0.1", "127.0.0.1").error(),
+              invalid);
+    EXPECT_EQ(engine_->open_file_share((dir_ / "engine" / "missing.mkv").string(),
+                                       "127.0.0.1", "127.0.0.1").error(),
+              make_error_code(errc::file_not_found));
+    EXPECT_EQ(engine_->open_file_share(film_, "0.0.0.0", "127.0.0.1").error(), invalid);
+    EXPECT_EQ(engine_->open_file_share(film_, "127.0.0.1", "192.0.2.1.5").error(), invalid);
+}
+
+TEST_F(EngineFileShareTest, AFileShareServesNoOtherAddressAndEndsWithTheServers) {
+    auto stranger = engine_->open_file_share(film_, "127.0.0.1", "192.0.2.1");
+    ASSERT_TRUE(stranger);
+    EXPECT_EQ(http_get(stranger.value().url, "bytes=0-"), "");
+
+    auto share = engine_->open_file_share(film_, "127.0.0.1", "127.0.0.1");
+    ASSERT_TRUE(share);
+    engine_->stop_server();
+    EXPECT_EQ(http_get(share.value().url, "bytes=0-"), "");
+    EXPECT_EQ(engine_->open_file_share(film_, "127.0.0.1", "127.0.0.1").error(),
+              make_error_code(errc::session_not_started));
+}
+
 }  // namespace
 }  // namespace seekserve

@@ -17,6 +17,7 @@
 #include "seekserve/error.hpp"
 #include "seekserve/config.hpp"
 #include "seekserve/byte_source.hpp"
+#include "seekserve/stream_source.hpp"
 
 namespace seekserve {
 
@@ -28,7 +29,7 @@ public:
     HttpRangeServer(net::io_context& ioc, const ServerConfig& config);
     ~HttpRangeServer();
 
-    void set_byte_source(std::shared_ptr<ByteSource> source,
+    void set_byte_source(std::shared_ptr<StreamSource> source,
                          const TorrentId& torrent_id,
                          FileIndex file_index,
                          const std::string& file_path = "");
@@ -54,7 +55,7 @@ public:
 
 private:
     struct SourceEntry {
-        std::shared_ptr<ByteSource> source;
+        std::shared_ptr<StreamSource> source;
         TorrentId torrent_id;
         FileIndex file_index;
         std::string file_path;  // for MIME type detection

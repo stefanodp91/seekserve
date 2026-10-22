@@ -213,7 +213,7 @@ HttpRangeServer::~HttpRangeServer() {
     stop();
 }
 
-void HttpRangeServer::set_byte_source(std::shared_ptr<ByteSource> source,
+void HttpRangeServer::set_byte_source(std::shared_ptr<StreamSource> source,
                                       const TorrentId& torrent_id,
                                       FileIndex file_index,
                                       const std::string& file_path) {
@@ -224,7 +224,7 @@ void HttpRangeServer::set_byte_source(std::shared_ptr<ByteSource> source,
 
 void HttpRangeServer::remove_byte_source(const TorrentId& torrent_id, FileIndex file_index) {
     std::string key = torrent_id + "/" + std::to_string(file_index);
-    std::shared_ptr<ByteSource> to_cancel;
+    std::shared_ptr<StreamSource> to_cancel;
     {
         std::lock_guard lock(sources_mu_);
         auto it = sources_.find(key);
@@ -237,7 +237,7 @@ void HttpRangeServer::remove_byte_source(const TorrentId& torrent_id, FileIndex 
 }
 
 void HttpRangeServer::remove_byte_sources_for_torrent(const TorrentId& torrent_id) {
-    std::vector<std::shared_ptr<ByteSource>> to_cancel;
+    std::vector<std::shared_ptr<StreamSource>> to_cancel;
     {
         std::lock_guard lock(sources_mu_);
         for (auto it = sources_.begin(); it != sources_.end(); ) {
@@ -592,7 +592,7 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
     // This ensures VLC gets data immediately instead of waiting for full buffering.
     auto stream_body = [&](http::status status, const std::string& ct,
                            std::int64_t cl, const std::string& cr,
-                           std::shared_ptr<ByteSource>& src,
+                           std::shared_ptr<StreamSource>& src,
                            std::int64_t start_offset, std::int64_t length,
                            const std::string& key, const TorrentId& torrent_id,
                            FileIndex file_index, std::uint64_t reader) {
@@ -739,7 +739,7 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
 
     // Find byte source
     std::string key = parsed->torrent_id + "/" + std::to_string(parsed->file_index);
-    std::shared_ptr<ByteSource> source;
+    std::shared_ptr<StreamSource> source;
     std::string content_type;
     {
         std::lock_guard lock(sources_mu_);

@@ -13,10 +13,11 @@
 #include "seekserve/error.hpp"
 #include "seekserve/byte_range_mapper.hpp"
 #include "seekserve/piece_availability.hpp"
+#include "seekserve/stream_source.hpp"
 
 namespace seekserve {
 
-class ByteSource {
+class ByteSource final : public StreamSource {
 public:
     ByteSource(lt::torrent_handle handle,
                FileIndex file_idx,
@@ -31,17 +32,17 @@ public:
     // Same, waiting at most `wait`: lets a caller wait in slices and check
     // in between whether it should keep waiting (see HttpRangeServer).
     Result<std::vector<std::uint8_t>> read(std::int64_t offset, std::int64_t len,
-                                           std::chrono::milliseconds wait);
+                                           std::chrono::milliseconds wait) override;
     bool is_available(std::int64_t offset, std::int64_t len) const;
     // Piece holding the byte at `offset`, or -1 once cancelled.
-    PieceIndex piece_at(std::int64_t offset) const;
+    PieceIndex piece_at(std::int64_t offset) const override;
     // Bytes from `offset` to the end of its piece, or -1 once cancelled.
-    std::int64_t bytes_to_piece_end(std::int64_t offset) const;
+    std::int64_t bytes_to_piece_end(std::int64_t offset) const override;
     void notify_piece_complete();
     // After cancel() returns no call touches the mapper or the availability
     // index again, so their owner may destroy them.
-    void cancel();
-    std::int64_t file_size() const;
+    void cancel() override;
+    std::int64_t file_size() const override;
 
 private:
     Result<std::vector<std::uint8_t>> read_from_disk(std::int64_t offset, std::int64_t len);

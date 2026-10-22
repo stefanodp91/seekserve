@@ -5,6 +5,7 @@
 #include <chrono>
 #include <atomic>
 #include <filesystem>
+#include <fstream>
 #include <vector>
 
 #include <sqlite3.h>
@@ -955,5 +956,46 @@ TEST_F(CApiTest, AShareOpensClosesAndTakesTheReadTimeoutKey) {
     EXPECT_EQ(ss_close_share(engine, share_id.c_str()), SS_OK);
     EXPECT_EQ(ss_close_share(engine, share_id.c_str()), SS_ERR_NOT_FOUND);
     ss_engine_destroy(engine);
+}
+
+TEST_F(CApiTest, FileShareNullArgs) {
+    char* json = nullptr;
+    auto* engine = reinterpret_cast<SeekServeEngine*>(0x1);
+    EXPECT_EQ(ss_open_file_share(nullptr, "/a", "127.0.0.1", "127.0.0.1", &json), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_open_file_share(engine, nullptr, "127.0.0.1", "127.0.0.1", &json), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_open_file_share(engine, "/a", nullptr, "127.0.0.1", &json), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_open_file_share(engine, "/a", "127.0.0.1", nullptr, &json), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_open_file_share(engine, "/a", "127.0.0.1", "127.0.0.1", nullptr), SS_ERR_INVALID_ARG);
+}
+
+// A file in the save path, with no torrent in the engine: opened, refused
+// outside the save path, closed with ss_close_share. Offline: no torrent.
+TEST_F(CApiTest, AFileShareOpensAFileOfTheSavePathOnly) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+    uint16_t port = 0;
+    ASSERT_EQ(ss_start_server(engine, 0, &port), SS_OK);
+    auto film = tmp_dir_ + "/film.mkv";
+    { std::ofstream(film, std::ios::binary) << std::string(1000, 'f'); }
+    auto outside = fs::path(tmp_dir_).parent_path() / "seekserve_capi_outside.mkv";
+    { std::ofstream(outside, std::ios::binary) << "x"; }
+
+    char* out = nullptr;
+    EXPECT_EQ(ss_open_file_share(engine, outside.c_str(), "127.0.0.1", "127.0.0.1", &out),
+              SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_open_file_share(engine, (tmp_dir_ + "/missing.mkv").c_str(), "127.0.0.1",
+                                 "127.0.0.1", &out), SS_ERR_NOT_FOUND);
+    ASSERT_EQ(ss_open_file_share(engine, film.c_str(), "127.0.0.1", "127.0.0.1", &out), SS_OK);
+    ASSERT_NE(out, nullptr);
+    std::string json(out);
+    ss_free_string(out);
+    EXPECT_EQ(json.find("film"), std::string::npos) << json;
+    auto start = json.find("\"share_id\":\"") + 12;
+    auto share_id = json.substr(start, json.find('"', start) - start);
+    EXPECT_EQ(ss_close_share(engine, share_id.c_str()), SS_OK);
+
+    ss_engine_destroy(engine);
+    fs::remove(outside);
 }
 

@@ -126,6 +126,12 @@ ss_error_t ss_open_share(SeekServeEngine* engine, const char* torrent_id,
                          int32_t file_index, const char* bind_address,
                          const char* peer_address, char** out_json);
 
+// The same for a whole file on disk that is no torrent's (a complete
+// download), inside save_path only
+ss_error_t ss_open_file_share(SeekServeEngine* engine, const char* file_path,
+                              const char* bind_address, const char* peer_address,
+                              char** out_json);
+
 // Close it and its connections
 ss_error_t ss_close_share(SeekServeEngine* engine, const char* share_id);
 ```
@@ -134,7 +140,10 @@ A share is a stream server of its own (app WORK-37): it listens on `bind_address
 (never `0.0.0.0` or `::`), serves `peer_address` only, and its URL has a random path and
 token, never the torrent's id. The file must be the one a player reads
 (`ss_select_file`, `ss_set_wanted_files`); the share follows it when it is selected again.
-Errors: `SS_ERR_INVALID_ARG` (missing argument, an address that is not one, a wildcard),
+`ss_open_file_share` needs no torrent and no peer (app DEC-627): `file_path` must be an absolute
+path to a regular file inside `save_path`, links and `..` resolved; a relative path, a path
+outside, a folder are `SS_ERR_INVALID_ARG`, a path with nothing there `SS_ERR_NOT_FOUND`.
+Errors of `ss_open_share`: `SS_ERR_INVALID_ARG` (missing argument, an address that is not one, a wildcard),
 `SS_ERR_NOT_FOUND` (no such torrent, a file no player reads, no such share), `SS_ERR_IO`
 (servers not started, an address that cannot be listened on). See `HTTP_RANGE_SPEC.md`.
 

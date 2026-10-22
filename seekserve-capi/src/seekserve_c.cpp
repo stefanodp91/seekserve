@@ -324,6 +324,23 @@ ss_error_t ss_open_share(SeekServeEngine* engine, const char* torrent_id,
     });
 }
 
+ss_error_t ss_open_file_share(SeekServeEngine* engine, const char* file_path,
+                              const char* bind_address, const char* peer_address,
+                              char** out_json) {
+    if (!engine || !file_path || !bind_address || !peer_address || !out_json) {
+        return SS_ERR_INVALID_ARG;
+    }
+
+    return guarded("ss_open_file_share", [&]() -> ss_error_t {
+        auto result = engine->open_file_share(file_path, bind_address, peer_address);
+        if (!result) return map_error(result.error());
+
+        json out = {{"share_id", result.value().id}, {"url", result.value().url}};
+        *out_json = alloc_string(out.dump());
+        return *out_json ? SS_OK : SS_ERR_IO;
+    });
+}
+
 ss_error_t ss_close_share(SeekServeEngine* engine, const char* share_id) {
     if (!engine || !share_id) return SS_ERR_INVALID_ARG;
 

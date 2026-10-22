@@ -36,6 +36,8 @@ Both HTTP servers bind to `127.0.0.1` by default. This prevents remote access to
   connection that does not come from the one client address it is given
 - Its URL carries neither the torrent's info hash nor the engine's token: a random share
   id and token (16 bytes each, `std::random_device`, a fresh value each time)
+- A file share (`ss_open_file_share`) serves only a regular file inside the save path, links
+  and `..` resolved first; anything else is refused. The file is held open from the check on
 - The client address check is no authentication (an address can be forged on the same
   network): the token is. Over plain HTTP, whoever can read the network sees the URL and
   the video

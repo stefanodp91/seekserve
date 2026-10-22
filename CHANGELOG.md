@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added — Shares of a file on disk
+
+#### `seekserve-core`, `seekserve-serve`, `seekserve-capi`
+
+- **`open_file_share`** (`ss_open_file_share`): a share of a whole file on disk that is no torrent's, a download
+  already complete, for the app's TV (app WORK-37, DEC-627): the same server and protections as `open_share`, with
+  no torrent and no peer, so it also works while the session cannot reach the network (the app's DoH mode). Only a
+  regular file inside the save path, once every link and `..` is resolved; the file is opened by its resolved path
+  without following a last link, and held open (`FileSource`, `pread`), so what is read is the file that was
+  checked. Closed with `close_share`.
+- **`StreamSource`**: what a stream server reads a file through, now an interface: `ByteSource` (a torrent's file)
+  and `FileSource` (a whole file) implement it.
+- Tests: `FileSourceTest.*` (5), `EngineFileShareTest.*` (3), `CApiTest.FileShareNullArgs`,
+  `.AFileShareOpensAFileOfTheSavePathOnly`. Written with the code, not seen failing first: two deliberate faults
+  (no save path check; a cancel that does nothing) were each caught, then removed.
+
 ### Added — Shares: a file served to one device of the home network
 
 #### `seekserve-serve`, `seekserve-capi`

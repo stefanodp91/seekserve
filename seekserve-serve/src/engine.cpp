@@ -1,6 +1,7 @@
 #include "seekserve/engine.hpp"
 #include "seekserve/resume_data.hpp"
 #include "seekserve/auth_utils.hpp"
+#include "seekserve/file_source.hpp"
 
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
@@ -734,32 +735,22 @@ void SeekServeEngine::update_shares(const TorrentId& id, FileIndex fi,
     }
 }
 
-Result<SeekServeEngine::Share> SeekServeEngine::open_share(const TorrentId& id, FileIndex fi,
-                                                           const std::string& bind_address,
-                                                           const std::string& peer_address) {
-    // Two real addresses: never every network of the device, nor any client.
+// Two real addresses: never every network of the device, nor any client.
+static bool are_share_addresses(const std::string& bind_address,
+                                const std::string& peer_address) {
     for (const auto* address : {&bind_address, &peer_address}) {
         boost::system::error_code ec;
         auto parsed = net::ip::make_address(*address, ec);
-        if (ec || parsed.is_unspecified()) return make_error_code(errc::invalid_argument);
+        if (ec || parsed.is_unspecified()) return false;
     }
+    return true;
+}
 
-    // Held until the share is in shares_: stop_server, which takes it after
-    // clearing server_running_, then closes it too, and update_shares, which
-    // takes it when the file gets a new stream or loses it, then updates it.
-    std::lock_guard shares_lock(shares_mu_);
-    if (!server_running_.load()) return make_error_code(errc::session_not_started);
-    if (!sessions_->has_torrent(id)) return make_error_code(errc::torrent_not_found);
-    std::shared_ptr<ByteSource> source;
-    {
-        std::lock_guard lock(mu_);
-        auto* state = find_state(id);
-        if (state && state->selected_file == fi) source = state->source;
-    }
-    if (!source) return make_error_code(errc::file_not_found);
-    auto file = catalog_.get_file(id, fi);
-    if (!file) return file.error();
-
+Result<SeekServeEngine::Share> SeekServeEngine::start_share(std::shared_ptr<StreamSource> source,
+                                                            const std::string& file_path,
+                                                            const std::string& bind_address,
+                                                            const std::string& peer_address,
+                                                            const TorrentId& torrent, FileIndex fi) {
     ServerConfig server_config = config_.server;
     server_config.bind_address = bind_address;
     server_config.allowed_peer = peer_address;
@@ -769,19 +760,83 @@ Result<SeekServeEngine::Share> SeekServeEngine::open_share(const TorrentId& id, 
     // The share's id is the stream id of its URL: random, like its token.
     auto share_id = random_hex(16);
     server->set_auth_token(random_hex(16));
-    server->set_byte_source(source, share_id, 0, file.value().path);
-    server->set_range_callback(
-        [this, id, fi](const ByteRange& range, const TorrentId&, FileIndex) {
-            on_stream_range(range, id, fi);
-        });
+    server->set_byte_source(std::move(source), share_id, 0, file_path);
+    if (!torrent.empty()) {
+        server->set_range_callback(
+            [this, torrent, fi](const ByteRange& range, const TorrentId&, FileIndex) {
+                on_stream_range(range, torrent, fi);
+            });
+    }
 
     auto started = server->start(0);
     if (!started) return started.error();
 
     Share share{share_id, server->stream_url(share_id, 0)};
-    shares_[share_id] = ShareState{std::move(server), id, fi};
+    shares_[share_id] = ShareState{std::move(server), torrent, fi};
     spdlog::info("Engine: share opened on {} for one client", bind_address);
     return share;
+}
+
+Result<SeekServeEngine::Share> SeekServeEngine::open_share(const TorrentId& id, FileIndex fi,
+                                                           const std::string& bind_address,
+                                                           const std::string& peer_address) {
+    if (!are_share_addresses(bind_address, peer_address)) {
+        return make_error_code(errc::invalid_argument);
+    }
+
+    // Held until the share is in shares_: stop_server, which takes it after
+    // clearing server_running_, then closes it too, and update_shares, which
+    // takes it when the file gets a new stream or loses it, then updates it.
+    std::lock_guard shares_lock(shares_mu_);
+    if (!server_running_.load()) return make_error_code(errc::session_not_started);
+    if (!sessions_->has_torrent(id)) return make_error_code(errc::torrent_not_found);
+    std::shared_ptr<StreamSource> source;
+    {
+        std::lock_guard lock(mu_);
+        auto* state = find_state(id);
+        if (state && state->selected_file == fi) source = state->source;
+    }
+    if (!source) return make_error_code(errc::file_not_found);
+    auto file = catalog_.get_file(id, fi);
+    if (!file) return file.error();
+
+    return start_share(std::move(source), file.value().path, bind_address, peer_address, id, fi);
+}
+
+Result<SeekServeEngine::Share> SeekServeEngine::open_file_share(const std::string& file_path,
+                                                                const std::string& bind_address,
+                                                                const std::string& peer_address) {
+    namespace fs = std::filesystem;
+    if (!are_share_addresses(bind_address, peer_address)) {
+        return make_error_code(errc::invalid_argument);
+    }
+
+    // Only a file inside the save path, once every link and ".." of both
+    // paths is resolved.
+    fs::path given(file_path);
+    if (!given.is_absolute()) return make_error_code(errc::invalid_argument);
+    std::error_code ec;
+    auto file = fs::canonical(given, ec);
+    if (ec) {
+        return make_error_code(ec == std::errc::no_such_file_or_directory
+                                   ? errc::file_not_found : errc::invalid_argument);
+    }
+    auto root = fs::canonical(config_.session.save_path, ec);
+    if (ec) return make_error_code(errc::invalid_argument);
+    auto inside = file.lexically_relative(root);
+    if (inside.empty() || *inside.begin() == ".." || inside == ".") {
+        spdlog::warn("Engine: a file share outside the save path was refused");
+        return make_error_code(errc::invalid_argument);
+    }
+
+    // Opened by its resolved path, which FileSource then holds: no link in
+    // between, and the file read is the file checked here.
+    auto source = FileSource::open(file.string());
+    if (!source) return source.error();
+
+    std::lock_guard shares_lock(shares_mu_);
+    if (!server_running_.load()) return make_error_code(errc::session_not_started);
+    return start_share(source.value(), file.string(), bind_address, peer_address, {}, -1);
 }
 
 Result<void> SeekServeEngine::close_share(const std::string& share_id) {

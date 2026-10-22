@@ -101,6 +101,15 @@ public:
     Result<Share> open_share(const TorrentId& id, FileIndex fi,
                              const std::string& bind_address,
                              const std::string& peer_address);
+    // A share of a whole file on disk, no torrent's (app WORK-37, DEC-627):
+    // a download already complete, served the same way, with no torrent and
+    // no peer, so also while the session cannot reach the network (the
+    // app's DoH mode). Only a regular file inside the save path, links
+    // resolved: anything else is errc::invalid_argument, a path with nothing
+    // there errc::file_not_found. It lasts until close_share or stop_server.
+    Result<Share> open_file_share(const std::string& file_path,
+                                  const std::string& bind_address,
+                                  const std::string& peer_address);
     Result<void> close_share(const std::string& share_id);
 
     // Proxy configuration (runtime update via apply_settings)
@@ -136,6 +145,13 @@ private:
     static void stop_and_drain(HttpRangeServer& server);
     // The shares of file `fi` of `id` (any file with fi = -1) get `source`,
     // or lose theirs with nullptr.
+    // A share's own server, for one client, serving `source`; started and
+    // listed. Called with shares_mu_ held and the servers running.
+    Result<Share> start_share(std::shared_ptr<StreamSource> source,
+                              const std::string& file_path,
+                              const std::string& bind_address,
+                              const std::string& peer_address,
+                              const TorrentId& torrent, FileIndex fi);
     void update_shares(const TorrentId& id, FileIndex fi,
                        const std::shared_ptr<ByteSource>& source,
                        const std::string& file_path = "");
@@ -189,8 +205,8 @@ private:
 
     struct ShareState {
         std::shared_ptr<HttpRangeServer> server;
-        TorrentId torrent;
-        FileIndex file;
+        TorrentId torrent;  // empty for a file share
+        FileIndex file;     // -1 for a file share
     };
     // By share id, which is also the share's stream id in its URL.
     std::unordered_map<std::string, ShareState> shares_;
