@@ -258,6 +258,25 @@ TEST_F(EngineShareTest, AClosedShareAnswersNoMore) {
               make_error_code(errc::file_not_found));
 }
 
+// The share borrows the stream of the player's file: closing it leaves that
+// stream to the player, which goes on reading (app WORK-37, the phone taking
+// the film back from the TV).
+TEST_F(EngineShareTest, ClosingAShareLeavesThePlayersStream) {
+    auto share = engine_->open_share(id_, 0, "127.0.0.1", "127.0.0.1");
+    ASSERT_TRUE(share);
+    ASSERT_NE(http_get(share.value().url, "bytes=0-").find("206"), std::string::npos);
+    ASSERT_TRUE(engine_->close_share(share.value().id));
+
+    auto reply = http_get(engine_->get_stream_url(id_, 0).value(),
+                          "bytes=" + std::to_string(3 * kPiece) + "-");
+    ASSERT_NE(reply.find("206"), std::string::npos) << reply.substr(0, 200);
+    // The headers go out before the first read: a cancelled stream would
+    // answer 206 and send no body.
+    auto body = reply.substr(reply.find("\r\n\r\n") + 4);
+    ASSERT_EQ(static_cast<int>(body.size()), 13 * kPiece);
+    EXPECT_EQ(body[0], static_cast<char>(3 * kPiece * 31 + 7));
+}
+
 TEST_F(EngineShareTest, StoppingTheServersClosesTheShares) {
     auto share = engine_->open_share(id_, 0, "127.0.0.1", "127.0.0.1");
     ASSERT_TRUE(share);

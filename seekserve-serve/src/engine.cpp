@@ -846,6 +846,11 @@ Result<void> SeekServeEngine::close_share(const std::string& share_id) {
         auto it = shares_.find(share_id);
         if (it == shares_.end()) return make_error_code(errc::file_not_found);
         server = std::move(it->second.server);
+        // A torrent's share borrows the stream of the file a player reads:
+        // stopping the share's server would cancel it for the player too,
+        // which then waits for ever (app WORK-37). A file share owns its
+        // FileSource, which stop() cancels.
+        if (!it->second.torrent.empty()) server->detach_byte_source(share_id, 0);
         shares_.erase(it);
     }
     stop_and_drain(*server);

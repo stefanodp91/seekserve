@@ -236,6 +236,12 @@ void HttpRangeServer::remove_byte_source(const TorrentId& torrent_id, FileIndex 
     if (to_cancel) to_cancel->cancel();
 }
 
+void HttpRangeServer::detach_byte_source(const TorrentId& torrent_id, FileIndex file_index) {
+    std::string key = torrent_id + "/" + std::to_string(file_index);
+    std::lock_guard lock(sources_mu_);
+    sources_.erase(key);
+}
+
 void HttpRangeServer::remove_byte_sources_for_torrent(const TorrentId& torrent_id) {
     std::vector<std::shared_ptr<StreamSource>> to_cancel;
     {

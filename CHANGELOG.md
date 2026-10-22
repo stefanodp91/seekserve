@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed — Closing a share no longer stops the player's stream
+
+#### `seekserve-serve`
+
+- **`close_share`** of a torrent's share left the player of the phone without data for ever: the share borrows the
+  stream (`ByteSource`) of the file a player reads, and stopping the share's server cancelled it for the player too,
+  who then got no byte and retried in a loop (app WORK-37, seen on a Pixel 9 Pro taking the film back from the TV).
+  The share's server now lets the stream go without cancelling it (`HttpRangeServer::detach_byte_source`); a file
+  share still cancels its own `FileSource`.
+- Tests: `EngineShareTest.ClosingAShareLeavesThePlayersStream`. Not run here (no toolchain in the session that
+  wrote it): to run on the Mac.
+
 ### Added — Shares of a file on disk
 
 #### `seekserve-core`, `seekserve-serve`, `seekserve-capi`
