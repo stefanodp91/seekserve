@@ -84,7 +84,24 @@ public:
 
     // Server lifecycle
     Result<std::uint16_t> start_server(std::uint16_t port = 0);
+    // Also closes every share.
     void stop_server();
+
+    // Shares (app WORK-37): the file a player reads, served to one other
+    // device, a TV, by a server of its own on `bind_address` (the device's
+    // address on that network, never a wildcard) that serves only
+    // `peer_address`. Its URL has a random path and token of its own, never
+    // the torrent's id, which is its info hash. The share follows its file
+    // when the file is selected again; it stays until close_share or
+    // stop_server, and answers 404 once the file is no longer the reader's.
+    struct Share {
+        std::string id;   // for close_share
+        std::string url;  // for the device
+    };
+    Result<Share> open_share(const TorrentId& id, FileIndex fi,
+                             const std::string& bind_address,
+                             const std::string& peer_address);
+    Result<void> close_share(const std::string& share_id);
 
     // Proxy configuration (runtime update via apply_settings)
     void set_proxy(const ProxyConfig& proxy);
@@ -110,6 +127,18 @@ private:
     // which is what select_file has always done.
     Result<void> want_files(const TorrentId& id, FileIndex reader,
                             FileIndex background, bool new_reader);
+
+    // A range request or a reader's progress on a stream of file `fi` of
+    // `id`, from the engine's server or from a share.
+    void on_stream_range(const ByteRange& range, const TorrentId& id, FileIndex fi);
+    // Stops a stream server and waits, bounded, for its connection threads,
+    // which own sockets of ioc_.
+    static void stop_and_drain(HttpRangeServer& server);
+    // The shares of file `fi` of `id` (any file with fi = -1) get `source`,
+    // or lose theirs with nullptr.
+    void update_shares(const TorrentId& id, FileIndex fi,
+                       const std::shared_ptr<ByteSource>& source,
+                       const std::string& file_path = "");
 
     void wire_alerts();
     void start_tick_timer();
@@ -157,6 +186,15 @@ private:
     mutable std::mutex event_mu_;
 
     std::atomic<bool> server_running_{false};
+
+    struct ShareState {
+        std::shared_ptr<HttpRangeServer> server;
+        TorrentId torrent;
+        FileIndex file;
+    };
+    // By share id, which is also the share's stream id in its URL.
+    std::unordered_map<std::string, ShareState> shares_;
+    std::mutex shares_mu_;
 
     // Resume data requests libtorrent has not answered yet.
     int resume_pending_ = 0;

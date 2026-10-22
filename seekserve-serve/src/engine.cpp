@@ -1,5 +1,6 @@
 #include "seekserve/engine.hpp"
 #include "seekserve/resume_data.hpp"
+#include "seekserve/auth_utils.hpp"
 
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
@@ -295,6 +296,7 @@ Result<void> SeekServeEngine::remove_torrent(const TorrentId& id, bool delete_fi
     if (http_server_) {
         http_server_->remove_byte_sources_for_torrent(id);
     }
+    update_shares(id, -1, nullptr);
 
     // Now safe to destroy TorrentState
     {
@@ -464,6 +466,7 @@ Result<void> SeekServeEngine::want_files(const TorrentId& id, FileIndex reader,
             if (http_server_) {
                 http_server_->remove_byte_source(id, old_reader);
             }
+            update_shares(id, old_reader, nullptr);
             std::unique_ptr<TorrentState> gone;
             {
                 std::lock_guard lock(mu_);
@@ -544,6 +547,7 @@ Result<void> SeekServeEngine::want_files(const TorrentId& id, FileIndex reader,
             if (http_server_) {
                 http_server_->set_byte_source(state->source, id, reader, file_info.value().path);
             }
+            update_shares(id, reader, state->source, file_info.value().path);
 
             {
                 std::lock_guard lock(mu_);
@@ -658,12 +662,7 @@ Result<std::uint16_t> SeekServeEngine::start_server(std::uint16_t port) {
     // selection was replaced or removed (app BUG-83).
     http_server_->set_range_callback(
         [this](const ByteRange& range, const TorrentId& id, FileIndex fi) {
-            std::lock_guard lock(mu_);
-            auto* state = find_state(id);
-            if (!state || !state->scheduler || state->selected_file != fi) return;
-            auto handle = sessions_->get_handle(id);
-            if (!handle.is_valid()) return;
-            state->scheduler->on_range_request(range, handle);
+            on_stream_range(range, id, fi);
         });
 
     api_server_ = std::make_unique<ControlApiServer>(
@@ -698,8 +697,117 @@ Result<std::uint16_t> SeekServeEngine::start_server(std::uint16_t port) {
     return api_result.value();
 }
 
+void SeekServeEngine::on_stream_range(const ByteRange& range, const TorrentId& id,
+                                      FileIndex fi) {
+    std::lock_guard lock(mu_);
+    auto* state = find_state(id);
+    if (!state || !state->scheduler || state->selected_file != fi) return;
+    auto handle = sessions_->get_handle(id);
+    if (!handle.is_valid()) return;
+    state->scheduler->on_range_request(range, handle);
+}
+
+void SeekServeEngine::stop_and_drain(HttpRangeServer& server) {
+    server.stop();
+    // stop() has woken every connection thread. Bounded, so a stuck thread
+    // cannot hold up the caller.
+    auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (server.active_connections() > 0 && std::chrono::steady_clock::now() < until) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (server.active_connections() > 0) {
+        spdlog::warn("Engine: {} stream connection(s) still ending", server.active_connections());
+    }
+}
+
+void SeekServeEngine::update_shares(const TorrentId& id, FileIndex fi,
+                                    const std::shared_ptr<ByteSource>& source,
+                                    const std::string& file_path) {
+    std::lock_guard lock(shares_mu_);
+    for (auto& [share_id, share] : shares_) {
+        if (share.torrent != id || (fi >= 0 && share.file != fi)) continue;
+        if (source) {
+            share.server->set_byte_source(source, share_id, 0, file_path);
+        } else {
+            share.server->remove_byte_source(share_id, 0);
+        }
+    }
+}
+
+Result<SeekServeEngine::Share> SeekServeEngine::open_share(const TorrentId& id, FileIndex fi,
+                                                           const std::string& bind_address,
+                                                           const std::string& peer_address) {
+    if (!server_running_.load()) return make_error_code(errc::session_not_started);
+
+    // Two real addresses: never every network of the device, nor any client.
+    for (const auto* address : {&bind_address, &peer_address}) {
+        boost::system::error_code ec;
+        auto parsed = net::ip::make_address(*address, ec);
+        if (ec || parsed.is_unspecified()) return make_error_code(errc::invalid_argument);
+    }
+
+    if (!sessions_->has_torrent(id)) return make_error_code(errc::torrent_not_found);
+    std::shared_ptr<ByteSource> source;
+    {
+        std::lock_guard lock(mu_);
+        auto* state = find_state(id);
+        if (state && state->selected_file == fi) source = state->source;
+    }
+    if (!source) return make_error_code(errc::file_not_found);
+    auto file = catalog_.get_file(id, fi);
+    if (!file) return file.error();
+
+    ServerConfig server_config = config_.server;
+    server_config.bind_address = bind_address;
+    server_config.allowed_peer = peer_address;
+    server_config.stream_port = 0;
+    auto server = std::make_shared<HttpRangeServer>(ioc_, server_config);
+
+    // The share's id is the stream id of its URL: random, like its token.
+    auto share_id = random_hex(16);
+    server->set_auth_token(random_hex(16));
+    server->set_byte_source(source, share_id, 0, file.value().path);
+    server->set_range_callback(
+        [this, id, fi](const ByteRange& range, const TorrentId&, FileIndex) {
+            on_stream_range(range, id, fi);
+        });
+
+    auto started = server->start(0);
+    if (!started) return started.error();
+
+    Share share{share_id, server->stream_url(share_id, 0)};
+    {
+        std::lock_guard lock(shares_mu_);
+        shares_[share_id] = ShareState{std::move(server), id, fi};
+    }
+    spdlog::info("Engine: share opened on {} for one client", bind_address);
+    return share;
+}
+
+Result<void> SeekServeEngine::close_share(const std::string& share_id) {
+    std::shared_ptr<HttpRangeServer> server;
+    {
+        std::lock_guard lock(shares_mu_);
+        auto it = shares_.find(share_id);
+        if (it == shares_.end()) return make_error_code(errc::file_not_found);
+        server = std::move(it->second.server);
+        shares_.erase(it);
+    }
+    stop_and_drain(*server);
+    spdlog::info("Engine: share closed");
+    return {};
+}
+
 void SeekServeEngine::stop_server() {
     if (!server_running_.exchange(false)) return;
+
+    std::vector<std::shared_ptr<HttpRangeServer>> shares;
+    {
+        std::lock_guard lock(shares_mu_);
+        for (auto& [share_id, share] : shares_) shares.push_back(std::move(share.server));
+        shares_.clear();
+    }
+    for (auto& share : shares) stop_and_drain(*share);
 
     if (api_server_) api_server_->stop();
     if (http_server_) http_server_->stop();
@@ -713,19 +821,8 @@ void SeekServeEngine::stop_server() {
     }
 
     // Stream connection threads own sockets of ioc_: let them end before
-    // ioc_ can go (stop() has woken them all). Bounded, so a stuck thread
-    // cannot hold up the shutdown.
-    if (http_server_) {
-        auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
-        while (http_server_->active_connections() > 0 &&
-               std::chrono::steady_clock::now() < until) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-        if (http_server_->active_connections() > 0) {
-            spdlog::warn("Engine: {} stream connection(s) still ending",
-                         http_server_->active_connections());
-        }
-    }
+    // ioc_ can go.
+    if (http_server_) stop_and_drain(*http_server_);
 
     if (work_guard_) {
         work_guard_.reset();

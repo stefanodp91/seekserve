@@ -125,6 +125,15 @@ static seekserve::SeekServeEngine::Config parse_config(const char* config_json) 
         if (j.contains("min_reconnect_time"))
             config.session.min_reconnect_time =
                 std::chrono::seconds(j["min_reconnect_time"].get<int>());
+        // After every other key too (app BUG-88, WORK-37).
+        if (j.contains("read_timeout"))
+            config.server.read_timeout = std::chrono::seconds(j["read_timeout"].get<int>());
+        if (j.contains("connection_timeout"))
+            config.server.connection_timeout =
+                std::chrono::seconds(j["connection_timeout"].get<int>());
+        if (j.contains("stale_reader_timeout"))
+            config.server.stale_reader_timeout =
+                std::chrono::seconds(j["stale_reader_timeout"].get<int>());
     } catch (const std::exception& e) {
         spdlog::warn("C API: failed to parse config JSON: {}", e.what());
     }
@@ -295,6 +304,32 @@ ss_error_t ss_get_stream_url(SeekServeEngine* engine, const char* torrent_id,
 
         *out_url = alloc_string(result.value());
         return *out_url ? SS_OK : SS_ERR_IO;
+    });
+}
+
+ss_error_t ss_open_share(SeekServeEngine* engine, const char* torrent_id,
+                         int32_t file_index, const char* bind_address,
+                         const char* peer_address, char** out_json) {
+    if (!engine || !torrent_id || !bind_address || !peer_address || !out_json) {
+        return SS_ERR_INVALID_ARG;
+    }
+
+    return guarded("ss_open_share", [&]() -> ss_error_t {
+        auto result = engine->open_share(torrent_id, file_index, bind_address, peer_address);
+        if (!result) return map_error(result.error());
+
+        json out = {{"share_id", result.value().id}, {"url", result.value().url}};
+        *out_json = alloc_string(out.dump());
+        return *out_json ? SS_OK : SS_ERR_IO;
+    });
+}
+
+ss_error_t ss_close_share(SeekServeEngine* engine, const char* share_id) {
+    if (!engine || !share_id) return SS_ERR_INVALID_ARG;
+
+    return guarded("ss_close_share", [&]() -> ss_error_t {
+        auto result = engine->close_share(share_id);
+        return result ? SS_OK : map_error(result.error());
     });
 }
 

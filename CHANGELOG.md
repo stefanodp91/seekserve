@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Added — Shares: a file served to one device of the home network
+
+#### `seekserve-serve`, `seekserve-capi`
+
+- **`open_share` / `close_share`** (`ss_open_share`, `ss_close_share`): the file a player reads, served to one
+  other device, a TV (app WORK-37, DEC-613), by a stream server of its own. It listens on the one address it is
+  given (never a wildcard) and closes, without an answer, every connection that does not come from the one client
+  address it is given (`ServerConfig::allowed_peer`). Its URL has a random share id and token (16 bytes each from
+  `std::random_device`), never the torrent's info hash, which tells anyone what the video is, nor the engine's
+  token. Its reads move the file's scheduler; it follows the file when it is selected again, answers 404 once the
+  file is no longer the reader's, and lasts until `close_share` or `stop_server`. The control API stays on
+  127.0.0.1. A stream URL on an IPv6 address has it in brackets.
+- Tests: `EngineShareTest.*` (7), `HttpRangeServerLimitsTest.OnlyTheAllowedPeerIsServed`, `.TheAllowedPeerIsServed`,
+  `.AnIpv6StreamUrlHasItsAddressInBrackets`, `CApiTest.ShareNullArgs`, `.ShareNotFound`,
+  `.AShareOpensClosesAndTakesTheReadTimeoutKey`. Two deliberate faults (no address check; a share that does not
+  follow its file) were each caught, then removed.
+
+### Fixed — Connections that hold a stream slot without moving
+
+#### `seekserve-serve`, `seekserve-capi`
+
+- **Stream server** (app BUG-88): `read_timeout` and `connection_timeout` never applied, because Asio's blocking
+  calls wait in `poll()` whatever `SO_RCVTIMEO` and `SO_SNDTIMEO` say. A connection that sent no request, or a
+  reader its client stopped reading, kept one of the `max_concurrent_streams` slots for good. Each connection's
+  socket is now non-blocking underneath, and every wait for the client is a `poll()` in 500 ms slices that can
+  end: the whole request has `read_timeout` to arrive; a write to the newest reader of a stream may wait
+  `connection_timeout` (now 0 by default = no limit, which is what it was in fact, so a paused player keeps its
+  connection); a reader that a newer request of its stream left behind is closed once it has waited
+  `stale_reader_timeout` (new, 0 = no limit) for its client or for pieces. A connection over the limit takes the
+  place of the oldest reader left behind instead of being turned away: when the app's TV seeks it keeps up to four
+  connections to the file (app WORK-37, DEC-609).
+- C API keys `read_timeout`, `connection_timeout`, `stale_reader_timeout` (seconds), read after every other key.
+- Tests: `HttpRangeServerLimitsTest.*` (7 for this, 5 seen failing first; the other 2 check that what was right
+  stays so).
+
 ### Fixed — What a player that leaves asked for
 
 #### `seekserve-serve`

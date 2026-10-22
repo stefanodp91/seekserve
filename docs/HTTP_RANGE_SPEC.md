@@ -72,14 +72,42 @@ Content-Length and Content-Range are relative to the **selected file**, not the 
 - Body is streamed in 64KB chunks directly from disk
 - Headers are sent immediately via Beast; body via raw Asio writes
 - ByteSource blocks if requested pieces are not yet downloaded
-- Read timeout: 30 seconds (configurable via `ServerConfig::read_timeout`)
-- Send timeout: 60 seconds (configurable via `ServerConfig::connection_timeout`)
+- Each connection's socket is non-blocking underneath, and every wait for the client is a
+  `poll()` in 500 ms slices that can end (Asio's blocking calls ignore `SO_RCVTIMEO` and
+  `SO_SNDTIMEO`: before, these limits never applied; app BUG-88):
+  - Request: the whole request has `ServerConfig::read_timeout` (default 30 s; 0 = no
+    limit) to arrive, then the connection is closed.
+  - Newest reader of a stream: a write may wait `ServerConfig::connection_timeout` for the
+    client to read (default 0 = as long as it stays connected: a paused player keeps its
+    connection).
+  - Reader left behind (a newer request of the same stream owns its position, as after a
+    seek): it is closed once it has waited `ServerConfig::stale_reader_timeout`, for its
+    client or for pieces (default 0 = no limit). A TV leaves its old connection open
+    without reading it when it seeks.
 
 ## Connection Limits
 
 - Max concurrent connections: `ServerConfig::max_concurrent_streams` (default: 4)
-- Connections exceeding the limit are immediately closed
-- Loopback binding only (127.0.0.1 by default)
+- A connection over the limit takes the place of the oldest reader left behind, which is
+  closed; with none, it is closed at once (app BUG-88)
+- Loopback binding only (127.0.0.1 by default), except for shares
+
+## Shares
+
+`open_share` (`ss_open_share`) serves the file a player reads to one other device of a
+network, a TV (app WORK-37). Each share is a stream server of its own:
+
+- it listens on the address it is given, never a wildcard (`0.0.0.0`, `::`);
+- it serves one client address (`ServerConfig::allowed_peer`): any other connection is
+  closed at once, without an answer, and takes no slot;
+- its URL is `http://<address>:<port>/stream/<share id>/0?token=<token>`, where the share
+  id and the token are 16 random bytes each, in hex, from the system's secure source: the
+  torrent's id (its info hash) is not in it, and the engine's token does not open it;
+- its reads move the file's scheduler like the engine's own stream;
+- it follows its file when the file is selected again, answers 404 once the file is no
+  longer the reader's, and lasts until `close_share` or `stop_server`.
+
+The control API stays on 127.0.0.1.
 
 ## Authentication
 

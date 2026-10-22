@@ -73,12 +73,25 @@ private:
     bool report_if_owner(const std::string& key, std::uint64_t reader,
                          const ByteRange& range, const TorrentId& id, FileIndex fi);
     void release_reader(const std::string& key, std::uint64_t reader);
+    // True when a newer request of the stream owns its position: the client
+    // of `reader` has most likely moved on (a seek) without closing it.
+    bool is_left_behind(const std::string& key, std::uint64_t reader);
+    // Shuts down the connection of the oldest reader left behind, if any
+    // (app BUG-88). False when there is none.
+    bool close_oldest_reader_left_behind();
+
+    struct ReaderTag {
+        std::string key;
+        std::uint64_t reader;
+    };
 
     // Shared with the connection threads, which can outlive the server.
     struct Connections {
         std::atomic<int> active{0};
         std::mutex mu;
         std::unordered_set<int> fds;  // sockets still open, for stop()
+        // The connections that are a stream's reader, by fd.
+        std::unordered_map<int, ReaderTag> readers;
     };
 
     net::io_context& ioc_;

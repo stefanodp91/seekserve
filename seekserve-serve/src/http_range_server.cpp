@@ -12,9 +12,11 @@
 
 #include <cerrno>
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <regex>
 #include <thread>
+#include <poll.h>
 #include <sys/socket.h>
 
 namespace seekserve {
@@ -29,6 +31,85 @@ static const std::int64_t kChunkSize = 65536; // 64 KB
 // slices, so a scheduler moved elsewhere comes back to it.
 static constexpr std::chrono::milliseconds kWaitSlice{500};
 static constexpr int kReportEverySlices = 4;
+
+using Clock = std::chrono::steady_clock;
+
+// Waits until the socket is ready for `events`, asking `keep_waiting`, with
+// how long it has waited, between slices. False when it said to stop.
+static bool wait_ready(int fd, short events,
+                       const std::function<bool(Clock::duration)>& keep_waiting) {
+    const auto since = Clock::now();
+    for (;;) {
+        pollfd p{fd, events, 0};
+        int r = ::poll(&p, 1, static_cast<int>(kWaitSlice.count()));
+        // Ready, closed or failed: the next call on the socket says which.
+        if (r > 0 || (r < 0 && errno != EINTR)) return true;
+        if (!keep_waiting(Clock::now() - since)) return false;
+    }
+}
+
+static bool would_block(const boost::system::error_code& ec) {
+    return ec == net::error::would_block || ec == net::error::try_again;
+}
+
+// The socket of one connection, non-blocking underneath, for Beast and Asio's
+// blocking calls: each wait for the client goes through wait_ready, so it can
+// end. Asio's own blocking calls wait in poll() without a limit, whatever
+// SO_RCVTIMEO and SO_SNDTIMEO say (app BUG-88).
+class ConnectionStream {
+public:
+    using Policy = std::function<bool(Clock::duration)>;
+
+    ConnectionStream(tcp::socket& socket, Policy keep_reading, Policy keep_writing)
+        : socket_(socket)
+        , keep_reading_(std::move(keep_reading))
+        , keep_writing_(std::move(keep_writing)) {}
+
+    template <typename Buffers>
+    std::size_t read_some(const Buffers& buffers, boost::system::error_code& ec) {
+        for (;;) {
+            auto n = socket_.read_some(buffers, ec);
+            if (!would_block(ec)) return n;
+            if (!wait_ready(socket_.native_handle(), POLLIN, keep_reading_)) {
+                ec = net::error::timed_out;
+                return 0;
+            }
+        }
+    }
+
+    template <typename Buffers>
+    std::size_t read_some(const Buffers& buffers) {
+        boost::system::error_code ec;
+        auto n = read_some(buffers, ec);
+        if (ec) throw boost::system::system_error(ec);
+        return n;
+    }
+
+    template <typename Buffers>
+    std::size_t write_some(const Buffers& buffers, boost::system::error_code& ec) {
+        for (;;) {
+            auto n = socket_.write_some(buffers, ec);
+            if (!would_block(ec)) return n;
+            if (!wait_ready(socket_.native_handle(), POLLOUT, keep_writing_)) {
+                ec = net::error::timed_out;
+                return 0;
+            }
+        }
+    }
+
+    template <typename Buffers>
+    std::size_t write_some(const Buffers& buffers) {
+        boost::system::error_code ec;
+        auto n = write_some(buffers, ec);
+        if (ec) throw boost::system::system_error(ec);
+        return n;
+    }
+
+private:
+    tcp::socket& socket_;
+    Policy keep_reading_;
+    Policy keep_writing_;
+};
 
 // True once the client has closed the connection (or it failed). Anything
 // the client sent after its request is read and dropped, since a connection
@@ -246,7 +327,10 @@ std::uint16_t HttpRangeServer::port() const {
 }
 
 std::string HttpRangeServer::stream_url(const TorrentId& id, FileIndex fi) const {
-    return "http://" + config_.bind_address + ":" + std::to_string(port_.load())
+    boost::system::error_code ec;
+    auto addr = net::ip::make_address(config_.bind_address, ec);
+    auto host = !ec && addr.is_v6() ? "[" + config_.bind_address + "]" : config_.bind_address;
+    return "http://" + host + ":" + std::to_string(port_.load())
          + "/stream/" + id + "/" + std::to_string(fi)
          + "?token=" + auth_token_;
 }
@@ -296,6 +380,38 @@ void HttpRangeServer::release_reader(const std::string& key, std::uint64_t reade
     }
 }
 
+bool HttpRangeServer::is_left_behind(const std::string& key, std::uint64_t reader) {
+    std::lock_guard lock(readers_mu_);
+    auto it = position_owner_.find(key);
+    return it != position_owner_.end() && it->second != reader;
+}
+
+bool HttpRangeServer::close_oldest_reader_left_behind() {
+    std::vector<std::pair<int, ReaderTag>> readers;
+    {
+        std::lock_guard lock(connections_->mu);
+        readers.assign(connections_->readers.begin(), connections_->readers.end());
+    }
+    std::optional<std::pair<int, ReaderTag>> oldest;
+    for (auto& [fd, tag] : readers) {
+        if (!is_left_behind(tag.key, tag.reader)) continue;
+        if (!oldest || tag.reader < oldest->second.reader) oldest.emplace(fd, tag);
+    }
+    if (!oldest) return false;
+
+    std::lock_guard lock(connections_->mu);
+    auto it = connections_->readers.find(oldest->first);
+    // Its thread may have ended since, and the fd gone to another socket.
+    if (it == connections_->readers.end() || it->second.reader != oldest->second.reader) {
+        return false;
+    }
+    // Out of the list, so the next connection over the limit picks another.
+    connections_->readers.erase(it);
+    ::shutdown(oldest->first, SHUT_RDWR);
+    spdlog::info("HttpRangeServer: closed a reader left behind to let a new connection in");
+    return true;
+}
+
 void HttpRangeServer::do_accept() {
     if (!running_.load()) return;
 
@@ -309,8 +425,27 @@ void HttpRangeServer::do_accept() {
                 return;
             }
 
-            // Connection limit check
-            if (connections_->active.load() >= config_.max_concurrent_streams) {
+            // A server for one device serves nobody else, and a stranger
+            // takes no slot.
+            if (!config_.allowed_peer.empty()) {
+                boost::system::error_code peer_ec;
+                boost::system::error_code allowed_ec;
+                auto peer = socket.remote_endpoint(peer_ec);
+                auto allowed = net::ip::make_address(config_.allowed_peer, allowed_ec);
+                if (peer_ec || allowed_ec || peer.address() != allowed) {
+                    spdlog::debug("HttpRangeServer: closing a connection from another address");
+                    boost::system::error_code close_ec;
+                    socket.close(close_ec);
+                    do_accept();
+                    return;
+                }
+            }
+
+            // Connection limit check. A reader that a newer request of its
+            // stream left behind makes room: the newest request is the one
+            // the player waits for (app BUG-88).
+            if (connections_->active.load() >= config_.max_concurrent_streams &&
+                !close_oldest_reader_left_behind()) {
                 spdlog::warn("HttpRangeServer: connection limit reached ({}/{}), rejecting",
                              connections_->active.load(), config_.max_concurrent_streams);
                 boost::system::error_code close_ec;
@@ -326,19 +461,6 @@ void HttpRangeServer::do_accept() {
                     connections->fds.insert(fd);
                 }
 
-                // Set socket timeouts
-                struct timeval tv_read;
-                tv_read.tv_sec = config_.read_timeout.count();
-                tv_read.tv_usec = 0;
-                setsockopt(socket.native_handle(), SOL_SOCKET, SO_RCVTIMEO,
-                           &tv_read, sizeof(tv_read));
-
-                struct timeval tv_send;
-                tv_send.tv_sec = config_.connection_timeout.count();
-                tv_send.tv_usec = 0;
-                setsockopt(socket.native_handle(), SOL_SOCKET, SO_SNDTIMEO,
-                           &tv_send, sizeof(tv_send));
-
                 // Handle each connection in its own thread so long-running
                 // streams don't block the accept loop (important for VLC seeks).
                 // Capture shared_ptr to keep HttpRangeServer alive for the
@@ -351,6 +473,7 @@ void HttpRangeServer::do_accept() {
                             // Out of the set before the fd can be reused.
                             std::lock_guard lock(connections->mu);
                             connections->fds.erase(fd);
+                            connections->readers.erase(fd);
                         }
                         // The socket and possibly the server go before the
                         // count drops: the owner may then destroy the
@@ -379,7 +502,40 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
     http::request<http::string_body> req;
 
     boost::system::error_code ec;
-    http::read(socket, buffer, req, ec);
+    socket.non_blocking(true, ec);
+    if (ec) {
+        spdlog::warn("HttpRangeServer: cannot make a connection non-blocking: {}", ec.message());
+        return;
+    }
+
+    // The whole request has read_timeout to arrive.
+    const auto request_deadline = Clock::now() + config_.read_timeout;
+    // Set once the connection is a stream's reader, for the write waits.
+    std::optional<std::pair<std::string, std::uint64_t>> reading;
+    ConnectionStream stream(
+        socket,
+        [&](Clock::duration) {
+            return running_.load() &&
+                   (config_.read_timeout.count() == 0 || Clock::now() < request_deadline);
+        },
+        [&](Clock::duration stalled) {
+            if (!running_.load()) return false;
+            if (reading && is_left_behind(reading->first, reading->second)) {
+                if (config_.stale_reader_timeout.count() > 0 &&
+                    stalled >= config_.stale_reader_timeout) {
+                    spdlog::info("HttpRangeServer: closing a reader left behind that stopped reading");
+                    return false;
+                }
+                return true;
+            }
+            if (config_.connection_timeout.count() > 0 && stalled >= config_.connection_timeout) {
+                spdlog::info("HttpRangeServer: closing a client that stopped reading");
+                return false;
+            }
+            return true;
+        });
+
+    http::read(stream, buffer, req, ec);
     if (ec) {
         spdlog::debug("HttpRangeServer: read error: {}", ec.message());
         return;
@@ -393,7 +549,7 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
         res.set(http::field::connection, req.keep_alive() ? "keep-alive" : "close");
         res.prepare_payload();
         boost::system::error_code write_ec;
-        http::write(socket, res, write_ec);
+        http::write(stream, res, write_ec);
     };
 
     auto send_head = [&](auto&& res, std::int64_t cl) {
@@ -401,7 +557,7 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
         res.set(http::field::connection, req.keep_alive() ? "keep-alive" : "close");
         res.content_length(cl);
         boost::system::error_code write_ec;
-        http::write(socket, res, write_ec);
+        http::write(stream, res, write_ec);
     };
 
     auto send_error = [&](http::status status, const std::string& body) {
@@ -425,6 +581,11 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
             std::uint64_t reader;
             ~ReaderGuard() { server.release_reader(key, reader); }
         } reader_guard{*this, key, reader};
+        reading.emplace(key, reader);
+        {
+            std::lock_guard lock(connections_->mu);
+            connections_->readers[socket.native_handle()] = ReaderTag{key, reader};
+        }
 
         // Send headers using Beast's empty_body serializer
         http::response<http::empty_body> header{status, req.version()};
@@ -437,7 +598,7 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
 
         http::response_serializer<http::empty_body> sr{header};
         boost::system::error_code write_ec;
-        http::write_header(socket, sr, write_ec);
+        http::write_header(stream, sr, write_ec);
         if (write_ec) {
             spdlog::debug("HttpRangeServer: header write error: {}", write_ec.message());
             return;
@@ -495,6 +656,13 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
                                   offset);
                     return;
                 }
+                if (config_.stale_reader_timeout.count() > 0 &&
+                    now - *waiting_since >= config_.stale_reader_timeout &&
+                    is_left_behind(key, reader)) {
+                    spdlog::info("HttpRangeServer: closing a reader left behind that waits at offset {}",
+                                 offset);
+                    return;
+                }
                 if (config_.stall_timeout.count() > 0 &&
                     now - *waiting_since >= config_.stall_timeout) {
                     spdlog::warn("HttpRangeServer: no data at offset {} for {} s, giving up",
@@ -515,7 +683,7 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
             auto& data = read_result.value();
             auto bytes_read = static_cast<std::int64_t>(data.size());
 
-            net::write(socket, net::buffer(data.data(), data.size()), write_ec);
+            net::write(stream, net::buffer(data.data(), data.size()), write_ec);
             if (write_ec) {
                 spdlog::debug("HttpRangeServer: body write error: {}", write_ec.message());
                 return;

@@ -19,6 +19,9 @@ inline bool constant_time_compare(const std::string& a, const std::string& b) {
     return result == 0;
 }
 
+/// `bytes` bytes from the system's secure random source, as lowercase hex.
+std::string random_hex(std::size_t bytes);
+
 /// Extracts the Bearer token from an HTTP request.
 /// Checks Authorization header first, then ?token= query parameter.
 /// Returns empty string if no token is found.

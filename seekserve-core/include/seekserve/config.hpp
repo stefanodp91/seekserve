@@ -65,11 +65,24 @@ struct SchedulerConfig {
 
 struct ServerConfig {
     std::string bind_address = "127.0.0.1";
+    // The only client address served; empty = any. A connection from any
+    // other address is closed at once, without an answer (app WORK-37).
+    std::string allowed_peer;
     std::uint16_t stream_port = 0;   // 0 = auto
     std::uint16_t control_port = 0;  // 0 = auto
     int max_concurrent_streams = 4;
+    // How long a client may take to send its whole request after it
+    // connected (app BUG-88).
     std::chrono::seconds read_timeout{30};
-    std::chrono::seconds connection_timeout{60};
+    // How long a write to the newest reader of a stream may wait for the
+    // client to read. 0 = as long as it stays connected: a paused player
+    // keeps its connection (app BUG-88).
+    std::chrono::seconds connection_timeout{0};
+    // How long a reader that a newer request of the same stream left behind
+    // may wait, for its client or for pieces, before it is closed. 0 = as
+    // long as it stays connected. A TV that seeks leaves its old connection
+    // open without reading it (app BUG-88, WORK-37).
+    std::chrono::seconds stale_reader_timeout{0};
     // How long a stream response may wait for missing pieces before giving
     // up. 0 = as long as the client stays connected: the response then never
     // ends short while the player still waits for a seek target (app BUG-83).

@@ -21,9 +21,24 @@ Both HTTP servers bind to `127.0.0.1` by default. This prevents remote access to
 
 ## Connection Limits
 
-- **Stream server**: `max_concurrent_streams` (default: 4) — excess connections rejected
+- **Stream server**: `max_concurrent_streams` (default: 4) — an excess connection takes the
+  place of the oldest reader a newer request of its stream left behind, or is rejected
 - **Control API**: Hard limit of 20 concurrent connections
-- Socket-level timeouts: `SO_RCVTIMEO` (30s read), `SO_SNDTIMEO` (60s send)
+- Stream server waits (app BUG-88): a request must arrive within `read_timeout` (30 s); a
+  reader left behind is closed after `stale_reader_timeout`, the newest reader after
+  `connection_timeout` (both 0 = no limit by default). `SO_RCVTIMEO` and `SO_SNDTIMEO`,
+  set before, had no effect on Asio's blocking calls
+
+## Shares (app WORK-37)
+
+- A share is a stream server for one device of a network (a TV): it listens on the one
+  address it is given (never `0.0.0.0` or `::`) and closes, without an answer, any
+  connection that does not come from the one client address it is given
+- Its URL carries neither the torrent's info hash nor the engine's token: a random share
+  id and token (16 bytes each, `std::random_device`, a fresh value each time)
+- The client address check is no authentication (an address can be forged on the same
+  network): the token is. Over plain HTTP, whoever can read the network sees the URL and
+  the video
 
 ## Request Size Limits
 

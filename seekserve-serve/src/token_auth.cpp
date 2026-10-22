@@ -1,3 +1,5 @@
+#include "seekserve/auth_utils.hpp"
+
 #include <string>
 #include <random>
 #include <algorithm>
@@ -19,6 +21,22 @@ std::string generate_auth_token() {
         token += charset[dist(gen)];
     }
     return token;
+}
+
+std::string random_hex(std::size_t bytes) {
+    // std::random_device reads the system's secure source (arc4random or
+    // /dev/urandom with libc++), a fresh value each call: unlike a generator
+    // seeded once from it, nothing about one value tells the next.
+    static const char digits[] = "0123456789abcdef";
+    std::random_device rd;
+    std::string out;
+    out.reserve(bytes * 2);
+    for (std::size_t i = 0; i < bytes; ++i) {
+        auto b = static_cast<unsigned>(rd()) & 0xffu;
+        out += digits[b >> 4];
+        out += digits[b & 0xfu];
+    }
+    return out;
 }
 
 bool validate_auth_token(const std::string& provided, const std::string& expected) {

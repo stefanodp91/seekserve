@@ -35,6 +35,7 @@ add_executable(seekserve-integration-tests
     integration/test_session_lifecycle.cpp
     integration/test_http_range_server.cpp
     integration/test_http_range_server_wait.cpp
+    integration/test_http_range_server_limits.cpp
     integration/test_engine_streaming.cpp
     integration/test_end_to_end_stream.cpp
     integration/test_stress.cpp

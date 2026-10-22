@@ -33,6 +33,11 @@ void ss_engine_destroy(SeekServeEngine* engine);
 
 All fields are optional. Unknown fields are ignored.
 
+The stream servers take three more keys, in seconds (app BUG-88): `read_timeout` (default
+30) for the whole request to arrive; `connection_timeout` (default 0 = no limit) for a write
+to the newest reader of a stream; `stale_reader_timeout` (default 0 = no limit) for a reader
+that a newer request of its stream left behind. See `HTTP_RANGE_SPEC.md`.
+
 `ca_cert_file` is a PEM file with the CAs that HTTPS trackers and web seeds are
 checked against, on top of OpenSSL's default locations. On Android it is
 needed: the default locations do not exist there, and OpenSSL ignores
@@ -108,9 +113,30 @@ Status JSON includes: `torrent_id`, `name`, `progress`, `download_rate`, `upload
 ss_error_t ss_start_server(SeekServeEngine* engine, uint16_t port,
                             uint16_t* out_port);
 
-// Stop HTTP servers
+// Stop HTTP servers, and every share
 ss_error_t ss_stop_server(SeekServeEngine* engine);
 ```
+
+### Shares
+
+```c
+// Serve the file a player reads to one device (a TV), on one address of a
+// network: out_json = {"share_id": "...", "url": "http://<bind_address>:<port>/..."}
+ss_error_t ss_open_share(SeekServeEngine* engine, const char* torrent_id,
+                         int32_t file_index, const char* bind_address,
+                         const char* peer_address, char** out_json);
+
+// Close it and its connections
+ss_error_t ss_close_share(SeekServeEngine* engine, const char* share_id);
+```
+
+A share is a stream server of its own (app WORK-37): it listens on `bind_address` only
+(never `0.0.0.0` or `::`), serves `peer_address` only, and its URL has a random path and
+token, never the torrent's id. The file must be the one a player reads
+(`ss_select_file`, `ss_set_wanted_files`); the share follows it when it is selected again.
+Errors: `SS_ERR_INVALID_ARG` (missing argument, an address that is not one, a wildcard),
+`SS_ERR_NOT_FOUND` (no such torrent, a file no player reads, no such share), `SS_ERR_IO`
+(servers not started, an address that cannot be listened on). See `HTTP_RANGE_SPEC.md`.
 
 ## Event Callback
 

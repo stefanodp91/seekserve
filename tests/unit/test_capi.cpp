@@ -9,6 +9,13 @@
 
 #include <sqlite3.h>
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+
 #include "seekserve_c.h"
 
 namespace fs = std::filesystem;
@@ -869,3 +876,84 @@ TEST_F(CApiTest, CallsOnATorrentBeingRemovedAreErrors) {
 
     ss_engine_destroy(engine);
 }
+
+// --- Shares (app WORK-37) ---
+
+TEST_F(CApiTest, ShareNullArgs) {
+    char* json = nullptr;
+    auto* engine = reinterpret_cast<SeekServeEngine*>(0x1);
+    EXPECT_EQ(ss_open_share(nullptr, "abc", 0, "127.0.0.1", "127.0.0.1", &json), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_open_share(engine, nullptr, 0, "127.0.0.1", "127.0.0.1", &json), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_open_share(engine, "abc", 0, nullptr, "127.0.0.1", &json), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_open_share(engine, "abc", 0, "127.0.0.1", nullptr, &json), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_open_share(engine, "abc", 0, "127.0.0.1", "127.0.0.1", nullptr), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_close_share(nullptr, "abc"), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_close_share(engine, nullptr), SS_ERR_INVALID_ARG);
+}
+
+TEST_F(CApiTest, ShareNotFound) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+    uint16_t port = 0;
+    ASSERT_EQ(ss_start_server(engine, 0, &port), SS_OK);
+
+    char* json = nullptr;
+    EXPECT_EQ(ss_open_share(engine, "nonexistent", 0, "127.0.0.1", "127.0.0.1", &json),
+              SS_ERR_NOT_FOUND);
+    EXPECT_EQ(json, nullptr);
+    EXPECT_EQ(ss_close_share(engine, "nonexistent"), SS_ERR_NOT_FOUND);
+
+    ss_engine_destroy(engine);
+}
+
+// The share of the fixture's first file, with "read_timeout" from the
+// config: a connection that sends no request is closed by then. Offline:
+// the proxy is on a closed port, and the share is on 127.0.0.1.
+TEST_F(CApiTest, AShareOpensClosesAndTakesTheReadTimeoutKey) {
+    auto config = make_config(R"("read_timeout":1,"connection_timeout":0,"stale_reader_timeout":5)");
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+    uint16_t port = 0;
+    ASSERT_EQ(ss_start_server(engine, 0, &port), SS_OK);
+    char id_buf[128] = {};
+    ASSERT_EQ(ss_add_torrent(engine, torrent_path().c_str(), id_buf, sizeof(id_buf)), SS_OK);
+    ASSERT_EQ(ss_select_file(engine, id_buf, 0), SS_OK);
+
+    char* out = nullptr;
+    ASSERT_EQ(ss_open_share(engine, id_buf, 0, "0.0.0.0", "127.0.0.1", &out), SS_ERR_INVALID_ARG);
+    ASSERT_EQ(ss_open_share(engine, id_buf, 0, "127.0.0.1", "127.0.0.1", &out), SS_OK);
+    ASSERT_NE(out, nullptr);
+    // {"share_id":"…","url":"…"}: neither value has a quote in it.
+    auto field = [json = std::string(out)](const std::string& key) {
+        auto start = json.find("\"" + key + "\":\"");
+        if (start == std::string::npos) return std::string();
+        start += key.size() + 4;
+        return json.substr(start, json.find('"', start) - start);
+    };
+    auto url = field("url");
+    auto share_id = field("share_id");
+    ss_free_string(out);
+    ASSERT_FALSE(share_id.empty());
+    EXPECT_EQ(url.find(id_buf), std::string::npos) << url;
+    ASSERT_EQ(url.rfind("http://127.0.0.1:", 0), 0u) << url;
+    int share_port = std::stoi(url.substr(std::string("http://127.0.0.1:").size()));
+    EXPECT_NE(share_port, port);
+
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(static_cast<uint16_t>(share_port));
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
+    pollfd p{fd, POLLIN, 0};
+    ASSERT_EQ(::poll(&p, 1, 4000), 1) << "the share kept a connection without a request";
+    char byte;
+    EXPECT_EQ(::recv(fd, &byte, 1, 0), 0);
+    ::close(fd);
+
+    EXPECT_EQ(ss_close_share(engine, share_id.c_str()), SS_OK);
+    EXPECT_EQ(ss_close_share(engine, share_id.c_str()), SS_ERR_NOT_FOUND);
+    ss_engine_destroy(engine);
+}
+
