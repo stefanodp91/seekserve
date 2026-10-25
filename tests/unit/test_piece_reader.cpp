@@ -94,3 +94,57 @@ TEST(TorrentPieceReaderTest, CancelWakesTheReader) {
     ASSERT_FALSE(got.ok());
     EXPECT_EQ(got.error(), make_error_code(errc::cancelled));
 }
+
+// The server waits for a piece in slices of half a second; reading a big
+// piece can take longer: the answer that comes after a slice is over is the
+// next read's, with no second request (app BUG-236, DEC-657).
+TEST(TorrentPieceReaderTest, ALateAnswerIsTheNextReadsWithOneRequest) {
+    std::atomic<int> asks{0};
+    TorrentPieceReader reader([&](PieceIndex) { ++asks; });
+
+    ASSERT_FALSE(reader.read(5, 30ms).ok());
+    reader.on_read(5, piece_of(8, 'z'));
+    auto got = reader.read(5, 30ms);
+
+    ASSERT_TRUE(got.ok()) << got.error().message();
+    EXPECT_EQ(got.value().data[0], 'z');
+    EXPECT_EQ(asks.load(), 1);
+}
+
+TEST(TorrentPieceReaderTest, AReadWhileARequestIsOnItsWayAsksNoMore) {
+    std::atomic<int> asks{0};
+    TorrentPieceReader reader([&](PieceIndex) { ++asks; });
+
+    ASSERT_FALSE(reader.read(5, 30ms).ok());
+    ASSERT_FALSE(reader.read(5, 30ms).ok());
+
+    EXPECT_EQ(asks.load(), 1);
+}
+
+TEST(TorrentPieceReaderTest, AnErrorNobodyWaitsForIsNotKept) {
+    std::atomic<int> asks{0};
+    TorrentPieceReader reader([&](PieceIndex) { ++asks; });
+
+    ASSERT_FALSE(reader.read(5, 30ms).ok());
+    reader.on_read(5, make_error_code(errc::piece_not_available));
+    auto got = reader.read(5, 30ms);
+
+    EXPECT_EQ(got.error(), make_error_code(errc::timeout_waiting_for_piece));
+    EXPECT_EQ(asks.load(), 2);
+}
+
+TEST(TorrentPieceReaderTest, OnlyAFewAnswersNobodyTookAreKept) {
+    std::atomic<int> asks{0};
+    TorrentPieceReader reader([&](PieceIndex) { ++asks; });
+    const int count = TorrentPieceReader::kMaxIdlePieces + 1;
+    for (PieceIndex p = 0; p < count; ++p) {
+        ASSERT_FALSE(reader.read(p, 1ms).ok());
+        reader.on_read(p, piece_of(4, 'k'));
+    }
+
+    // The oldest went: it is asked again; the newest is still there.
+    EXPECT_FALSE(reader.read(0, 1ms).ok());
+    EXPECT_TRUE(reader.read(count - 1, 1ms).ok());
+    EXPECT_EQ(asks.load(), count + 1);
+}
+

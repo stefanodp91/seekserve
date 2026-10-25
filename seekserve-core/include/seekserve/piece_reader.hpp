@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -41,10 +42,16 @@ public:
 
 // The PieceReader of one torrent: `ask` starts libtorrent's read_piece, and
 // on_read hands it the answer (read_piece_alert). One request per piece at
-// a time, however many readers wait for it.
+// a time, however many readers wait for it. A request stays on its way when
+// a read stops waiting, and an answer that comes late is the next read's:
+// reading a big piece can take longer than a reader waits at a time.
 class TorrentPieceReader final : public PieceReader {
 public:
     using Ask = std::function<void(PieceIndex)>;
+
+    // How many pieces with no reader waiting are kept, asked or answered:
+    // a stream reads on from where it is, so few are read again.
+    static constexpr std::size_t kMaxIdlePieces = 8;
 
     explicit TorrentPieceReader(Ask ask);
 
@@ -57,14 +64,21 @@ public:
 private:
     struct Pending {
         int waiters = 0;
+        bool asked = false;
         std::optional<Result<PieceBuffer>> answer;
+        // When it was last left with nobody waiting: the oldest goes first.
+        std::uint64_t idle_since = 0;
     };
+
+    // `pending` has nobody waiting now: kept, up to kMaxIdlePieces.
+    void keep_idle(Pending& pending);
 
     Ask ask_;
     std::mutex mu_;
     std::condition_variable cv_;
     std::unordered_map<PieceIndex, Pending> pending_;
     bool cancelled_ = false;
+    std::uint64_t idle_clock_ = 0;
 };
 
 } // namespace seekserve

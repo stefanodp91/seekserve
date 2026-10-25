@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed — A piece read through libtorrent that takes longer than a wait
+
+#### `seekserve-core`
+
+- **`TorrentPieceReader`** forgot a request when a read stopped waiting, threw away the answer that came later and
+  asked again at the next read: the stream server waits in slices of half a second, and a big piece (up to 16 MB in a
+  pack) can take longer to read, so the read never ended and the player never started (seen on the app's Pixel 4
+  with a pack of ten 1.9 GB episodes, app BUG-236, DEC-657). Now a request stays on its way and a late answer is the
+  next read's, with no second request; an error nobody waits for is not kept (a later read, once the piece is there
+  again, asks again); at most `kMaxIdlePieces` (8) pieces with nobody waiting are kept; `cancel()` lets them all go.
+- Tests: `TorrentPieceReaderTest.ALateAnswerIsTheNextReadsWithOneRequest`, `.AReadWhileARequestIsOnItsWayAsksNoMore`,
+  `.OnlyAFewAnswersNobodyTookAreKept`, seen failing first, and `.AnErrorNobodyWaitsForIsNotKept`.
+
 ### Fixed — A piece that arrives during a stream is read through libtorrent
 
 #### `seekserve-core`, `seekserve-serve`, `seekserve-capi`
