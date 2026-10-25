@@ -661,6 +661,14 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
         }
     }
 
+    // How big the torrent's pieces are: the reader gets its first bytes a
+    // whole piece at a time (app BUG-228, for the app's debug log).
+    try {
+        if (auto ti = handle.torrent_file()) status_json["piece_length"] = ti->piece_length();
+    } catch (const std::exception& e) {
+        spdlog::debug("Engine: no piece length for {}: {}", id, e.what());
+    }
+
     {
         std::lock_guard lock(mu_);
         auto* state = find_state(id);
@@ -668,6 +676,9 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
             status_json["stream_mode"] = static_cast<int>(state->scheduler->current_mode());
             status_json["playhead_piece"] = state->scheduler->playhead_piece();
             status_json["active_deadlines"] = state->scheduler->active_deadlines();
+            // Whether the start with priority still holds the other pieces
+            // back (app BUG-228, DEC-656).
+            status_json["startup_focus"] = state->focus && state->focus->active();
         }
         if (state && state->source) {
             status_json["piece_reads"] = state->source->piece_reads();

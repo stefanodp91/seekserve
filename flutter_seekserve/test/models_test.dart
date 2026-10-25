@@ -63,6 +63,10 @@ void main() {
         'stream_mode': 'streaming_first',
         'playhead_piece': 42,
         'active_deadlines': 10,
+        'piece_length': 4194304,
+        'startup_focus': true,
+        'piece_reads': 7,
+        'piece_cache_hits': 120,
       });
 
       expect(status.torrentId, 'abc123');
@@ -78,6 +82,10 @@ void main() {
       expect(status.streamMode, 'streaming_first');
       expect(status.playheadPiece, 42);
       expect(status.activeDeadlines, 10);
+      expect(status.pieceLength, 4194304);
+      expect(status.startupFocus, true);
+      expect(status.pieceReads, 7);
+      expect(status.pieceCacheHits, 120);
     });
 
     test('fromJson maps integer state_t values (1-based libtorrent enum)', () {
@@ -126,6 +134,10 @@ void main() {
       expect(status.selectedFile, isNull);
       expect(status.streamMode, isNull);
       expect(status.playheadPiece, isNull);
+      expect(status.pieceLength, isNull);
+      expect(status.startupFocus, isNull);
+      expect(status.pieceReads, isNull);
+      expect(status.pieceCacheHits, isNull);
       expect(status.isPaused, false);
     });
 
@@ -201,6 +213,21 @@ void main() {
       };
       expect(TorrentStatus.fromJson(json).toJson()['files'], json['files']);
       expect(TorrentStatus.fromJson({'torrent_id': 'abc'}).toJson().containsKey('files'), false);
+    });
+
+    test('toJson writes the start numbers back', () {
+      final json = {
+        'piece_length': 524288,
+        'startup_focus': false,
+        'piece_reads': 3,
+        'piece_cache_hits': 40,
+      };
+      final written = TorrentStatus.fromJson({'torrent_id': 'abc', ...json}).toJson();
+      for (final key in json.keys) {
+        expect(written[key], json[key], reason: key);
+      }
+      final empty = TorrentStatus.fromJson({'torrent_id': 'abc'}).toJson();
+      expect(json.keys.where(empty.containsKey), isEmpty);
     });
   });
 

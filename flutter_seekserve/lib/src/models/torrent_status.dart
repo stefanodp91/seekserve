@@ -76,6 +76,20 @@ class TorrentStatus {
   final int? playheadPiece;
   final int? activeDeadlines;
 
+  /// The bytes of each piece of the torrent: the reader gets its first
+  /// bytes a whole piece at a time. Null before the metadata or from an
+  /// older library.
+  final int? pieceLength;
+
+  /// Whether the start of a stream with priority still holds the other
+  /// pieces back; null from an older library.
+  final bool? startupFocus;
+
+  /// The pieces the reader got through libtorrent, and those it found in
+  /// the engine's memory of pieces; null with no reader.
+  final int? pieceReads;
+  final int? pieceCacheHits;
+
   /// One entry for each file the torrent downloads; null when the engine
   /// does not say (an older library, no metadata yet). [progress] counts
   /// the wanted pieces of the whole torrent: with two wanted files it is
@@ -97,6 +111,10 @@ class TorrentStatus {
     this.streamMode,
     this.playheadPiece,
     this.activeDeadlines,
+    this.pieceLength,
+    this.startupFocus,
+    this.pieceReads,
+    this.pieceCacheHits,
     this.files,
   });
 
@@ -116,6 +134,10 @@ class TorrentStatus {
       streamMode: _parseStreamMode(json['stream_mode']),
       playheadPiece: json['playhead_piece'] as int?,
       activeDeadlines: json['active_deadlines'] as int?,
+      pieceLength: json['piece_length'] as int?,
+      startupFocus: json['startup_focus'] as bool?,
+      pieceReads: json['piece_reads'] as int?,
+      pieceCacheHits: json['piece_cache_hits'] as int?,
       files: (json['files'] as List<dynamic>?)
           ?.map((file) => WantedFile.fromJson(file as Map<String, dynamic>))
           .toList(),
@@ -168,6 +190,10 @@ class TorrentStatus {
     if (streamMode != null) 'stream_mode': streamMode,
     if (playheadPiece != null) 'playhead_piece': playheadPiece,
     if (activeDeadlines != null) 'active_deadlines': activeDeadlines,
+    if (pieceLength != null) 'piece_length': pieceLength,
+    if (startupFocus != null) 'startup_focus': startupFocus,
+    if (pieceReads != null) 'piece_reads': pieceReads,
+    if (pieceCacheHits != null) 'piece_cache_hits': pieceCacheHits,
     if (files != null) 'files': files!.map((file) => file.toJson()).toList(),
   };
 }

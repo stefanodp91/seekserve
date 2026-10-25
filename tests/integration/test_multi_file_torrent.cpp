@@ -628,6 +628,42 @@ TEST_F(MultiFileTorrent, AStartWithPriorityGivesTheRightBytesAndTheWholeFile) {
     EXPECT_TRUE(downloaded(kE02) == seeded(kE02));
 }
 
+// What the status says of the start with priority (app BUG-228): how big the
+// torrent's pieces are, and whether the start still holds the other pieces
+// back, for the app's debug log.
+TEST_F(MultiFileTorrent, TheStatusSaysThePieceLengthAndTheStartWithPriority) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port());
+    // 64 pieces at the trickle's 4 a second: still there after one piece.
+    config.scheduler.startup_focus_bytes = 64 * kPiece;
+    config.scheduler.startup_focus_timeout = std::chrono::seconds(60);
+    SeekServeEngine engine(config);
+    ASSERT_TRUE(engine.start_server());
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    ASSERT_GE(e02, 0);
+    ASSERT_TRUE(engine.select_file(id, e02));
+    EXPECT_EQ(status_of(engine, id).value("piece_length", 0), kPiece)
+        << engine.get_status_json(id);
+    EXPECT_FALSE(status_of(engine, id).value("startup_focus", true))
+        << engine.get_status_json(id);
+
+    auto url = engine.get_stream_url(id, e02);
+    ASSERT_TRUE(url);
+    EXPECT_EQ(http_get_body(url.value(), "bytes=0-" + std::to_string(kPiece - 1)),
+              seeded(kE02).substr(0, kPiece));
+    EXPECT_TRUE(status_of(engine, id).value("startup_focus", false))
+        << engine.get_status_json(id);
+
+    proxy.limit_download(0);
+    EXPECT_TRUE(wait_for([&] { return !status_of(engine, id).value("startup_focus", true); }))
+        << engine.get_status_json(id);
+}
+
 // select_file is one selection: selecting another file takes the first one
 // out, and what it had stays where it was. A torrent that wants two files,
 // one for the player and one that downloads behind it, asks for them with
