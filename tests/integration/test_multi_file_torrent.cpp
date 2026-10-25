@@ -682,6 +682,52 @@ TEST_F(MultiFileTorrent, TheStatusSaysThePieceLengthAndTheStartWithPriority) {
         << engine.get_status_json(id);
 }
 
+// While a reader waits for a piece, the status says which and where it is
+// (app BUG-238, BUG-228, DEC-661): the seeder has it, its blocks add up.
+TEST_F(MultiFileTorrent, TheStatusSaysThePieceAReaderWaitsFor) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+    ASSERT_TRUE(engine.start_server());
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    ASSERT_GE(e02, 0);
+    ASSERT_TRUE(engine.select_file(id, e02));
+    auto url = engine.get_stream_url(id, e02);
+    ASSERT_TRUE(url);
+    EXPECT_FALSE(status_of(engine, id).contains("wait_piece")) << engine.get_status_json(id);
+
+    const std::size_t size = seeded(kE02).size();
+    std::thread reader([&] {
+        http_get_body(url.value(), "bytes=" + std::to_string(size - 4 * kPiece) + "-" +
+                                       std::to_string(size - 1));
+    });
+    json waiting;
+    EXPECT_TRUE(wait_for([&] {
+        waiting = status_of(engine, id);
+        return waiting.contains("wait_piece");
+    })) << engine.get_status_json(id);
+    EXPECT_GE(waiting.value("wait_piece", -1), 0) << waiting.dump();
+    EXPECT_EQ(waiting.value("wait_piece_peers", -1), 1) << waiting.dump();
+    const int blocks = waiting.value("wait_piece_blocks", 0);
+    EXPECT_GE(blocks, 1) << waiting.dump();
+    EXPECT_EQ(waiting.value("wait_piece_done", -1) + waiting.value("wait_piece_asked", -1) +
+                  waiting.value("wait_piece_free", -1),
+              blocks)
+        << waiting.dump();
+    EXPECT_TRUE(waiting.contains("wait_piece_peers_open")) << waiting.dump();
+    EXPECT_TRUE(waiting.contains("wait_piece_askers")) << waiting.dump();
+    EXPECT_TRUE(waiting.contains("wait_piece_slowest_kbs")) << waiting.dump();
+    EXPECT_TRUE(waiting.contains("wait_piece_fastest_kbs")) << waiting.dump();
+    EXPECT_TRUE(waiting.contains("wait_piece_still_ms")) << waiting.dump();
+
+    proxy.limit_download(0);
+    reader.join();
+}
+
 // select_file is one selection: selecting another file takes the first one
 // out, and what it had stays where it was. A torrent that wants two files,
 // one for the player and one that downloads behind it, asks for them with

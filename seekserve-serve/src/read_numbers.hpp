@@ -4,6 +4,7 @@
 
 #include "seekserve/byte_source.hpp"
 #include "seekserve/piece_reader.hpp"
+#include "seekserve/wait_piece.hpp"
 
 namespace seekserve {
 
@@ -12,5 +13,7 @@ namespace seekserve {
 // and what the stream's readers read and wait for. No address, no file name.
 void put_piece_reads(nlohmann::json& status, const PieceReadStats& stats);
 void put_stream_reads(nlohmann::json& status, const ByteSourceStats& stats);
+// The piece a reader waits for (app BUG-238, BUG-228, DEC-661).
+void put_wait_piece(nlohmann::json& status, const WaitPieceStats& stats);
 
 }  // namespace seekserve

@@ -674,6 +674,7 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
         spdlog::debug("Engine: no piece length for {}: {}", id, e.what());
     }
 
+    PieceIndex awaited = -1;
     {
         std::lock_guard lock(mu_);
         auto* state = find_state(id);
@@ -689,6 +690,7 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
             status_json["piece_reads"] = state->source->piece_reads();
             status_json["piece_cache_hits"] = state->source->cache_hits();
             put_stream_reads(status_json, state->source->stats());
+            awaited = awaited_piece(*state);
         }
         if (state && state->pieces) put_piece_reads(status_json, state->pieces->stats());
         if (state && http_server_) {
@@ -697,8 +699,51 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
     }
 
     status_json["alerts_dropped"] = alerts_dropped_.load();
+    if (awaited >= 0) {
+        if (auto stats = awaited_piece_stats(id, handle, awaited)) put_wait_piece(status_json, *stats);
+    }
 
     return status_json.dump();
+}
+
+PieceIndex SeekServeEngine::awaited_piece(const TorrentState& state) {
+    if (!state.source || !state.scheduler || !state.mapper) return -1;
+    if (state.source->stats().waiting_download == 0) return -1;
+    const PieceIndex end = state.mapper->end_piece();
+    for (PieceIndex p = std::max(state.scheduler->playhead_piece(), state.mapper->first_piece());
+         p < end; ++p) {
+        if (!state.avail.is_complete(p)) return p;
+    }
+    return -1;
+}
+
+std::optional<WaitPieceStats> SeekServeEngine::awaited_piece_stats(
+    const TorrentId& id, const lt::torrent_handle& handle, PieceIndex piece) {
+    // libtorrent's own block size, smaller only in a smaller piece.
+    constexpr int kBlockSize = 16 * 1024;
+    std::vector<lt::peer_info> peers;
+    std::vector<lt::partial_piece_info> queue;
+    int blocks = 0;
+    WaitPieceStats stats;
+    // libtorrent throws on a handle whose torrent went in between. The
+    // queue's blocks live in libtorrent until its next queue: read at once.
+    try {
+        auto ti = handle.torrent_file();
+        if (!ti) return std::nullopt;
+        const int size = ti->piece_size(lt::piece_index_t{piece});
+        blocks = (size + kBlockSize - 1) / kBlockSize;
+        handle.get_peer_info(peers);
+        handle.get_download_queue(queue);
+        stats = wait_piece_stats(piece, blocks, peers, queue);
+    } catch (const std::exception& e) {
+        spdlog::debug("Engine: no awaited piece for {}: {}", id, e.what());
+        return std::nullopt;
+    }
+    std::lock_guard lock(mu_);
+    auto* state = find_state(id);
+    if (!state) return std::nullopt;
+    stats.still_ms = state->wait_watch.still_ms(piece, stats.done, WaitPieceWatch::Clock::now());
+    return stats;
 }
 
 Result<std::uint16_t> SeekServeEngine::start_server(std::uint16_t port) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -22,6 +23,7 @@
 #include "seekserve/metadata_catalog.hpp"
 #include "seekserve/piece_availability.hpp"
 #include "seekserve/byte_range_mapper.hpp"
+#include "seekserve/wait_piece.hpp"
 #include "seekserve/startup_focus.hpp"
 #include "seekserve/piece_reader.hpp"
 #include "seekserve/byte_source.hpp"
@@ -135,6 +137,8 @@ private:
         std::unique_ptr<StreamingScheduler> scheduler;
         // The start of the stream with priority (app BUG-228, DEC-656).
         std::unique_ptr<StartupFocus> focus;
+        // Since when the piece a reader waits for got no block (DEC-661).
+        WaitPieceWatch wait_watch;
         FileIndex selected_file{-1};  // the reader's file
     };
 
@@ -151,6 +155,15 @@ private:
     // come first (app BUG-228, DEC-656). Called with mu_ held.
     void begin_startup_focus(TorrentState& state, lt::torrent_handle& handle,
                              std::int64_t offset);
+    // The first piece missing from the reader's position on, while a reader
+    // of `state` waits for a download; -1 otherwise. Called with mu_ held.
+    static PieceIndex awaited_piece(const TorrentState& state);
+    // Who has `piece` and where its blocks are (app BUG-238, BUG-228,
+    // DEC-661); nothing when the torrent went. Called without mu_: it asks
+    // libtorrent.
+    std::optional<WaitPieceStats> awaited_piece_stats(const TorrentId& id,
+                                                      const lt::torrent_handle& handle,
+                                                      PieceIndex piece);
     // The start with priority of `id` is over: the files' priorities again.
     // Called with mu_ held.
     void end_startup_focus(const TorrentId& id, TorrentState& state,

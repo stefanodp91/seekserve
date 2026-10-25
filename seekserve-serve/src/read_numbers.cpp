@@ -20,4 +20,18 @@ void put_stream_reads(nlohmann::json& status, const ByteSourceStats& stats) {
     status["readers_waiting_answer"] = stats.waiting_answer;
 }
 
+void put_wait_piece(nlohmann::json& status, const WaitPieceStats& stats) {
+    status["wait_piece"] = stats.piece;
+    status["wait_piece_peers"] = stats.peers;
+    status["wait_piece_peers_open"] = stats.peers_open;
+    status["wait_piece_blocks"] = stats.blocks;
+    status["wait_piece_done"] = stats.done;
+    status["wait_piece_asked"] = stats.asked;
+    status["wait_piece_free"] = stats.free;
+    status["wait_piece_askers"] = stats.askers;
+    status["wait_piece_slowest_kbs"] = stats.slowest_kbs;
+    status["wait_piece_fastest_kbs"] = stats.fastest_kbs;
+    status["wait_piece_still_ms"] = stats.still_ms;
+}
+
 }  // namespace seekserve

@@ -215,6 +215,60 @@ void main() {
       expect(TorrentStatus.fromJson({'torrent_id': 'abc'}).toJson().containsKey('files'), false);
     });
 
+    test('fromJson reads the piece a reader waits for (BUG-238)', () {
+      final waiting = TorrentStatus.fromJson({
+        'torrent_id': 'abc',
+        'wait_piece': 0,
+        'wait_piece_peers': 1,
+        'wait_piece_peers_open': 1,
+        'wait_piece_blocks': 512,
+        'wait_piece_done': 300,
+        'wait_piece_asked': 40,
+        'wait_piece_free': 172,
+        'wait_piece_askers': 2,
+        'wait_piece_slowest_kbs': 3,
+        'wait_piece_fastest_kbs': 35,
+        'wait_piece_still_ms': 12000,
+      }).waitPiece!;
+
+      expect(waiting.piece, 0);
+      expect(waiting.peers, 1);
+      expect(waiting.peersOpen, 1);
+      expect(waiting.blocks, 512);
+      expect(waiting.done, 300);
+      expect(waiting.asked, 40);
+      expect(waiting.free, 172);
+      expect(waiting.askers, 2);
+      expect(waiting.slowestKbs, 3);
+      expect(waiting.fastestKbs, 35);
+      expect(waiting.stillMs, 12000);
+    });
+
+    test('no piece is awaited when the engine says none', () {
+      expect(TorrentStatus.fromJson({'torrent_id': 'abc'}).waitPiece, isNull);
+    });
+
+    test('toJson writes the awaited piece back', () {
+      final json = {
+        'torrent_id': 'abc',
+        'wait_piece': 7,
+        'wait_piece_peers': 0,
+        'wait_piece_peers_open': 0,
+        'wait_piece_blocks': 128,
+        'wait_piece_done': 0,
+        'wait_piece_asked': 0,
+        'wait_piece_free': 128,
+        'wait_piece_askers': 0,
+        'wait_piece_slowest_kbs': 0,
+        'wait_piece_fastest_kbs': 0,
+        'wait_piece_still_ms': 0,
+      };
+      final written = TorrentStatus.fromJson(json).toJson();
+      for (final key in json.keys) {
+        expect(written[key], json[key], reason: key);
+      }
+    });
+
     test('fromJson reads what the reads did (BUG-238)', () {
       final reads = TorrentStatus.fromJson({
         'torrent_id': 'abc',

@@ -1,4 +1,5 @@
 import 'stream_reads.dart';
+import 'wait_piece.dart';
 
 /// What the engine was asked a file for.
 enum WantedFileRole {
@@ -95,6 +96,9 @@ class TorrentStatus {
   /// What the stream's reads did (app BUG-238); null from an older library.
   final StreamReads? reads;
 
+  /// The piece a reader waits for (app BUG-238); null when none waits.
+  final WaitPiece? waitPiece;
+
   /// One entry for each file the torrent downloads; null when the engine
   /// does not say (an older library, no metadata yet). [progress] counts
   /// the wanted pieces of the whole torrent: with two wanted files it is
@@ -121,6 +125,7 @@ class TorrentStatus {
     this.pieceReads,
     this.pieceCacheHits,
     this.reads,
+    this.waitPiece,
     this.files,
   });
 
@@ -145,6 +150,7 @@ class TorrentStatus {
       pieceReads: json['piece_reads'] as int?,
       pieceCacheHits: json['piece_cache_hits'] as int?,
       reads: StreamReads.fromJson(json),
+      waitPiece: WaitPiece.fromJson(json),
       files: (json['files'] as List<dynamic>?)
           ?.map((file) => WantedFile.fromJson(file as Map<String, dynamic>))
           .toList(),
@@ -202,6 +208,7 @@ class TorrentStatus {
     if (pieceReads != null) 'piece_reads': pieceReads,
     if (pieceCacheHits != null) 'piece_cache_hits': pieceCacheHits,
     ...?reads?.toJson(),
+    ...?waitPiece?.toJson(),
     if (files != null) 'files': files!.map((file) => file.toJson()).toList(),
   };
 }
