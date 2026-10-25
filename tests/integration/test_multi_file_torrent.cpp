@@ -592,7 +592,7 @@ TEST_F(MultiFileTorrent, AStartWithPriorityGivesTheRightBytesAndTheWholeFile) {
     // that piece comes back as zeros, with or without this start (a
     // separate problem, app BUG-236).
     const std::size_t start = static_cast<std::size_t>(
-        kPiece - (ti_->files().file_offset(lt::file_index_t{e02}) % kPiece));
+        kPiece - (ti_->layout().file_offset(lt::file_index_t{e02}) % kPiece));
     const std::size_t far = expected.size() / 2;
     EXPECT_EQ(http_get_body(url.value(), "bytes=" + std::to_string(start) + "-" +
                                              std::to_string(start + length - 1)),
