@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added — The piece length and the start with priority in the status
+
+#### `seekserve-serve`
+
+- **`get_status_json`** (and `ss_get_status`) says `piece_length`, the bytes of each piece of the torrent (once it has
+  its metadata), and `startup_focus`, whether the start of a stream with priority still holds the other pieces back
+  (with a reader only): the app's debug log tells why the first bytes of a stream take long (app BUG-228).
+- Test: `MultiFileTorrent.TheStatusSaysThePieceLengthAndTheStartWithPriority`.
+
+#### `flutter_seekserve`
+
+- **`TorrentStatus`** reads `pieceLength`, `startupFocus`, `pieceReads` and `pieceCacheHits`, null from an older
+  library.
+
 ### Fixed — A piece read through libtorrent that takes longer than a wait
 
 #### `seekserve-core`
