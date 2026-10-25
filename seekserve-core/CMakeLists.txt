@@ -6,6 +6,7 @@ add_library(seekserve-core STATIC
     src/byte_range_mapper.cpp
     src/piece_availability.cpp
     src/streaming_scheduler.cpp
+    src/startup_focus.cpp
     src/byte_source.cpp
     src/file_source.cpp
     src/offline_cache.cpp

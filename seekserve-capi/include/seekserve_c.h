@@ -52,6 +52,15 @@ typedef void (*ss_event_callback_t)(const char* event_json, void* user_data);
 //     connection open without reading it. Whatever this says, when every
 //     slot is taken the oldest reader left behind makes room for a new
 //     connection.
+// config_json keys for the start of a stream with priority (both optional;
+// read after every key above, for the same reason; app BUG-228, DEC-656):
+//   "startup_focus_bytes" (int, default 0 = off): when a reader starts or
+//     jumps far, the pieces of its first so many bytes go to the top
+//     priority and every other wanted piece to the lowest (never to zero),
+//     until those bytes are there. Through Tor this keeps the pieces a
+//     player waits for from queuing behind the rest of the file.
+//   "startup_focus_timeout" (int, seconds, default 30): the longest such a
+//     start lasts; then the files' priorities hold again.
 __attribute__((visibility("default")))
 SeekServeEngine* ss_engine_create(const char* config_json);
 

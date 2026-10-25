@@ -562,6 +562,50 @@ TEST_F(MultiFileTorrent, TheReaderGetsTheBytesOfTheSelectedFile) {
               expected.substr(size - 100));
 }
 
+// The start of a stream with priority (app BUG-228, DEC-656): with it on,
+// the player reads its file near the start and from a point far in and gets
+// the right bytes, and the file then downloads to its last byte: the
+// priorities come back after the start, and none is zero in between.
+TEST_F(MultiFileTorrent, AStartWithPriorityGivesTheRightBytesAndTheWholeFile) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port());
+    config.scheduler.startup_focus_bytes = 8 * kPiece;
+    config.scheduler.startup_focus_timeout = std::chrono::seconds(2);
+    SeekServeEngine engine(config);
+    ASSERT_TRUE(engine.start_server());
+    CompletedFiles completed(engine);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    ASSERT_GE(e02, 0);
+    ASSERT_TRUE(engine.select_file(id, e02));
+    auto url = engine.get_stream_url(id, e02);
+    ASSERT_TRUE(url);
+
+    const std::string expected = seeded(kE02);
+    const std::size_t length = 4 * kPiece;
+    // From the file's second piece: its first one is shared with the file
+    // before, which is not wanted, and read while it downloads its part of
+    // that piece comes back as zeros, with or without this start (a
+    // separate problem, app BUG-236).
+    const std::size_t start = static_cast<std::size_t>(
+        kPiece - (ti_->files().file_offset(lt::file_index_t{e02}) % kPiece));
+    const std::size_t far = expected.size() / 2;
+    EXPECT_EQ(http_get_body(url.value(), "bytes=" + std::to_string(start) + "-" +
+                                             std::to_string(start + length - 1)),
+              expected.substr(start, length));
+    EXPECT_EQ(http_get_body(url.value(), "bytes=" + std::to_string(far) + "-" +
+                                             std::to_string(far + length - 1)),
+              expected.substr(far, length));
+
+    proxy.limit_download(0);
+    ASSERT_TRUE(wait_for([&] { return completed.has(e02); })) << engine.get_status_json(id);
+    EXPECT_TRUE(downloaded(kE02) == seeded(kE02));
+}
+
 // select_file is one selection: selecting another file takes the first one
 // out, and what it had stays where it was. A torrent that wants two files,
 // one for the player and one that downloads behind it, asks for them with

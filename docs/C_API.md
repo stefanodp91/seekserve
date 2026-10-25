@@ -38,6 +38,11 @@ The stream servers take three more keys, in seconds (app BUG-88): `read_timeout`
 to the newest reader of a stream; `stale_reader_timeout` (default 0 = no limit) for a reader
 that a newer request of its stream left behind. See `HTTP_RANGE_SPEC.md`.
 
+The start of a stream with priority takes two more (app BUG-228): `startup_focus_bytes`
+(default 0 = off) and `startup_focus_timeout` (seconds, default 30). When a reader starts or
+jumps far, the pieces of its first so many bytes come first and every other wanted piece
+last, until those bytes are there or the time passed.
+
 `ca_cert_file` is a PEM file with the CAs that HTTPS trackers and web seeds are
 checked against, on top of OpenSSL's default locations. On Android it is
 needed: the default locations do not exist there, and OpenSSL ignores

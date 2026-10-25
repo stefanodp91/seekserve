@@ -17,7 +17,7 @@ StreamingScheduler::StreamingScheduler(SchedulerConfig config,
     playhead_piece_ = mapper_.first_piece();
 }
 
-void StreamingScheduler::on_range_request(const ByteRange& range, lt::torrent_handle& handle) {
+bool StreamingScheduler::on_range_request(const ByteRange& range, lt::torrent_handle& handle) {
     std::lock_guard lock(mu_);
 
     auto span = mapper_.map(range);
@@ -25,7 +25,10 @@ void StreamingScheduler::on_range_request(const ByteRange& range, lt::torrent_ha
 
     // Detect seek: playhead jumped by more than hot_window_pieces
     auto distance = std::abs(new_playhead - playhead_piece_);
-    if (distance > config_.hot_window_pieces) {
+    const bool jumped = distance > config_.hot_window_pieces;
+    const bool new_place = jumped || !requested_;
+    requested_ = true;
+    if (jumped) {
         spdlog::debug("StreamingScheduler: seek detected, {} → {} (distance={})",
                       playhead_piece_, new_playhead, distance);
 
@@ -37,6 +40,7 @@ void StreamingScheduler::on_range_request(const ByteRange& range, lt::torrent_ha
 
     playhead_piece_ = new_playhead;
     set_deadlines(handle);
+    return new_place;
 }
 
 void StreamingScheduler::on_piece_complete(PieceIndex piece) {

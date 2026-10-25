@@ -130,6 +130,20 @@ TEST_F(StreamingSchedulerTest, PlayheadUpdatesOnSubsequentRequests) {
 
 // ─── Seek detection ─────────────────────────────────────────────────────────
 
+// A new place to read from: the first request, then a jump far away; a
+// request near the playhead is the same place (app BUG-228, DEC-656).
+TEST_F(StreamingSchedulerTest, TheFirstRequestAndAFarJumpAreANewPlace) {
+    SchedulerConfig cfg;
+    cfg.hot_window_pieces = 5;
+    auto sched = make_scheduler(cfg);
+
+    EXPECT_TRUE(sched.on_range_request(ByteRange{0, 100}, s_handle));
+    EXPECT_FALSE(sched.on_range_request(ByteRange{512 * 1024, 512 * 1024 + 100}, s_handle));
+    EXPECT_TRUE(sched.on_range_request(ByteRange{8 * 1024 * 1024, 8 * 1024 * 1024 + 100},
+                                       s_handle));
+}
+
+
 TEST_F(StreamingSchedulerTest, SmallMoveNoSeekBoost) {
     SchedulerConfig cfg;
     cfg.hot_window_pieces = 5;

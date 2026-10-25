@@ -134,6 +134,13 @@ static seekserve::SeekServeEngine::Config parse_config(const char* config_json) 
         if (j.contains("stale_reader_timeout"))
             config.server.stale_reader_timeout =
                 std::chrono::seconds(j["stale_reader_timeout"].get<int>());
+        // After every other key too (app BUG-228, DEC-656).
+        if (j.contains("startup_focus_bytes"))
+            config.scheduler.startup_focus_bytes =
+                j["startup_focus_bytes"].get<std::int64_t>();
+        if (j.contains("startup_focus_timeout"))
+            config.scheduler.startup_focus_timeout =
+                std::chrono::seconds(j["startup_focus_timeout"].get<int>());
     } catch (const std::exception& e) {
         spdlog::warn("C API: failed to parse config JSON: {}", e.what());
     }

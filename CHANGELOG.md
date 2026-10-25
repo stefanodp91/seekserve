@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Added — The start of a stream with priority
+
+#### `seekserve-core`, `seekserve-serve`, `seekserve-capi`
+
+- **`StartupFocus`** (app BUG-228, DEC-656): when a reader starts or jumps farther than the hot window
+  (`StreamingScheduler::on_range_request` now says so), the pieces of its first `startup_focus_bytes` go to the top
+  priority and every other wanted piece to the lowest, never to zero (with nothing else wanted libtorrent would call
+  the torrent finished, and the app's queue a download complete). It ends when those bytes are there or
+  `startup_focus_timeout` passed (the tick checks), and the files' priorities are set again. Through Tor the peers'
+  queues fill with pieces of the file that are not due, and the pieces a player waits for came one at a time behind
+  them: on the app's phone 1.5 MB in 60 s with 13–14 peers and up to 334 kB/s.
+- `SchedulerConfig::startup_focus_bytes` (default 0 = off, as before) and `startup_focus_timeout` (default 30 s); in
+  the C API the keys `"startup_focus_bytes"` and `"startup_focus_timeout"` (seconds), read after every other key.
+- Tests: `StartupFocusTest.*` (8) and `StreamingSchedulerTest.TheFirstRequestAndAFarJumpAreANewPlace`, seen failing
+  against empty implementations first; `MultiFileTorrent.AStartWithPriorityGivesTheRightBytesAndTheWholeFile`.
+- Found on the way, not fixed here: read while it downloads, the part of a file's first piece that the piece shares
+  with a file before it that is not wanted comes back as zeros, with or without this start (app BUG-236; in the test
+  pack the first 11,363 bytes of the second episode, two runs in two).
+
 ### Fixed — Closing a share no longer stops the player's stream
 
 #### `seekserve-serve`

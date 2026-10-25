@@ -10,6 +10,7 @@ add_executable(seekserve-unit-tests
     unit/test_byte_source.cpp
     unit/test_file_source.cpp
     unit/test_streaming_scheduler.cpp
+    unit/test_startup_focus.cpp
     unit/test_range_parser.cpp
     unit/test_offline_cache.cpp
     unit/test_resume_data.cpp

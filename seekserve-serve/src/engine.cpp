@@ -543,6 +543,7 @@ Result<void> SeekServeEngine::want_files(const TorrentId& id, FileIndex reader,
 
             state->scheduler = std::make_unique<StreamingScheduler>(
                 config_.scheduler, state->avail, *state->mapper);
+            state->focus = std::make_unique<StartupFocus>(config_.scheduler);
 
             // Register byte source on HTTP server if running
             if (http_server_) {
@@ -705,7 +706,44 @@ void SeekServeEngine::on_stream_range(const ByteRange& range, const TorrentId& i
     if (!state || !state->scheduler || state->selected_file != fi) return;
     auto handle = sessions_->get_handle(id);
     if (!handle.is_valid()) return;
-    state->scheduler->on_range_request(range, handle);
+    if (state->scheduler->on_range_request(range, handle)) {
+        begin_startup_focus(*state, handle, range.start);
+    }
+}
+
+void SeekServeEngine::begin_startup_focus(TorrentState& state, lt::torrent_handle& handle,
+                                          std::int64_t offset) {
+    if (!state.focus || !state.mapper) return;
+    // libtorrent throws on a handle whose torrent went in between.
+    try {
+        auto wanted = state.focus->begin(offset, *state.mapper, state.avail,
+                                         handle.get_piece_priorities(),
+                                         StartupFocus::Clock::now());
+        if (wanted.empty()) return;
+        handle.prioritize_pieces(wanted);
+        spdlog::info("Engine: start with priority from byte {} of file {}", offset,
+                     state.selected_file);
+    } catch (const std::exception& e) {
+        state.focus->end();
+        spdlog::debug("Engine: no start with priority: {}", e.what());
+    }
+}
+
+void SeekServeEngine::end_startup_focus(const TorrentId& id, TorrentState& state,
+                                        lt::torrent_handle& handle) {
+    state.focus->end();
+    // The files' priorities again: libtorrent works the pieces' out of them.
+    const auto wanted = catalog_.wanted_files(id);
+    if (wanted.reader < 0 && wanted.background < 0) return;
+    try {
+        auto result = catalog_.set_wanted_files(id, wanted.reader, wanted.background, handle);
+        if (!result) {
+            spdlog::warn("Engine: the priorities after the start of {}: {}", id,
+                         result.error().message());
+        }
+    } catch (const std::exception& e) {
+        spdlog::debug("Engine: torrent {} went at the end of its start: {}", id, e.what());
+    }
 }
 
 void SeekServeEngine::stop_and_drain(HttpRangeServer& server) {
@@ -944,6 +982,10 @@ void SeekServeEngine::on_tick(const boost::system::error_code& ec) {
             }
 
             state->scheduler->tick(handle, st);
+            if (state->focus &&
+                state->focus->over(state->avail, StartupFocus::Clock::now())) {
+                end_startup_focus(id, *state, handle);
+            }
 
             // Update cache progress for selected file
             if (state->selected_file >= 0 && state->mapper) {

@@ -22,6 +22,7 @@
 #include "seekserve/metadata_catalog.hpp"
 #include "seekserve/piece_availability.hpp"
 #include "seekserve/byte_range_mapper.hpp"
+#include "seekserve/startup_focus.hpp"
 #include "seekserve/byte_source.hpp"
 #include "seekserve/streaming_scheduler.hpp"
 #include "seekserve/offline_cache.hpp"
@@ -128,6 +129,8 @@ private:
         std::unique_ptr<ByteRangeMapper> mapper;
         std::shared_ptr<ByteSource> source;
         std::unique_ptr<StreamingScheduler> scheduler;
+        // The start of the stream with priority (app BUG-228, DEC-656).
+        std::unique_ptr<StartupFocus> focus;
         FileIndex selected_file{-1};  // the reader's file
     };
 
@@ -140,6 +143,14 @@ private:
     // A range request or a reader's progress on a stream of file `fi` of
     // `id`, from the engine's server or from a share.
     void on_stream_range(const ByteRange& range, const TorrentId& id, FileIndex fi);
+    // A reader that starts or jumps far at byte `offset`: its first bytes
+    // come first (app BUG-228, DEC-656). Called with mu_ held.
+    void begin_startup_focus(TorrentState& state, lt::torrent_handle& handle,
+                             std::int64_t offset);
+    // The start with priority of `id` is over: the files' priorities again.
+    // Called with mu_ held.
+    void end_startup_focus(const TorrentId& id, TorrentState& state,
+                           lt::torrent_handle& handle);
     // Stops a stream server and waits, bounded, for its connection threads,
     // which own sockets of ioc_.
     static void stop_and_drain(HttpRangeServer& server);

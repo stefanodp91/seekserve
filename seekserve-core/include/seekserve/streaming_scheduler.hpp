@@ -20,7 +20,9 @@ public:
                        ByteRangeMapper& mapper);
 
     // Called on each HTTP Range request. Maps bytes → pieces and sets deadlines.
-    void on_range_request(const ByteRange& range, lt::torrent_handle& handle);
+    // True for a new place to read from: the first request, or a jump
+    // farther than the hot window (app BUG-228, DEC-656).
+    bool on_range_request(const ByteRange& range, lt::torrent_handle& handle);
 
     // Called when a piece finishes downloading.
     void on_piece_complete(PieceIndex piece);
@@ -51,6 +53,8 @@ private:
     // Seek boost state
     bool seek_boosting_{false};
     std::chrono::steady_clock::time_point seek_boost_start_;
+    // Whether a range request came already: the first one is a new place.
+    bool requested_ = false;
 
     int stall_count_{0};
     mutable std::mutex mu_;

@@ -61,6 +61,14 @@ struct SchedulerConfig {
     std::int64_t min_contiguous_bytes = 2 * 1024 * 1024;  // 2 MB
     int stall_count_threshold = 3;
     double min_sustained_rate = 500'000;  // 500 KB/s
+
+    // The start of a stream with priority (app BUG-228, DEC-656): when a
+    // reader starts or jumps far, the pieces of its first
+    // `startup_focus_bytes` come first and every other wanted piece last,
+    // until those bytes are there or `startup_focus_timeout` passed. 0 = off,
+    // as before.
+    std::int64_t startup_focus_bytes = 0;
+    std::chrono::milliseconds startup_focus_timeout{30000};
 };
 
 struct ServerConfig {
