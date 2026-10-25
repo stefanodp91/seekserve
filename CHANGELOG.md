@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added — The piece a reader waits for, in the status
+
+#### `seekserve-core` and `seekserve-serve`
+
+- **`get_status_json`** (and `ss_get_status`), while a reader waits for a download, says the first piece missing from
+  its position (app BUG-238, BUG-228, DEC-661): `wait_piece`, `wait_piece_peers`, `wait_piece_peers_open`,
+  `wait_piece_blocks`, `wait_piece_done`, `wait_piece_asked`, `wait_piece_free`, `wait_piece_askers`,
+  `wait_piece_slowest_kbs`, `wait_piece_fastest_kbs`, `wait_piece_still_ms` (`wait_piece_stats()`,
+  `WaitPieceWatch`). No address goes out.
+
+#### `flutter_seekserve`
+
+- **`WaitPiece`**, from `TorrentStatus.waitPiece`: the same numbers, null when no reader waits.
+
 ### Added — What the piece reads did, in the status
 
 #### `seekserve-core` and `seekserve-serve`
