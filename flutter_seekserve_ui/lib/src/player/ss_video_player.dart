@@ -11,6 +11,7 @@ import '../atoms/ss_slider.dart';
 import '../theme/ss_theme.dart';
 import '../utils/format.dart';
 import 'ss_buffering_overlay.dart';
+import 'ss_player_diagnostics.dart';
 import 'ss_player_status_bar.dart';
 import 'ss_position_reporter.dart';
 import 'ss_strings.dart';
@@ -98,6 +99,11 @@ class SsVideoPlayer extends StatefulWidget {
   /// subtitles, fullscreen).
   final List<Widget> topBarActions;
 
+  /// What the app wants to know of the player, for its debug log, and its
+  /// choice of decoder; null, the default, for a player as before (app
+  /// BUG-238, BUG-239, DEC-662).
+  final SsPlayerDiagnostics? diagnostics;
+
   const SsVideoPlayer({
     super.key,
     required this.streamUrl,
@@ -121,6 +127,7 @@ class SsVideoPlayer extends StatefulWidget {
     this.strings = const SsStrings(),
     this.showStreamUrl = true,
     this.topBarActions = const [],
+    this.diagnostics,
   });
 
   @override
@@ -148,6 +155,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
     with WidgetsBindingObserver {
   Player? _player;
   VideoController? _videoController;
+  SsPlayerWatch? _watch;
   String _error = '';
   bool _noVideoFrames = false;
   Timer? _formatRetryTimer;
@@ -219,11 +227,20 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
   }
 
   void _startPlayer(String url) {
-    _player?.dispose();
+    _disposePlayer();
     _noVideoFrames = false;
 
-    _player = Player();
-    _videoController = VideoController(_player!);
+    final diagnostics = widget.diagnostics;
+    _player = diagnostics == null
+        ? Player()
+        : Player(configuration: diagnostics.playerConfiguration);
+    _videoController = diagnostics == null
+        ? VideoController(_player!)
+        : VideoController(_player!, configuration: diagnostics.videoConfiguration);
+    _watch = diagnostics == null
+        ? null
+        : SsPlayerWatch(diagnostics, _player!, _videoController!);
+    final watch = _watch;
 
     // A new player starts again from the initial position: what the one
     // before said no longer counts.
@@ -243,6 +260,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
     });
 
     _player!.stream.error.listen((err) {
+      watch?.error(err);
       if (!mounted) return;
       // "Failed to recognize file format" means the torrent hasn't buffered
       // enough data yet. Retry silently after 4 seconds.
@@ -274,11 +292,20 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
       });
     }
 
-    unawaited(_open(_player!, url));
+    unawaited(_open(_player!, url, watch));
     if (mounted) setState(() {});
   }
 
-  Future<void> _open(Player player, String url) async {
+  /// Disposes the current player, through its [SsPlayerWatch] if any.
+  void _disposePlayer() {
+    final player = _player;
+    final watch = _watch;
+    _watch = null;
+    if (player == null) return;
+    unawaited(watch == null ? player.dispose() : watch.dispose(player));
+  }
+
+  Future<void> _open(Player player, String url, SsPlayerWatch? watch) async {
     final platform = player.platform;
     if (platform is NativePlayer && _isLocalStream(url)) {
       // Read when the stream opens, so it has to be set before open().
@@ -294,6 +321,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
     if (!mounted || !identical(player, _player)) return;
     final start = widget.initialPosition;
     await player.open(Media(url, start: start > Duration.zero ? start : null));
+    watch?.opened();
   }
 
   /// Opens the stream again at [target], keeping the chosen tracks.
@@ -385,7 +413,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
     _formatRetryTimer?.cancel();
     // The point reached, before the player that knows it goes.
     _positions?.flush();
-    _player?.dispose();
+    _disposePlayer();
     super.dispose();
   }
 
