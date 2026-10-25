@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added — What the piece reads did, in the status
+
+#### `seekserve-core` and `seekserve-serve`
+
+- **`get_status_json`** (and `ss_get_status`) says what the reads of a stream did, for the app's debug log (app
+  BUG-238, DEC-660): `piece_asks`, `piece_repeats`, `piece_answers`, `piece_errors`, `piece_last_error`,
+  `piece_late`, `piece_waiting`, `piece_oldest_wait_ms` (`TorrentPieceReader::stats()`); `disk_reads`,
+  `read_timeouts`, `readers_waiting_download`, `readers_waiting_answer` (`ByteSource::stats()`); `range_requests`
+  (`HttpRangeServer::requests()`); `alerts_dropped` (libtorrent's `alerts_dropped_alert`). No address, no file name.
+
+#### `flutter_seekserve`
+
+- **`StreamReads`**, from `TorrentStatus.reads`: the same numbers, null from an older library.
+
 ### Fixed — A piece read that never answers no longer stops the stream
 
 #### `seekserve-core`
