@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added — The video player's diagnostics
+
+#### `flutter_seekserve_ui`
+
+- **`SsVideoPlayer.diagnostics`** (`SsPlayerDiagnostics`, null by default) gives an app, for its debug log, mpv's
+  messages and the player's errors with no address (`ssRedactPlayerLog`), the stages of each player with their times
+  and a word when one is late (`SsPlayerLife`, `SsPlayerStage`), the player's state on request (`SsPlayerProbe`,
+  `SsPlayerState`) and software decoding; `SsCappedLog` caps the lines (app BUG-238, BUG-239, DEC-662).
+
 ### Added — The piece a reader waits for, in the status
 
 #### `seekserve-core` and `seekserve-serve`
