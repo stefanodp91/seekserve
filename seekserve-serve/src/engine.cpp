@@ -209,6 +209,22 @@ void SeekServeEngine::wire_alerts() {
             }
         });
 
+    // read_piece_alert → the stream that asked for the piece (app BUG-236)
+    sessions_->alert_dispatcher().on<lt::read_piece_alert>(
+        [this](const lt::read_piece_alert& a) {
+            auto found = sessions_->id_of(a.handle);
+            if (!found) return;
+            auto piece = static_cast<PieceIndex>(a.piece);
+            std::lock_guard lock(mu_);
+            auto* state = find_state(*found);
+            if (!state || !state->pieces) return;
+            if (a.error) {
+                state->pieces->on_read(piece, make_error_code(errc::piece_not_available));
+            } else {
+                state->pieces->on_read(piece, PieceBuffer{a.buffer, a.size});
+            }
+        });
+
     // file_completed_alert → cache
     sessions_->alert_dispatcher().on<lt::file_completed_alert>(
         [this](const lt::file_completed_alert& a) {
@@ -537,9 +553,19 @@ Result<void> SeekServeEngine::want_files(const TorrentId& id, FileIndex reader,
             auto file_path = (std::filesystem::path(config_.session.save_path) /
                               file_info.value().path).string();
 
+            state->pieces = std::make_shared<TorrentPieceReader>([handle](PieceIndex p) {
+                // libtorrent throws on a handle whose torrent went in between;
+                // the read then waits in vain and the stream asks again.
+                try {
+                    handle.read_piece(lt::piece_index_t{p});
+                } catch (const std::exception& e) {
+                    spdlog::debug("Engine: no read of piece {}: {}", p, e.what());
+                }
+            });
             state->source = std::make_shared<ByteSource>(
                 handle, reader, file_path, *state->mapper, state->avail,
-                std::chrono::duration_cast<std::chrono::milliseconds>(config_.server.read_timeout));
+                std::chrono::duration_cast<std::chrono::milliseconds>(config_.server.read_timeout),
+                state->pieces, config_.server.piece_cache_bytes);
 
             state->scheduler = std::make_unique<StreamingScheduler>(
                 config_.scheduler, state->avail, *state->mapper);
@@ -642,6 +668,10 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
             status_json["stream_mode"] = static_cast<int>(state->scheduler->current_mode());
             status_json["playhead_piece"] = state->scheduler->playhead_piece();
             status_json["active_deadlines"] = state->scheduler->active_deadlines();
+        }
+        if (state && state->source) {
+            status_json["piece_reads"] = state->source->piece_reads();
+            status_json["piece_cache_hits"] = state->source->cache_hits();
         }
     }
 

@@ -14,6 +14,8 @@
 #include "seekserve/byte_range_mapper.hpp"
 #include "seekserve/piece_availability.hpp"
 #include "seekserve/stream_source.hpp"
+#include "seekserve/piece_cache.hpp"
+#include "seekserve/piece_reader.hpp"
 
 namespace seekserve {
 
@@ -24,7 +26,9 @@ public:
                const std::string& file_path,
                ByteRangeMapper& mapper,
                PieceAvailabilityIndex& avail,
-               std::chrono::milliseconds read_timeout = std::chrono::seconds(30));
+               std::chrono::milliseconds read_timeout = std::chrono::seconds(30),
+               std::shared_ptr<PieceReader> pieces = nullptr,
+               std::int64_t piece_cache_bytes = 0);
 
     // Waits up to the read timeout given at construction for the pieces
     // covering [offset, offset+len), then reads them from disk.
@@ -44,8 +48,19 @@ public:
     void cancel() override;
     std::int64_t file_size() const override;
 
+    // Pieces read through libtorrent, and chunks found in memory instead.
+    std::int64_t piece_reads() const;
+    std::int64_t cache_hits() const;
+
 private:
     Result<std::vector<std::uint8_t>> read_from_disk(std::int64_t offset, std::int64_t len);
+    // [offset, offset+len), each piece that arrived during the stream through
+    // libtorrent, the others from disk (app BUG-236, DEC-657).
+    Result<std::vector<std::uint8_t>> read_by_piece(std::int64_t offset, std::int64_t len,
+                                                    std::chrono::milliseconds wait);
+    // A piece's bytes from memory or through libtorrent; one libtorrent does
+    // not have goes back to waiting (errc::timeout_waiting_for_piece).
+    Result<PieceBuffer> piece_bytes(PieceIndex piece, std::chrono::milliseconds wait);
 
     lt::torrent_handle handle_;
     FileIndex file_idx_;
@@ -61,6 +76,14 @@ private:
     mutable std::mutex mu_;
     std::condition_variable cv_;
     std::atomic<bool> cancelled_{false};
+    std::shared_ptr<PieceReader> pieces_;
+    // The file's pieces that were there when the stream started: written to
+    // the file long ago, they are read from it.
+    PieceIndex first_piece_ = 0;
+    std::vector<bool> on_disk_at_start_;
+    PieceCache cache_;
+    std::atomic<std::int64_t> piece_reads_{0};
+    std::atomic<std::int64_t> cache_hits_{0};
 };
 
 } // namespace seekserve

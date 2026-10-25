@@ -562,8 +562,33 @@ TEST_F(MultiFileTorrent, TheReaderGetsTheBytesOfTheSelectedFile) {
               expected.substr(size - 100));
 }
 
+// The first piece of a file of a pack is shared with the file before, which
+// is not wanted: read while it downloads, its part of that piece is right
+// (app BUG-236, DEC-657). libtorrent says a piece is complete before it is
+// written to the file; the stream reads such a piece through libtorrent.
+TEST_F(MultiFileTorrent, TheStartOfAFileOfAPackIsRightWhileItDownloads) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+    ASSERT_TRUE(engine.start_server());
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    ASSERT_GE(e02, 0);
+    ASSERT_TRUE(engine.select_file(id, e02));
+    auto url = engine.get_stream_url(id, e02);
+    ASSERT_TRUE(url);
+
+    const std::string expected = seeded(kE02);
+    const std::size_t length = 2 * kPiece;
+    EXPECT_EQ(http_get_body(url.value(), "bytes=0-" + std::to_string(length - 1)),
+              expected.substr(0, length));
+}
+
 // The start of a stream with priority (app BUG-228, DEC-656): with it on,
-// the player reads its file near the start and from a point far in and gets
+// the player reads its file from the start and from a point far in and gets
 // the right bytes, and the file then downloads to its last byte: the
 // priorities come back after the start, and none is zero in between.
 TEST_F(MultiFileTorrent, AStartWithPriorityGivesTheRightBytesAndTheWholeFile) {
@@ -587,12 +612,9 @@ TEST_F(MultiFileTorrent, AStartWithPriorityGivesTheRightBytesAndTheWholeFile) {
 
     const std::string expected = seeded(kE02);
     const std::size_t length = 4 * kPiece;
-    // From the file's second piece: its first one is shared with the file
-    // before, which is not wanted, and read while it downloads its part of
-    // that piece comes back as zeros, with or without this start (a
-    // separate problem, app BUG-236).
-    const std::size_t start = static_cast<std::size_t>(
-        kPiece - (ti_->layout().file_offset(lt::file_index_t{e02}) % kPiece));
+    // From the start: the part of the first piece the file shares with the
+    // one before is right too, read through libtorrent (app BUG-236).
+    const std::size_t start = 0;
     const std::size_t far = expected.size() / 2;
     EXPECT_EQ(http_get_body(url.value(), "bytes=" + std::to_string(start) + "-" +
                                              std::to_string(start + length - 1)),

@@ -95,6 +95,9 @@ struct ServerConfig {
     // up. 0 = as long as the client stays connected: the response then never
     // ends short while the player still waits for a seek target (app BUG-83).
     std::chrono::seconds stall_timeout{0};
+    // How many bytes of pieces read through libtorrent a stream keeps for its
+    // next chunks; always at least one piece (app BUG-236, DEC-657).
+    std::int64_t piece_cache_bytes = 16 * 1024 * 1024;
 };
 
 struct CacheConfig {

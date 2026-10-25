@@ -37,6 +37,14 @@ void PieceAvailabilityIndex::mark_complete(PieceIndex piece) {
     }
 }
 
+void PieceAvailabilityIndex::mark_incomplete(PieceIndex piece) {
+    if (piece < 0 || piece >= num_pieces_) return;
+    bool expected = true;
+    if (completed_[piece].compare_exchange_strong(expected, false, std::memory_order_release)) {
+        completed_count_.fetch_sub(1, std::memory_order_relaxed);
+    }
+}
+
 bool PieceAvailabilityIndex::is_complete(PieceIndex piece) const {
     if (piece < 0 || piece >= num_pieces_) return false;
     return completed_[piece].load(std::memory_order_acquire);

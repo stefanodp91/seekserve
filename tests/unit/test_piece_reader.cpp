@@ -1,0 +1,96 @@
+#include <gtest/gtest.h>
+
+#include <atomic>
+#include <chrono>
+#include <thread>
+#include <vector>
+
+#include "seekserve/piece_reader.hpp"
+
+using namespace seekserve;
+using namespace std::chrono_literals;
+
+// Whole pieces read through libtorrent's read_piece (app BUG-236, DEC-657).
+namespace {
+
+PieceBuffer piece_of(int size, char fill) {
+    PieceBuffer b;
+    b.data.reset(new char[static_cast<std::size_t>(size)]);
+    std::fill(b.data.get(), b.data.get() + size, fill);
+    b.size = size;
+    return b;
+}
+
+}  // namespace
+
+TEST(TorrentPieceReaderTest, ItAsksLibtorrentAndReturnsItsAnswer) {
+    std::vector<PieceIndex> asked;
+    TorrentPieceReader* self = nullptr;
+    TorrentPieceReader reader([&](PieceIndex p) {
+        asked.push_back(p);
+        self->on_read(p, piece_of(10, 'x'));
+    });
+    self = &reader;
+
+    auto got = reader.read(7, 1s);
+
+    ASSERT_TRUE(got.ok()) << got.error().message();
+    EXPECT_EQ(got.value().size, 10);
+    EXPECT_EQ(got.value().data[0], 'x');
+    EXPECT_EQ(asked, std::vector<PieceIndex>{7});
+}
+
+TEST(TorrentPieceReaderTest, TwoReadersOfOnePieceAskOnce) {
+    std::atomic<int> asks{0};
+    TorrentPieceReader reader([&](PieceIndex) { ++asks; });
+
+    std::atomic<int> ok{0};
+    auto wait_for_it = [&] {
+        if (reader.read(2, 2s).ok()) ++ok;
+    };
+    std::thread a(wait_for_it);
+    std::thread b(wait_for_it);
+    std::this_thread::sleep_for(100ms);
+    reader.on_read(2, piece_of(5, 'y'));
+    a.join();
+    b.join();
+
+    EXPECT_EQ(asks.load(), 1);
+    EXPECT_EQ(ok.load(), 2);
+}
+
+TEST(TorrentPieceReaderTest, APieceLibtorrentDoesNotHaveIsNotAvailable) {
+    TorrentPieceReader* self = nullptr;
+    TorrentPieceReader reader([&](PieceIndex p) {
+        self->on_read(p, make_error_code(errc::piece_not_available));
+    });
+    self = &reader;
+
+    auto got = reader.read(1, 1s);
+
+    ASSERT_FALSE(got.ok());
+    EXPECT_EQ(got.error(), make_error_code(errc::piece_not_available));
+}
+
+TEST(TorrentPieceReaderTest, NoAnswerInTimeIsATimeout) {
+    TorrentPieceReader reader([](PieceIndex) {});
+
+    auto got = reader.read(1, 50ms);
+
+    ASSERT_FALSE(got.ok());
+    EXPECT_EQ(got.error(), make_error_code(errc::timeout_waiting_for_piece));
+}
+
+TEST(TorrentPieceReaderTest, CancelWakesTheReader) {
+    TorrentPieceReader reader([](PieceIndex) {});
+    std::thread canceller([&] {
+        std::this_thread::sleep_for(50ms);
+        reader.cancel();
+    });
+
+    auto got = reader.read(1, 5s);
+    canceller.join();
+
+    ASSERT_FALSE(got.ok());
+    EXPECT_EQ(got.error(), make_error_code(errc::cancelled));
+}

@@ -61,6 +61,12 @@ typedef void (*ss_event_callback_t)(const char* event_json, void* user_data);
 //     player waits for from queuing behind the rest of the file.
 //   "startup_focus_timeout" (int, seconds, default 30): the longest such a
 //     start lasts; then the files' priorities hold again.
+// config_json key for the pieces a stream reads through libtorrent
+// (optional; read last; app BUG-236, DEC-657):
+//   "piece_cache_bytes" (int, default 16 MB): how many bytes of such pieces a
+//     stream keeps for its next chunks, always at least one piece. A piece
+//     that arrives during the stream is read through libtorrent, which has
+//     it before it is written to the file.
 __attribute__((visibility("default")))
 SeekServeEngine* ss_engine_create(const char* config_json);
 

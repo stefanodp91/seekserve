@@ -23,6 +23,7 @@
 #include "seekserve/piece_availability.hpp"
 #include "seekserve/byte_range_mapper.hpp"
 #include "seekserve/startup_focus.hpp"
+#include "seekserve/piece_reader.hpp"
 #include "seekserve/byte_source.hpp"
 #include "seekserve/streaming_scheduler.hpp"
 #include "seekserve/offline_cache.hpp"
@@ -128,6 +129,9 @@ private:
         PieceAvailabilityIndex avail;
         std::unique_ptr<ByteRangeMapper> mapper;
         std::shared_ptr<ByteSource> source;
+        // Reads the pieces that arrive during the stream through libtorrent
+        // (app BUG-236, DEC-657).
+        std::shared_ptr<TorrentPieceReader> pieces;
         std::unique_ptr<StreamingScheduler> scheduler;
         // The start of the stream with priority (app BUG-228, DEC-656).
         std::unique_ptr<StartupFocus> focus;

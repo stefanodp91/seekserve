@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <map>
+#include <memory>
 #include <cstdio>
 #include <fstream>
 #include <thread>
@@ -11,6 +13,7 @@
 #include <libtorrent/torrent_handle.hpp>
 
 #include "seekserve/byte_source.hpp"
+#include "seekserve/piece_reader.hpp"
 #include "seekserve/byte_range_mapper.hpp"
 #include "seekserve/piece_availability.hpp"
 #include "seekserve/types.hpp"
@@ -380,6 +383,110 @@ TEST_F(ByteSourceTest, ReadEntireFile) {
     for (int i = 0; i < kFileSize; ++i) {
         EXPECT_EQ(result.value()[i], test_byte(i)) << "Mismatch at " << i;
     }
+}
+
+// --- Pieces read through libtorrent (app BUG-236, DEC-657) ---
+
+// A PieceReader with the answers of a test, counting the reads.
+class FakePieceReader final : public PieceReader {
+public:
+    std::map<PieceIndex, Result<PieceBuffer>> answers;
+    std::atomic<int> reads{0};
+
+    Result<PieceBuffer> read(PieceIndex piece, std::chrono::milliseconds) override {
+        ++reads;
+        auto it = answers.find(piece);
+        if (it == answers.end()) return make_error_code(errc::timeout_waiting_for_piece);
+        return it->second;
+    }
+    void cancel() override {}
+};
+
+PieceBuffer filled(int size, char fill) {
+    PieceBuffer b;
+    b.data.reset(new char[static_cast<std::size_t>(size)]);
+    std::fill(b.data.get(), b.data.get() + size, fill);
+    b.size = size;
+    return b;
+}
+
+class ByteSourcePiecesTest : public ByteSourceTest {
+protected:
+    std::unique_ptr<ByteSource> make_reading_source(std::shared_ptr<FakePieceReader> pieces) {
+        return std::make_unique<ByteSource>(lt::torrent_handle{}, 0, file_path_, *mapper_,
+                                            *avail_, std::chrono::seconds(1), pieces,
+                                            16 * 1024 * 1024);
+    }
+};
+
+TEST_F(ByteSourcePiecesTest, APieceThatArrivesDuringTheStreamIsReadThroughTheLibrary) {
+    avail_->mark_complete(0);
+    auto pieces = std::make_shared<FakePieceReader>();
+    pieces->answers.emplace(1, filled(kPieceLength, 'R'));
+    auto src = make_reading_source(pieces);
+    avail_->mark_complete(1);  // during the stream: on disk maybe not yet
+
+    auto result = src->read(1000, 100);
+
+    ASSERT_TRUE(result.ok()) << result.error().message();
+    ASSERT_EQ(static_cast<int>(result.value().size()), 100);
+    for (int i = 0; i < 100; ++i) EXPECT_EQ(result.value()[i], 'R') << i;
+    EXPECT_EQ(pieces->reads.load(), 1);
+}
+
+TEST_F(ByteSourcePiecesTest, APieceOnDiskWhenTheStreamStartsIsReadFromTheFile) {
+    mark_all_complete();
+    auto pieces = std::make_shared<FakePieceReader>();
+    pieces->answers.emplace(0, filled(kPieceLength, 'R'));
+    auto src = make_reading_source(pieces);
+
+    auto result = src->read(0, 100);
+
+    ASSERT_TRUE(result.ok());
+    for (int i = 0; i < 100; ++i) EXPECT_EQ(result.value()[i], test_byte(i)) << i;
+    EXPECT_EQ(pieces->reads.load(), 0);
+}
+
+TEST_F(ByteSourcePiecesTest, APieceIsReadOnceThenFromMemory) {
+    auto pieces = std::make_shared<FakePieceReader>();
+    pieces->answers.emplace(1, filled(kPieceLength, 'R'));
+    auto src = make_reading_source(pieces);
+    avail_->mark_complete(1);
+
+    ASSERT_TRUE(src->read(1000, 10).ok());
+    ASSERT_TRUE(src->read(1500, 10).ok());
+
+    EXPECT_EQ(pieces->reads.load(), 1);
+    EXPECT_EQ(src->piece_reads(), 1);
+    EXPECT_EQ(src->cache_hits(), 1);
+}
+
+TEST_F(ByteSourcePiecesTest, AReadAcrossAPieceOnDiskAndANewOne) {
+    avail_->mark_complete(0);
+    auto pieces = std::make_shared<FakePieceReader>();
+    pieces->answers.emplace(1, filled(kPieceLength, 'R'));
+    auto src = make_reading_source(pieces);
+    avail_->mark_complete(1);
+
+    auto result = src->read(990, 20);
+
+    ASSERT_TRUE(result.ok());
+    ASSERT_EQ(static_cast<int>(result.value().size()), 20);
+    for (int i = 0; i < 10; ++i) EXPECT_EQ(result.value()[i], test_byte(990 + i)) << i;
+    for (int i = 10; i < 20; ++i) EXPECT_EQ(result.value()[i], 'R') << i;
+}
+
+TEST_F(ByteSourcePiecesTest, APieceTheLibraryDoesNotHaveGoesBackToWaiting) {
+    auto pieces = std::make_shared<FakePieceReader>();
+    pieces->answers.emplace(1, make_error_code(errc::piece_not_available));
+    auto src = make_reading_source(pieces);
+    avail_->mark_complete(1);
+
+    auto result = src->read(1000, 10, std::chrono::milliseconds(50));
+
+    ASSERT_FALSE(result.ok());
+    EXPECT_EQ(result.error(), make_error_code(errc::timeout_waiting_for_piece));
+    EXPECT_FALSE(avail_->is_complete(1));
 }
 
 }  // namespace

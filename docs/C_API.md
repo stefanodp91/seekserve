@@ -43,6 +43,10 @@ The start of a stream with priority takes two more (app BUG-228): `startup_focus
 jumps far, the pieces of its first so many bytes come first and every other wanted piece
 last, until those bytes are there or the time passed.
 
+`piece_cache_bytes` (default 16 MB): a piece that arrives during a stream is read through
+libtorrent, which has it before it is written to the file (app BUG-236); a stream keeps so
+many bytes of such pieces for its next chunks, always at least one piece.
+
 `ca_cert_file` is a PEM file with the CAs that HTTPS trackers and web seeds are
 checked against, on top of OpenSSL's default locations. On Android it is
 needed: the default locations do not exist there, and OpenSSL ignores

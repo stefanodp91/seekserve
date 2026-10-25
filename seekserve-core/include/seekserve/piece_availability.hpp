@@ -15,6 +15,9 @@ public:
 
     void reset(int num_pieces, int piece_length, int last_piece_length);
     void mark_complete(PieceIndex piece);
+    // A piece libtorrent turned out not to have (app BUG-236): to wait for
+    // again.
+    void mark_incomplete(PieceIndex piece);
     bool is_complete(PieceIndex piece) const;
     bool is_span_complete(const PieceSpan& span) const;
     int contiguous_from(PieceIndex start) const;

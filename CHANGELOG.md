@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Fixed — A piece that arrives during a stream is read through libtorrent
+
+#### `seekserve-core`, `seekserve-serve`, `seekserve-capi`
+
+- **`ByteSource`** read a piece from the file as soon as libtorrent said it complete, but libtorrent checks a piece's
+  hash from its store buffer (`mmap_disk_io`), before the piece is written to the file: read at that moment, the
+  start of a file of a pack (the part of the piece shared with an unwanted file before it, which also goes to the part
+  file) came back as zeros (app BUG-236, DEC-657; in the test pack 11,308 wrong bytes, right one second later).
+  Now the pieces that arrive during the stream are read through libtorrent (`TorrentPieceReader`,
+  `torrent_handle::read_piece` and its `read_piece_alert`, which also looks in the store buffer); the pieces that were
+  there when the stream started are read from the file as before. A piece read is kept for the next chunks
+  (`PieceCache`, up to `ServerConfig::piece_cache_bytes`, 16 MB by default, always at least one piece); a piece
+  libtorrent says it does not have goes back to waiting (`PieceAvailabilityIndex::mark_incomplete`).
+- The status of a torrent with a stream gets `piece_reads` and `piece_cache_hits`. The C API reads
+  `"piece_cache_bytes"`, last.
+- Tests: `PieceCacheTest.*` (4), `TorrentPieceReaderTest.*` (5), `ByteSourcePiecesTest.*` (5), seen failing against
+  empty implementations first (but for the ones true before too); `MultiFileTorrent.TheStartOfAFileOfAPackIsRightWhileItDownloads`,
+  seen failing first, two runs in two; `MultiFileTorrent.AStartWithPriorityGivesTheRightBytesAndTheWholeFile` reads
+  from the start again.
+
 ### Added — The start of a stream with priority
 
 #### `seekserve-core`, `seekserve-serve`, `seekserve-capi`
@@ -17,9 +37,7 @@
   the C API the keys `"startup_focus_bytes"` and `"startup_focus_timeout"` (seconds), read after every other key.
 - Tests: `StartupFocusTest.*` (8) and `StreamingSchedulerTest.TheFirstRequestAndAFarJumpAreANewPlace`, seen failing
   against empty implementations first; `MultiFileTorrent.AStartWithPriorityGivesTheRightBytesAndTheWholeFile`.
-- Found on the way, not fixed here: read while it downloads, the part of a file's first piece that the piece shares
-  with a file before it that is not wanted comes back as zeros, with or without this start (app BUG-236; in the test
-  pack the first 11,363 bytes of the second episode, two runs in two).
+- Found on the way: app BUG-236, fixed above.
 
 ### Fixed — Closing a share no longer stops the player's stream
 
