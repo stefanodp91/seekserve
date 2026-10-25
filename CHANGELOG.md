@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixed — A piece read that never answers no longer stops the stream
+
+#### `seekserve-core`
+
+- **`TorrentPieceReader`** kept a request to `read_piece` on its way until it was answered (since the fix of the late
+  answers): an answer that never came stopped the stream for good, and on the app's Pixel 4 a player waited with the
+  whole file on disk (app BUG-238, DEC-659). A read that finds the piece still unanswered, with nobody else waiting
+  for it, now asks again; a late answer is still the next read's.
+- Tests: `TorrentPieceReaderTest.AReadOfAPieceWithNoAnswerAsksAgain`, `.AReadWhileAnotherWaitsAsksNoMore`,
+  `.TheSecondAnswerOfAPieceAskedTwiceIsHarmless`.
+
 ### Added — The piece length and the start with priority in the status
 
 #### `seekserve-serve`
