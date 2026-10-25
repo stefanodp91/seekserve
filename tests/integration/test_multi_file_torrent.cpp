@@ -658,6 +658,24 @@ TEST_F(MultiFileTorrent, TheStatusSaysThePieceLengthAndTheStartWithPriority) {
               seeded(kE02).substr(0, kPiece));
     EXPECT_TRUE(status_of(engine, id).value("startup_focus", false))
         << engine.get_status_json(id);
+    // And what the reads did (app BUG-238, DEC-660).
+    {
+        const auto status = status_of(engine, id);
+        EXPECT_GE(status.value("piece_asks", 0), 1) << status.dump();
+        EXPECT_GE(status.value("piece_answers", 0), 1) << status.dump();
+        EXPECT_EQ(status.value("piece_errors", -1), 0) << status.dump();
+        EXPECT_EQ(status.value("piece_waiting", -1), 0) << status.dump();
+        EXPECT_EQ(status.value("piece_oldest_wait_ms", -1), 0) << status.dump();
+        EXPECT_TRUE(status.contains("piece_repeats")) << status.dump();
+        EXPECT_TRUE(status.contains("piece_late")) << status.dump();
+        EXPECT_EQ(status.value("piece_last_error", std::string("?")), "") << status.dump();
+        EXPECT_TRUE(status.contains("disk_reads")) << status.dump();
+        EXPECT_TRUE(status.contains("read_timeouts")) << status.dump();
+        EXPECT_EQ(status.value("readers_waiting_download", -1), 0) << status.dump();
+        EXPECT_EQ(status.value("readers_waiting_answer", -1), 0) << status.dump();
+        EXPECT_EQ(status.value("range_requests", 0), 1) << status.dump();
+        EXPECT_EQ(status.value("alerts_dropped", -1), 0) << status.dump();
+    }
 
     proxy.limit_download(0);
     EXPECT_TRUE(wait_for([&] { return !status_of(engine, id).value("startup_focus", true); }))

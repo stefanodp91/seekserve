@@ -161,6 +161,16 @@ protected:
 
 // --- HEAD request ---
 
+// How many requests of a stream reached the server, for the app's debug log
+// (app BUG-238, DEC-660): one that never comes shows in it.
+TEST_F(HttpRangeServerTest, ItCountsTheRequestsOfAStream) {
+    EXPECT_EQ(server_->requests("abc123", 0), 0);
+    do_get("/stream/abc123/0?token=testtoken", "bytes=0-99");
+    do_get("/stream/abc123/0?token=testtoken", "bytes=100-199");
+    EXPECT_EQ(server_->requests("abc123", 0), 2);
+    EXPECT_EQ(server_->requests("other", 0), 0);
+}
+
 TEST_F(HttpRangeServerTest, HeadReturnsAcceptRanges) {
     auto res = do_head("/stream/abc123/0?token=testtoken");
 

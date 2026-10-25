@@ -215,6 +215,69 @@ void main() {
       expect(TorrentStatus.fromJson({'torrent_id': 'abc'}).toJson().containsKey('files'), false);
     });
 
+    test('fromJson reads what the reads did (BUG-238)', () {
+      final reads = TorrentStatus.fromJson({
+        'torrent_id': 'abc',
+        'piece_asks': 12,
+        'piece_repeats': 6,
+        'piece_answers': 7,
+        'piece_errors': 5,
+        'piece_last_error': 'invalid piece index',
+        'piece_late': 1,
+        'piece_waiting': 1,
+        'piece_oldest_wait_ms': 3200,
+        'disk_reads': 4,
+        'read_timeouts': 6,
+        'readers_waiting_download': 0,
+        'readers_waiting_answer': 1,
+        'range_requests': 3,
+        'alerts_dropped': 0,
+      }).reads!;
+
+      expect(reads.asks, 12);
+      expect(reads.repeats, 6);
+      expect(reads.answers, 7);
+      expect(reads.errors, 5);
+      expect(reads.lastError, 'invalid piece index');
+      expect(reads.late, 1);
+      expect(reads.waiting, 1);
+      expect(reads.oldestWaitMs, 3200);
+      expect(reads.diskReads, 4);
+      expect(reads.timeouts, 6);
+      expect(reads.waitingDownload, 0);
+      expect(reads.waitingAnswer, 1);
+      expect(reads.requests, 3);
+      expect(reads.alertsDropped, 0);
+    });
+
+    test('an older library says nothing of the reads', () {
+      expect(TorrentStatus.fromJson({'torrent_id': 'abc'}).reads, isNull);
+    });
+
+    test('toJson writes the reads back', () {
+      final json = {
+        'torrent_id': 'abc',
+        'piece_asks': 2,
+        'piece_repeats': 0,
+        'piece_answers': 2,
+        'piece_errors': 0,
+        'piece_last_error': '',
+        'piece_late': 0,
+        'piece_waiting': 0,
+        'piece_oldest_wait_ms': 0,
+        'disk_reads': 1,
+        'read_timeouts': 0,
+        'readers_waiting_download': 0,
+        'readers_waiting_answer': 0,
+        'range_requests': 1,
+        'alerts_dropped': 0,
+      };
+      final written = TorrentStatus.fromJson(json).toJson();
+      for (final key in json.keys) {
+        expect(written[key], json[key], reason: key);
+      }
+    });
+
     test('toJson writes the start numbers back', () {
       final json = {
         'piece_length': 524288,

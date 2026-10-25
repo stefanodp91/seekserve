@@ -217,6 +217,9 @@ private:
     mutable std::mutex event_mu_;
 
     std::atomic<bool> server_running_{false};
+    // libtorrent's alerts_dropped_alert: alerts lost to a full queue, a read
+    // answer among them maybe (app BUG-238, DEC-660).
+    std::atomic<std::int64_t> alerts_dropped_{0};
 
     struct ShareState {
         std::shared_ptr<HttpRangeServer> server;

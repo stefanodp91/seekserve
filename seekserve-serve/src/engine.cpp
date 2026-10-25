@@ -2,6 +2,7 @@
 #include "seekserve/resume_data.hpp"
 #include "seekserve/auth_utils.hpp"
 #include "seekserve/file_source.hpp"
+#include "read_numbers.hpp"
 
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
@@ -219,11 +220,15 @@ void SeekServeEngine::wire_alerts() {
             auto* state = find_state(*found);
             if (!state || !state->pieces) return;
             if (a.error) {
-                state->pieces->on_read(piece, make_error_code(errc::piece_not_available));
+                state->pieces->on_read(piece, make_error_code(errc::piece_not_available),
+                                       a.error.message());
             } else {
                 state->pieces->on_read(piece, PieceBuffer{a.buffer, a.size});
             }
         });
+
+    sessions_->alert_dispatcher().on<lt::alerts_dropped_alert>(
+        [this](const lt::alerts_dropped_alert&) { ++alerts_dropped_; });
 
     // file_completed_alert → cache
     sessions_->alert_dispatcher().on<lt::file_completed_alert>(
@@ -683,8 +688,15 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
         if (state && state->source) {
             status_json["piece_reads"] = state->source->piece_reads();
             status_json["piece_cache_hits"] = state->source->cache_hits();
+            put_stream_reads(status_json, state->source->stats());
+        }
+        if (state && state->pieces) put_piece_reads(status_json, state->pieces->stats());
+        if (state && http_server_) {
+            status_json["range_requests"] = http_server_->requests(id, state->selected_file);
         }
     }
+
+    status_json["alerts_dropped"] = alerts_dropped_.load();
 
     return status_json.dump();
 }

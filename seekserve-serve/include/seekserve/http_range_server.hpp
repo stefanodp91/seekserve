@@ -57,6 +57,10 @@ public:
     // promptly: their sources are cancelled and their sockets shut down.
     int active_connections() const;
 
+    // How many requests for the bytes of a stream reached this server, for
+    // the app's debug log (app BUG-238, DEC-660).
+    std::int64_t requests(const TorrentId& id, FileIndex fi) const;
+
 private:
     struct SourceEntry {
         std::shared_ptr<StreamSource> source;
@@ -116,6 +120,10 @@ private:
     std::mutex readers_mu_;
     std::unordered_map<std::string, std::uint64_t> position_owner_;
     std::uint64_t next_reader_{1};
+
+    // By stream key; taken after readers_mu_, never before.
+    mutable std::mutex requests_mu_;
+    std::unordered_map<std::string, std::int64_t> requests_;
 
     std::shared_ptr<Connections> connections_ = std::make_shared<Connections>();
 

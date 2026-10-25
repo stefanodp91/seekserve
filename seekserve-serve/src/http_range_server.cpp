@@ -375,8 +375,18 @@ std::uint64_t HttpRangeServer::claim_and_report(const std::string& key, const By
     std::lock_guard lock(readers_mu_);
     auto reader = next_reader_++;
     position_owner_[key] = reader;
+    {
+        std::lock_guard count(requests_mu_);
+        ++requests_[key];
+    }
     notify_range(range, id, fi);
     return reader;
+}
+
+std::int64_t HttpRangeServer::requests(const TorrentId& id, FileIndex fi) const {
+    std::lock_guard lock(requests_mu_);
+    auto it = requests_.find(id + "/" + std::to_string(fi));
+    return it == requests_.end() ? 0 : it->second;
 }
 
 bool HttpRangeServer::report_if_owner(const std::string& key, std::uint64_t reader,

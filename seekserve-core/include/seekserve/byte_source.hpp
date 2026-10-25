@@ -19,6 +19,14 @@
 
 namespace seekserve {
 
+// What a ByteSource did, for the app's debug log (app BUG-238, DEC-660).
+struct ByteSourceStats {
+    std::int64_t disk_reads = 0;     // reads from the file
+    std::int64_t read_timeouts = 0;  // reads whose wait ended without the bytes
+    int waiting_download = 0;        // readers waiting for a piece to download
+    int waiting_answer = 0;          // readers waiting for libtorrent's answer
+};
+
 class ByteSource final : public StreamSource {
 public:
     ByteSource(lt::torrent_handle handle,
@@ -51,9 +59,13 @@ public:
     // Pieces read through libtorrent, and chunks found in memory instead.
     std::int64_t piece_reads() const;
     std::int64_t cache_hits() const;
+    ByteSourceStats stats() const;
 
 private:
     Result<std::vector<std::uint8_t>> read_from_disk(std::int64_t offset, std::int64_t len);
+    // read(), before counting a wait that ended without the bytes.
+    Result<std::vector<std::uint8_t>> read_waiting(std::int64_t offset, std::int64_t len,
+                                                   std::chrono::milliseconds wait);
     // [offset, offset+len), each piece that arrived during the stream through
     // libtorrent, the others from disk (app BUG-236, DEC-657).
     Result<std::vector<std::uint8_t>> read_by_piece(std::int64_t offset, std::int64_t len,
@@ -84,6 +96,10 @@ private:
     PieceCache cache_;
     std::atomic<std::int64_t> piece_reads_{0};
     std::atomic<std::int64_t> cache_hits_{0};
+    std::atomic<std::int64_t> disk_reads_{0};
+    std::atomic<std::int64_t> read_timeouts_{0};
+    std::atomic<int> waiting_download_{0};
+    std::atomic<int> waiting_answer_{0};
 };
 
 } // namespace seekserve

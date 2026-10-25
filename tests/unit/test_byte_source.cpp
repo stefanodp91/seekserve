@@ -489,5 +489,57 @@ TEST_F(ByteSourcePiecesTest, APieceTheLibraryDoesNotHaveGoesBackToWaiting) {
     EXPECT_FALSE(avail_->is_complete(1));
 }
 
+// What the stream did, for the app's debug log (app BUG-238, DEC-660).
+TEST_F(ByteSourcePiecesTest, ItCountsTheReadsFromTheFileAndTheWaitsThatEndedEmpty) {
+    avail_->mark_complete(0);
+    auto pieces = std::make_shared<FakePieceReader>();
+    auto src = make_reading_source(pieces);
+
+    ASSERT_TRUE(src->read(0, 10).ok());                                    // from the file
+    ASSERT_FALSE(src->read(1000, 10, std::chrono::milliseconds(20)).ok()); // not there yet
+    avail_->mark_complete(1);
+    ASSERT_FALSE(src->read(1000, 10, std::chrono::milliseconds(20)).ok()); // no answer
+
+    const auto stats = src->stats();
+    EXPECT_EQ(stats.disk_reads, 1);
+    EXPECT_EQ(stats.read_timeouts, 2);
+    EXPECT_EQ(stats.waiting_download, 0);
+    EXPECT_EQ(stats.waiting_answer, 0);
+}
+
+// A reader that waits for a piece to download, and one that waits for the
+// library's answer of a piece that is there.
+class BlockingPieceReader final : public PieceReader {
+public:
+    std::atomic<bool> in_read{false};
+    Result<PieceBuffer> read(PieceIndex, std::chrono::milliseconds wait) override {
+        in_read = true;
+        std::this_thread::sleep_for(wait);
+        in_read = false;
+        return make_error_code(errc::timeout_waiting_for_piece);
+    }
+    void cancel() override {}
+};
+
+TEST_F(ByteSourcePiecesTest, ItSaysWhatItsReadersWaitFor) {
+    auto pieces = std::make_shared<BlockingPieceReader>();
+    auto src = std::make_unique<ByteSource>(lt::torrent_handle{}, 0, file_path_, *mapper_,
+                                            *avail_, std::chrono::seconds(1), pieces,
+                                            16 * 1024 * 1024);
+
+    std::thread download([&] { src->read(1000, 10, std::chrono::milliseconds(300)); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_EQ(src->stats().waiting_download, 1);
+    EXPECT_EQ(src->stats().waiting_answer, 0);
+    download.join();
+
+    avail_->mark_complete(2);
+    std::thread answer([&] { src->read(2100, 10, std::chrono::milliseconds(300)); });
+    while (!pieces->in_read) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    EXPECT_EQ(src->stats().waiting_download, 0);
+    EXPECT_EQ(src->stats().waiting_answer, 1);
+    answer.join();
+}
+
 }  // namespace
 }  // namespace seekserve

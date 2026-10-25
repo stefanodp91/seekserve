@@ -189,3 +189,46 @@ TEST(TorrentPieceReaderTest, OnlyAFewAnswersNobodyTookAreKept) {
     EXPECT_EQ(asks.load(), count + 1);
 }
 
+// What the reader did, for the app's debug log (app BUG-238, DEC-660).
+TEST(TorrentPieceReaderTest, ItCountsTheRequestsTheAnswersAndTheErrors) {
+    TorrentPieceReader* self = nullptr;
+    bool fail = false;
+    TorrentPieceReader reader([&](PieceIndex p) {
+        if (fail) self->on_read(p, make_error_code(errc::piece_not_available), "invalid piece index");
+    });
+    self = &reader;
+
+    ASSERT_FALSE(reader.read(1, 1ms).ok());   // asked
+    ASSERT_FALSE(reader.read(1, 1ms).ok());   // asked again
+    reader.on_read(1, piece_of(4, 'a'));      // late: nobody waits
+    ASSERT_TRUE(reader.read(1, 1ms).ok());    // taken from memory
+    fail = true;
+    ASSERT_FALSE(reader.read(2, 1ms).ok());   // an error at once
+
+    const auto stats = reader.stats();
+    EXPECT_EQ(stats.asks, 3);
+    EXPECT_EQ(stats.repeats, 1);
+    EXPECT_EQ(stats.answers, 1);
+    EXPECT_EQ(stats.errors, 1);
+    EXPECT_EQ(stats.late, 1);
+    EXPECT_EQ(stats.last_error, "invalid piece index");
+}
+
+TEST(TorrentPieceReaderTest, ItSaysWhatWaitsForAnAnswerAndSinceWhen) {
+    auto now = TorrentPieceReader::Clock::time_point{} + 1h;
+    TorrentPieceReader reader([](PieceIndex) {}, [&] { return now; });
+
+    ASSERT_FALSE(reader.read(3, 1ms).ok());
+    now += 2500ms;
+    ASSERT_FALSE(reader.read(4, 1ms).ok());
+    auto stats = reader.stats();
+    EXPECT_EQ(stats.waiting, 2);
+    EXPECT_EQ(stats.oldest_wait_ms, 2500);
+
+    reader.on_read(3, piece_of(4, 'b'));
+    reader.on_read(4, piece_of(4, 'c'));
+    stats = reader.stats();
+    EXPECT_EQ(stats.waiting, 0);
+    EXPECT_EQ(stats.oldest_wait_ms, 0);
+}
+

@@ -7,6 +7,22 @@
 
 namespace seekserve {
 
+namespace {
+
+// Counts a reader in `waiting` for as long as it lives.
+class Waiting {
+public:
+    explicit Waiting(std::atomic<int>& count) : count_(count) { ++count_; }
+    ~Waiting() { --count_; }
+    Waiting(const Waiting&) = delete;
+    Waiting& operator=(const Waiting&) = delete;
+
+private:
+    std::atomic<int>& count_;
+};
+
+}  // namespace
+
 ByteSource::ByteSource(lt::torrent_handle handle,
                        FileIndex file_idx,
                        const std::string& file_path,
@@ -37,12 +53,26 @@ std::int64_t ByteSource::piece_reads() const { return piece_reads_.load(); }
 
 std::int64_t ByteSource::cache_hits() const { return cache_hits_.load(); }
 
+ByteSourceStats ByteSource::stats() const {
+    return ByteSourceStats{disk_reads_.load(), read_timeouts_.load(), waiting_download_.load(),
+                           waiting_answer_.load()};
+}
+
 Result<std::vector<std::uint8_t>> ByteSource::read(std::int64_t offset, std::int64_t len) {
     return read(offset, len, timeout_);
 }
 
 Result<std::vector<std::uint8_t>> ByteSource::read(std::int64_t offset, std::int64_t len,
                                                    std::chrono::milliseconds wait) {
+    auto result = read_waiting(offset, len, wait);
+    if (!result.ok() && result.error() == make_error_code(errc::timeout_waiting_for_piece)) {
+        ++read_timeouts_;
+    }
+    return result;
+}
+
+Result<std::vector<std::uint8_t>> ByteSource::read_waiting(std::int64_t offset, std::int64_t len,
+                                                           std::chrono::milliseconds wait) {
     {
         std::unique_lock lock(mu_);
         if (cancelled_.load(std::memory_order_acquire)) {
@@ -52,9 +82,13 @@ Result<std::vector<std::uint8_t>> ByteSource::read(std::int64_t offset, std::int
         ByteRange range{offset, offset + len - 1};
         auto span = mapper_.map(range);
 
-        bool ok = cv_.wait_for(lock, wait, [&] {
-            return cancelled_.load(std::memory_order_acquire) || avail_.is_span_complete(span);
-        });
+        bool ok = true;
+        if (!avail_.is_span_complete(span)) {
+            Waiting waiting(waiting_download_);
+            ok = cv_.wait_for(lock, wait, [&] {
+                return cancelled_.load(std::memory_order_acquire) || avail_.is_span_complete(span);
+            });
+        }
 
         if (cancelled_.load(std::memory_order_acquire)) {
             return make_error_code(errc::cancelled);
@@ -113,7 +147,10 @@ Result<PieceBuffer> ByteSource::piece_bytes(PieceIndex piece, std::chrono::milli
         ++cache_hits_;
         return *kept;
     }
-    auto read = pieces_->read(piece, wait);
+    auto read = [&] {
+        Waiting waiting(waiting_answer_);
+        return pieces_->read(piece, wait);
+    }();
     if (read.ok()) {
         ++piece_reads_;
         cache_.put(piece, read.value());
@@ -139,6 +176,7 @@ Result<std::vector<std::uint8_t>> ByteSource::read_from_disk(std::int64_t offset
         return make_error_code(errc::io_error);
     }
 
+    ++disk_reads_;
     std::vector<std::uint8_t> buf(len);
     file.read(reinterpret_cast<char*>(buf.data()), len);
     auto bytes_read = file.gcount();
