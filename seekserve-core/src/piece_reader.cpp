@@ -19,7 +19,10 @@ Result<PieceBuffer> TorrentPieceReader::read(PieceIndex piece, std::chrono::mill
     }
 
     auto& pending = pending_[piece];
-    const bool ask = !pending.asked;
+    // Asked again by a read that finds no answer and nobody else waiting:
+    // an answer that never comes must not stop the stream for good (app
+    // BUG-238, DEC-659). A late answer to the first request is still taken.
+    const bool ask = !pending.answer && (!pending.asked || pending.waiters == 0);
     pending.asked = true;
     ++pending.waiters;
     if (ask) {
@@ -47,7 +50,7 @@ Result<PieceBuffer> TorrentPieceReader::read(PieceIndex piece, std::chrono::mill
         if (mine.waiters == 0) pending_.erase(it);
         return answer;
     }
-    // Not yet: the request stays on its way for the next read.
+    // Not yet: the answer, if it comes, is the next read's.
     if (mine.waiters == 0) keep_idle(mine);
     return make_error_code(errc::timeout_waiting_for_piece);
 }

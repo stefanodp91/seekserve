@@ -97,7 +97,8 @@ TEST(TorrentPieceReaderTest, CancelWakesTheReader) {
 
 // The server waits for a piece in slices of half a second; reading a big
 // piece can take longer: the answer that comes after a slice is over is the
-// next read's, with no second request (app BUG-236, DEC-657).
+// next read's, with no second request when it came before that read (app
+// BUG-236, DEC-657).
 TEST(TorrentPieceReaderTest, ALateAnswerIsTheNextReadsWithOneRequest) {
     std::atomic<int> asks{0};
     TorrentPieceReader reader([&](PieceIndex) { ++asks; });
@@ -111,14 +112,54 @@ TEST(TorrentPieceReaderTest, ALateAnswerIsTheNextReadsWithOneRequest) {
     EXPECT_EQ(asks.load(), 1);
 }
 
-TEST(TorrentPieceReaderTest, AReadWhileARequestIsOnItsWayAsksNoMore) {
+// An answer that never comes must not stop the stream for good (app
+// BUG-238, DEC-659): a read that finds the piece still unanswered, with
+// nobody else waiting for it, asks libtorrent again.
+TEST(TorrentPieceReaderTest, AReadOfAPieceWithNoAnswerAsksAgain) {
     std::atomic<int> asks{0};
     TorrentPieceReader reader([&](PieceIndex) { ++asks; });
 
     ASSERT_FALSE(reader.read(5, 30ms).ok());
     ASSERT_FALSE(reader.read(5, 30ms).ok());
+    EXPECT_EQ(asks.load(), 2);
+
+    reader.on_read(5, piece_of(8, 'q'));
+    auto got = reader.read(5, 30ms);
+    ASSERT_TRUE(got.ok()) << got.error().message();
+    EXPECT_EQ(got.value().data[0], 'q');
+    EXPECT_EQ(asks.load(), 2);
+}
+
+// While one reader waits for a piece, another that comes asks no more.
+TEST(TorrentPieceReaderTest, AReadWhileAnotherWaitsAsksNoMore) {
+    std::atomic<int> asks{0};
+    TorrentPieceReader reader([&](PieceIndex) { ++asks; });
+    std::thread first([&] { reader.read(5, 1s); });
+    while (asks.load() == 0) std::this_thread::sleep_for(1ms);
+
+    ASSERT_FALSE(reader.read(5, 30ms).ok());
+    reader.on_read(5, piece_of(4, 'w'));
+    first.join();
 
     EXPECT_EQ(asks.load(), 1);
+}
+
+// A piece asked twice has two answers: the one that comes after the read
+// took the first is nobody's, and the next read asks again.
+TEST(TorrentPieceReaderTest, TheSecondAnswerOfAPieceAskedTwiceIsHarmless) {
+    std::atomic<int> asks{0};
+    TorrentPieceReader reader([&](PieceIndex) { ++asks; });
+    ASSERT_FALSE(reader.read(5, 1ms).ok());
+    ASSERT_FALSE(reader.read(5, 1ms).ok());
+
+    reader.on_read(5, piece_of(4, 'a'));
+    auto got = reader.read(5, 30ms);
+    ASSERT_TRUE(got.ok()) << got.error().message();
+    EXPECT_EQ(got.value().data[0], 'a');
+    reader.on_read(5, piece_of(4, 'a'));
+
+    EXPECT_FALSE(reader.read(5, 1ms).ok());
+    EXPECT_EQ(asks.load(), 3);
 }
 
 TEST(TorrentPieceReaderTest, AnErrorNobodyWaitsForIsNotKept) {

@@ -41,10 +41,12 @@ public:
 };
 
 // The PieceReader of one torrent: `ask` starts libtorrent's read_piece, and
-// on_read hands it the answer (read_piece_alert). One request per piece at
-// a time, however many readers wait for it. A request stays on its way when
-// a read stops waiting, and an answer that comes late is the next read's:
-// reading a big piece can take longer than a reader waits at a time.
+// on_read hands it the answer (read_piece_alert). One request per piece for
+// the readers that wait for it together. An answer that comes after a read
+// stopped waiting is the next read's: reading a big piece can take longer
+// than a reader waits at a time. A read that finds the piece still
+// unanswered, with nobody else waiting, asks again: an answer that never
+// comes would otherwise stop the stream for good (app BUG-238, DEC-659).
 class TorrentPieceReader final : public PieceReader {
 public:
     using Ask = std::function<void(PieceIndex)>;
