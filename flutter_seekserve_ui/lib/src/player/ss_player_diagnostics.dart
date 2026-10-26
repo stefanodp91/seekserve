@@ -6,6 +6,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'ss_player_life.dart';
 import 'ss_player_log.dart';
 import 'ss_player_probe.dart';
+import 'ss_player_unstick.dart';
 
 /// What an app wants to know of the player of an `SsVideoPlayer`, for its
 /// debug log (app BUG-238, BUG-239, DEC-662). Without it the player says no
@@ -70,6 +71,7 @@ class SsPlayerWatch {
     _when(video.waitUntilFirstFrameRendered, SsPlayerStage.firstFrame);
     if (platform is NativePlayer) {
       _diagnostics.probe?.attach(platform.getProperty);
+      unawaited(_watchVisible(platform));
     }
   }
 
@@ -79,6 +81,10 @@ class SsPlayerWatch {
 
   /// The player opened the stream or the file.
   void opened() => _life.reach(SsPlayerStage.opened);
+
+  /// The player stood on a seek and opened the stream again
+  /// ([SsPlayerUnstick]).
+  void unstuck() => _life.reach(SsPlayerStage.unstuck);
 
   /// An error of the player, also one it tries again by itself.
   void error(String message) => _write('error: $message');
@@ -97,6 +103,24 @@ class SsPlayerWatch {
   }
 
   void _write(String line) => _diagnostics.onLog(ssRedactPlayerLog(line));
+
+  /// Says when an image is on the screen: on Android after the first frame,
+  /// once the surface of the video is ready (app BUG-246).
+  Future<void> _watchVisible(NativePlayer platform) async {
+    try {
+      await platform.observeProperty('vo-configured', (configured) async {
+        final currentVo = await platform.getProperty(
+          'current-vo',
+          waitForInitialization: false,
+        );
+        if (ssIsVisibleOutput(voConfigured: configured, currentVo: currentVo)) {
+          _life.reach(SsPlayerStage.visible);
+        }
+      });
+    } catch (_) {
+      // The player went before it was ready: nothing to say.
+    }
+  }
 
   void _when(Future<void> done, SsPlayerStage stage) {
     unawaited(done.then((_) => _life.reach(stage), onError: (Object _) {}));

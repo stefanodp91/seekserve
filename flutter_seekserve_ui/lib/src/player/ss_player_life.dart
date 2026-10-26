@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import '../utils/clock.dart';
+
 /// The stages of a video player's life, for an app's debug log (app
 /// BUG-239, DEC-662): a player that never gets [ready], or whose end never
 /// comes, is a player stuck behind another.
@@ -16,8 +18,16 @@ enum SsPlayerStage {
   /// It opened the stream or the file.
   opened,
 
-  /// It showed the first frame.
+  /// It decoded the first frame. On Android media_kit shows it on an output
+  /// nobody sees, until the surface of the video is ready ([visible]).
   firstFrame,
+
+  /// An image is on the screen (app BUG-246).
+  visible,
+
+  /// It stood on a seek after its first frame and opened the stream again
+  /// (app BUG-246, DEC-669; `SsPlayerUnstick`).
+  unstuck,
 
   /// It started to go.
   disposing,
@@ -48,7 +58,7 @@ class SsPlayerLife {
     Duration Function()? elapsed,
     SsStartTimer? startTimer,
   }) : _onEvent = onEvent,
-       _elapsed = elapsed ?? (Stopwatch()..start()).elapsedFunction,
+       _elapsed = elapsed ?? ssElapsedFromNow(),
        _startTimer = startTimer ?? Timer.new;
 
   /// How long a stage may wait for the next one before a word is said.
@@ -59,7 +69,7 @@ class SsPlayerLife {
   final Set<SsPlayerStage> _reached = {};
   Timer? _watch;
 
-  static const _last = {SsPlayerStage.firstFrame, SsPlayerStage.disposed};
+  static const _last = {SsPlayerStage.visible, SsPlayerStage.disposed};
 
   void reach(SsPlayerStage stage) {
     if (!_reached.add(stage)) return;
@@ -78,9 +88,4 @@ class SsPlayerLife {
     _watch?.cancel();
     _watch = null;
   }
-}
-
-extension on Stopwatch {
-  Duration Function() get elapsedFunction =>
-      () => elapsed;
 }

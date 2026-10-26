@@ -105,11 +105,36 @@ void main() {
       },
     );
 
-    test('the first frame and the end are not waited after', () {
-      life.reach(SsPlayerStage.firstFrame);
+    test('the image on the screen and the end are not waited after', () {
+      life.reach(SsPlayerStage.visible);
       life.reach(SsPlayerStage.disposed);
 
       expect(timers, isEmpty);
+    });
+
+    test(
+      'after the first frame the image on the screen is waited for: on '
+      'Android the first frame goes to an output nobody sees (app BUG-246)',
+      () {
+        life.reach(SsPlayerStage.firstFrame);
+        now = const Duration(seconds: 10);
+        timers.last();
+
+        expect(events.last.stage, SsPlayerStage.firstFrame);
+        expect(events.last.late, isTrue);
+      },
+    );
+
+    test('the unstick is a stage, said once (app BUG-246, DEC-669)', () {
+      life.reach(SsPlayerStage.firstFrame);
+      now = const Duration(seconds: 2);
+      life.reach(SsPlayerStage.unstuck);
+      life.reach(SsPlayerStage.unstuck);
+
+      expect(events.map((e) => (e.stage, e.elapsed.inSeconds)), [
+        (SsPlayerStage.firstFrame, 0),
+        (SsPlayerStage.unstuck, 2),
+      ]);
     });
 
     test('a stage reached again is said once', () {

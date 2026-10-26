@@ -12,6 +12,7 @@ import '../theme/ss_theme.dart';
 import '../utils/format.dart';
 import 'ss_buffering_overlay.dart';
 import 'ss_player_diagnostics.dart';
+import 'ss_player_unstick.dart';
 import 'ss_player_status_bar.dart';
 import 'ss_position_reporter.dart';
 import 'ss_strings.dart';
@@ -104,6 +105,11 @@ class SsVideoPlayer extends StatefulWidget {
   /// BUG-238, BUG-239, DEC-662).
   final SsPlayerDiagnostics? diagnostics;
 
+  /// How long the player may stand on a seek after its first frame before
+  /// it opens a local stream again ([SsPlayerUnstick], app BUG-246,
+  /// DEC-669); null, the default, never.
+  final Duration? unstickAfter;
+
   const SsVideoPlayer({
     super.key,
     required this.streamUrl,
@@ -128,6 +134,7 @@ class SsVideoPlayer extends StatefulWidget {
     this.showStreamUrl = true,
     this.topBarActions = const [],
     this.diagnostics,
+    this.unstickAfter,
   });
 
   @override
@@ -156,6 +163,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
   Player? _player;
   VideoController? _videoController;
   SsPlayerWatch? _watch;
+  SsPlayerUnstick? _unstick;
   String _error = '';
   bool _noVideoFrames = false;
   Timer? _formatRetryTimer;
@@ -241,6 +249,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
         ? null
         : SsPlayerWatch(diagnostics, _player!, _videoController!);
     final watch = _watch;
+    _unstick = _unstickFor(url, _player!, _videoController!, watch);
 
     // A new player starts again from the initial position: what the one
     // before said no longer counts.
@@ -296,8 +305,51 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
     if (mounted) setState(() {});
   }
 
+  /// The unstick of [player], for a local stream when the app wants one:
+  /// armed at the first frame, it opens the stream again where the player
+  /// is ([_reopenAt]).
+  SsPlayerUnstick? _unstickFor(
+    String url,
+    Player player,
+    VideoController video,
+    SsPlayerWatch? watch,
+  ) {
+    final after = widget.unstickAfter;
+    final platform = player.platform;
+    if (after == null || !_isLocalStream(url) || platform is! NativePlayer) {
+      return null;
+    }
+    final unstick = SsPlayerUnstick(
+      after: after,
+      read: () => ssReadPlayerMotion(
+        (name) => platform.getProperty(name, waitForInitialization: false),
+      ),
+      onStuck: () {
+        if (!mounted || !identical(player, _player)) return;
+        watch?.unstuck();
+        // A player that has not told its position yet stands where it
+        // opened.
+        final position = player.state.position;
+        unawaited(
+          _reopenAt(
+            position > Duration.zero ? position : widget.initialPosition,
+          ),
+        );
+      },
+    );
+    unawaited(
+      video.waitUntilFirstFrameRendered.then(
+        (_) => unstick.arm(),
+        onError: (Object _) {},
+      ),
+    );
+    return unstick;
+  }
+
   /// Disposes the current player, through its [SsPlayerWatch] if any.
   void _disposePlayer() {
+    _unstick?.close();
+    _unstick = null;
     final player = _player;
     final watch = _watch;
     _watch = null;
