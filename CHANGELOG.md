@@ -15,6 +15,11 @@
   start with priority again from that piece (app DEC-669), which did not help on the phone: a piece with a deadline
   has the top priority already.
 
+#### `flutter_seekserve`
+
+- **`TorrentStatus.waitKicks`** reads the engine's `wait_kicks` (null from an older library), for the app's debug log
+  (app BUG-246, DEC-671).
+
 ### Fixed — The player that stands on a seek after its first frame
 
 #### `flutter_seekserve_ui`

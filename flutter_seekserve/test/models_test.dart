@@ -65,6 +65,7 @@ void main() {
         'active_deadlines': 10,
         'piece_length': 4194304,
         'startup_focus': true,
+        'wait_kicks': 2,
         'piece_reads': 7,
         'piece_cache_hits': 120,
       });
@@ -84,6 +85,7 @@ void main() {
       expect(status.activeDeadlines, 10);
       expect(status.pieceLength, 4194304);
       expect(status.startupFocus, true);
+      expect(status.waitKicks, 2);
       expect(status.pieceReads, 7);
       expect(status.pieceCacheHits, 120);
     });
@@ -136,6 +138,7 @@ void main() {
       expect(status.playheadPiece, isNull);
       expect(status.pieceLength, isNull);
       expect(status.startupFocus, isNull);
+      expect(status.waitKicks, isNull);
       expect(status.pieceReads, isNull);
       expect(status.pieceCacheHits, isNull);
       expect(status.isPaused, false);
@@ -336,6 +339,7 @@ void main() {
       final json = {
         'piece_length': 524288,
         'startup_focus': false,
+        'wait_kicks': 0,
         'piece_reads': 3,
         'piece_cache_hits': 40,
       };

@@ -88,6 +88,10 @@ class TorrentStatus {
   /// pieces back; null from an older library.
   final bool? startupFocus;
 
+  /// How many times a reader stuck on a piece got it asked first (app
+  /// BUG-246, DEC-670); null from an older library.
+  final int? waitKicks;
+
   /// The pieces the reader got through libtorrent, and those it found in
   /// the engine's memory of pieces; null with no reader.
   final int? pieceReads;
@@ -122,6 +126,7 @@ class TorrentStatus {
     this.activeDeadlines,
     this.pieceLength,
     this.startupFocus,
+    this.waitKicks,
     this.pieceReads,
     this.pieceCacheHits,
     this.reads,
@@ -147,6 +152,7 @@ class TorrentStatus {
       activeDeadlines: json['active_deadlines'] as int?,
       pieceLength: json['piece_length'] as int?,
       startupFocus: json['startup_focus'] as bool?,
+      waitKicks: json['wait_kicks'] as int?,
       pieceReads: json['piece_reads'] as int?,
       pieceCacheHits: json['piece_cache_hits'] as int?,
       reads: StreamReads.fromJson(json),
@@ -205,6 +211,7 @@ class TorrentStatus {
     if (activeDeadlines != null) 'active_deadlines': activeDeadlines,
     if (pieceLength != null) 'piece_length': pieceLength,
     if (startupFocus != null) 'startup_focus': startupFocus,
+    if (waitKicks != null) 'wait_kicks': waitKicks,
     if (pieceReads != null) 'piece_reads': pieceReads,
     if (pieceCacheHits != null) 'piece_cache_hits': pieceCacheHits,
     ...?reads?.toJson(),
