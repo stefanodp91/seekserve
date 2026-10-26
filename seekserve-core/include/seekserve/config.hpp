@@ -69,6 +69,10 @@ struct SchedulerConfig {
     // as before.
     std::int64_t startup_focus_bytes = 0;
     std::chrono::milliseconds startup_focus_timeout{30000};
+    // A reader that waits for the same piece this long gets the start with
+    // priority again, from that piece (app BUG-246, DEC-669; WaitFocusWatch).
+    // 0 = never, as before; nothing either with `startup_focus_bytes` 0.
+    std::chrono::milliseconds wait_focus_after{0};
 };
 
 struct ServerConfig {

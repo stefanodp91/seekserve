@@ -61,6 +61,11 @@ typedef void (*ss_event_callback_t)(const char* event_json, void* user_data);
 //     player waits for from queuing behind the rest of the file.
 //   "startup_focus_timeout" (int, seconds, default 30): the longest such a
 //     start lasts; then the files' priorities hold again.
+//   "wait_focus_after" (int, seconds, default 0 = never; app BUG-246,
+//     DEC-669): a reader that waits for the same piece this long gets such a
+//     start again, from that piece. libtorrent asks a peer for a piece with
+//     a deadline only while the peer's queue is short, and through Tor the
+//     queue of pieces not due can keep it from being asked at all.
 // config_json key for the pieces a stream reads through libtorrent
 // (optional; read last; app BUG-236, DEC-657):
 //   "piece_cache_bytes" (int, default 16 MB): how many bytes of such pieces a

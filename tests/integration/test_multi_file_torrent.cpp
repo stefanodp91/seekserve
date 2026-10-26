@@ -728,6 +728,57 @@ TEST_F(MultiFileTorrent, TheStatusSaysThePieceAReaderWaitsFor) {
     reader.join();
 }
 
+// A reader that waits for the same piece too long gets the start with
+// priority again, from that piece (app BUG-246, DEC-669): on the app's phone
+// a reader waited 75 s for a piece a connected peer had, while libtorrent
+// asked that peer for other pieces.
+TEST_F(MultiFileTorrent, AReaderThatWaitsLongForAPieceGetsTheStartWithPriorityAgain) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    // A piece in about 8 s: the reader waits for the same one long enough.
+    proxy.limit_download(kPiece / 8);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port());
+    config.scheduler.startup_focus_bytes = 4 * kPiece;
+    // The start of the stream is over before the wait is due.
+    config.scheduler.startup_focus_timeout = std::chrono::seconds(1);
+    config.scheduler.wait_focus_after = std::chrono::seconds(3);
+    SeekServeEngine engine(config);
+    ASSERT_TRUE(engine.start_server());
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    ASSERT_GE(e02, 0);
+    ASSERT_TRUE(engine.select_file(id, e02));
+    auto url = engine.get_stream_url(id, e02);
+    ASSERT_TRUE(url);
+
+    const std::size_t size = seeded(kE02).size();
+    std::thread reader([&] {
+        http_get_body(url.value(), "bytes=" + std::to_string(size - 4 * kPiece) + "-" +
+                                       std::to_string(size - 1));
+    });
+    EXPECT_TRUE(wait_for([&] { return status_of(engine, id).value("startup_focus", false); }))
+        << engine.get_status_json(id);
+    EXPECT_TRUE(wait_for([&] { return !status_of(engine, id).value("startup_focus", true); }))
+        << engine.get_status_json(id);
+    json again;
+    EXPECT_TRUE(wait_for([&] {
+        again = status_of(engine, id);
+        return again.contains("wait_piece") && again.value("startup_focus", false);
+    })) << engine.get_status_json(id);
+    // And the piece is asked of the peer that has it, or is there already.
+    const int awaited = again.value("wait_piece", -1);
+    EXPECT_TRUE(wait_for([&] {
+        const auto status = status_of(engine, id);
+        return status.value("wait_piece", -1) != awaited ||
+               status.value("wait_piece_asked", 0) + status.value("wait_piece_done", 0) > 0;
+    })) << engine.get_status_json(id);
+
+    proxy.limit_download(0);
+    reader.join();
+}
+
 // select_file is one selection: selecting another file takes the first one
 // out, and what it had stays where it was. A torrent that wants two files,
 // one for the player and one that downloads behind it, asks for them with

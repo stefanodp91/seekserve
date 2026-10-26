@@ -158,6 +158,20 @@ TEST_F(ByteRangeMapperTest, FirstPieceAndEndPieceLastFile) {
 
 // --- piece_length() / file_size() ---
 
+// Where a piece starts in the file: the byte a reader that waits for it
+// would read first (app BUG-246, DEC-669).
+TEST_F(ByteRangeMapperTest, PieceStartInTheFile) {
+    ByteRangeMapper video(fs_, 0);
+    EXPECT_EQ(video.piece_start(0), 0);
+    EXPECT_EQ(video.piece_start(1), 1000);
+    EXPECT_EQ(video.piece_start(2), 2000);
+
+    ByteRangeMapper extra(fs_, 2);  // offset 2800
+    EXPECT_EQ(extra.piece_start(2), 0);  // the piece the file starts in
+    EXPECT_EQ(extra.piece_start(3), 200);
+    EXPECT_EQ(extra.piece_start(4), 1200);
+}
+
 TEST_F(ByteRangeMapperTest, PieceLengthAndFileSize) {
     ByteRangeMapper mapper0(fs_, 0);
     EXPECT_EQ(mapper0.piece_length(), 1000);

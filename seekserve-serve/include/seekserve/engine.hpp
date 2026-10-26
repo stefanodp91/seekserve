@@ -25,6 +25,7 @@
 #include "seekserve/byte_range_mapper.hpp"
 #include "seekserve/wait_piece.hpp"
 #include "seekserve/startup_focus.hpp"
+#include "seekserve/wait_focus.hpp"
 #include "seekserve/piece_reader.hpp"
 #include "seekserve/byte_source.hpp"
 #include "seekserve/streaming_scheduler.hpp"
@@ -137,6 +138,9 @@ private:
         std::unique_ptr<StreamingScheduler> scheduler;
         // The start of the stream with priority (app BUG-228, DEC-656).
         std::unique_ptr<StartupFocus> focus;
+        // A reader that waits for the same piece too long gets the start
+        // with priority again, from that piece (app BUG-246, DEC-669).
+        std::unique_ptr<WaitFocusWatch> wait_focus;
         // Since when the piece a reader waits for got no block (DEC-661).
         WaitPieceWatch wait_watch;
         FileIndex selected_file{-1};  // the reader's file

@@ -575,6 +575,8 @@ Result<void> SeekServeEngine::want_files(const TorrentId& id, FileIndex reader,
             state->scheduler = std::make_unique<StreamingScheduler>(
                 config_.scheduler, state->avail, *state->mapper);
             state->focus = std::make_unique<StartupFocus>(config_.scheduler);
+            state->wait_focus =
+                std::make_unique<WaitFocusWatch>(config_.scheduler.wait_focus_after);
 
             // Register byte source on HTTP server if running
             if (http_server_) {
@@ -1083,6 +1085,15 @@ void SeekServeEngine::on_tick(const boost::system::error_code& ec) {
             if (state->focus &&
                 state->focus->over(state->avail, StartupFocus::Clock::now())) {
                 end_startup_focus(id, *state, handle);
+            }
+            if (state->wait_focus) {
+                const PieceIndex awaited = awaited_piece(*state);
+                if (state->wait_focus->due(awaited, WaitFocusWatch::Clock::now())) {
+                    spdlog::info("Engine: a reader of {} waits for piece {}: its start with "
+                                 "priority again",
+                                 id, awaited);
+                    begin_startup_focus(*state, handle, state->mapper->piece_start(awaited));
+                }
             }
 
             // Update cache progress for selected file

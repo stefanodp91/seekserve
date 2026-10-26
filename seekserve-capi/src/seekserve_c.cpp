@@ -141,6 +141,10 @@ static seekserve::SeekServeEngine::Config parse_config(const char* config_json) 
         if (j.contains("startup_focus_timeout"))
             config.scheduler.startup_focus_timeout =
                 std::chrono::seconds(j["startup_focus_timeout"].get<int>());
+        // After every other key too (app BUG-246, DEC-669).
+        if (j.contains("wait_focus_after"))
+            config.scheduler.wait_focus_after =
+                std::chrono::seconds(j["wait_focus_after"].get<int>());
         // After every other key too (app BUG-236, DEC-657).
         if (j.contains("piece_cache_bytes"))
             config.server.piece_cache_bytes = j["piece_cache_bytes"].get<std::int64_t>();

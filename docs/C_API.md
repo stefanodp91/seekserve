@@ -41,7 +41,11 @@ that a newer request of its stream left behind. See `HTTP_RANGE_SPEC.md`.
 The start of a stream with priority takes two more (app BUG-228): `startup_focus_bytes`
 (default 0 = off) and `startup_focus_timeout` (seconds, default 30). When a reader starts or
 jumps far, the pieces of its first so many bytes come first and every other wanted piece
-last, until those bytes are there or the time passed.
+last, until those bytes are there or the time passed. `wait_focus_after` (seconds, default
+0 = never; app BUG-246): a reader that waits for the same piece this long gets such a start
+again, from that piece; libtorrent asks a peer for a piece with a deadline only while the
+peer's queue is short, and through Tor the queue of pieces not due can keep it from being
+asked at all.
 
 `piece_cache_bytes` (default 16 MB): a piece that arrives during a stream is read through
 libtorrent, which has it before it is written to the file (app BUG-236); a stream keeps so
