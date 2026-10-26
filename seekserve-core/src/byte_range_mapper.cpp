@@ -1,7 +1,5 @@
 #include "seekserve/byte_range_mapper.hpp"
 
-#include <algorithm>
-
 #include <spdlog/spdlog.h>
 
 namespace seekserve {
@@ -47,11 +45,6 @@ PieceIndex ByteRangeMapper::end_piece() const {
     if (file_size_ == 0) return first_piece();
     auto req = fs_.map_file(lt::file_index_t{file_idx_}, file_size_ - 1, 1);
     return static_cast<PieceIndex>(req.piece) + 1;
-}
-
-std::int64_t ByteRangeMapper::piece_start(PieceIndex piece) const {
-    const std::int64_t start = static_cast<std::int64_t>(piece) * piece_length_ - file_offset_;
-    return std::max<std::int64_t>(0, start);
 }
 
 } // namespace seekserve

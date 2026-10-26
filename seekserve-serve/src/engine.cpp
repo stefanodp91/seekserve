@@ -687,6 +687,9 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
             // Whether the start with priority still holds the other pieces
             // back (app BUG-228, DEC-656).
             status_json["startup_focus"] = state->focus && state->focus->active();
+            // How many times a reader stuck on a piece got it asked first (app
+            // BUG-246, DEC-670).
+            status_json["wait_kicks"] = state->wait_kicks;
         }
         if (state && state->source) {
             status_json["piece_reads"] = state->source->piece_reads();
@@ -719,32 +722,54 @@ PieceIndex SeekServeEngine::awaited_piece(const TorrentState& state) {
     return -1;
 }
 
-std::optional<WaitPieceStats> SeekServeEngine::awaited_piece_stats(
-    const TorrentId& id, const lt::torrent_handle& handle, PieceIndex piece) {
+std::optional<WaitPieceStats> SeekServeEngine::piece_stats(const TorrentId& id,
+                                                          const lt::torrent_handle& handle,
+                                                          PieceIndex piece) {
     // libtorrent's own block size, smaller only in a smaller piece.
     constexpr int kBlockSize = 16 * 1024;
     std::vector<lt::peer_info> peers;
     std::vector<lt::partial_piece_info> queue;
-    int blocks = 0;
-    WaitPieceStats stats;
     // libtorrent throws on a handle whose torrent went in between. The
     // queue's blocks live in libtorrent until its next queue: read at once.
     try {
         auto ti = handle.torrent_file();
         if (!ti) return std::nullopt;
         const int size = ti->piece_size(lt::piece_index_t{piece});
-        blocks = (size + kBlockSize - 1) / kBlockSize;
+        const int blocks = (size + kBlockSize - 1) / kBlockSize;
         handle.get_peer_info(peers);
         handle.get_download_queue(queue);
-        stats = wait_piece_stats(piece, blocks, peers, queue);
+        return wait_piece_stats(piece, blocks, peers, queue);
     } catch (const std::exception& e) {
         spdlog::debug("Engine: no awaited piece for {}: {}", id, e.what());
         return std::nullopt;
     }
+}
+
+void SeekServeEngine::ask_first(const TorrentId& id, TorrentState& state,
+                                lt::torrent_handle& handle, PieceIndex piece) {
+    // libtorrent cancels the requests of pieces with no deadline only when a
+    // deadline comes on an empty list (`torrent::set_piece_deadline`). The
+    // scheduler sets the other deadlines again at its next tick, after the
+    // cancel.
+    try {
+        handle.clear_piece_deadlines();
+        handle.set_piece_deadline(lt::piece_index_t{piece}, 0);
+        ++state.wait_kicks;
+        spdlog::info("Engine: no block of piece {} of {} for a while: asked first", piece, id);
+    } catch (const std::exception& e) {
+        spdlog::debug("Engine: torrent {} went before its piece {} was asked first: {}", id,
+                      piece, e.what());
+    }
+}
+
+std::optional<WaitPieceStats> SeekServeEngine::awaited_piece_stats(
+    const TorrentId& id, const lt::torrent_handle& handle, PieceIndex piece) {
+    auto stats = piece_stats(id, handle, piece);
+    if (!stats) return std::nullopt;
     std::lock_guard lock(mu_);
     auto* state = find_state(id);
     if (!state) return std::nullopt;
-    stats.still_ms = state->wait_watch.still_ms(piece, stats.done, WaitPieceWatch::Clock::now());
+    stats->still_ms = state->wait_watch.still_ms(piece, stats->done, WaitPieceWatch::Clock::now());
     return stats;
 }
 
@@ -1086,13 +1111,16 @@ void SeekServeEngine::on_tick(const boost::system::error_code& ec) {
                 state->focus->over(state->avail, StartupFocus::Clock::now())) {
                 end_startup_focus(id, *state, handle);
             }
-            if (state->wait_focus) {
+            if (state->wait_focus && state->wait_focus->on()) {
                 const PieceIndex awaited = awaited_piece(*state);
-                if (state->wait_focus->due(awaited, WaitFocusWatch::Clock::now())) {
-                    spdlog::info("Engine: a reader of {} waits for piece {}: its start with "
-                                 "priority again",
-                                 id, awaited);
-                    begin_startup_focus(*state, handle, state->mapper->piece_start(awaited));
+                const auto stats = awaited == kNoPiece
+                                       ? std::nullopt
+                                       : piece_stats(id, handle, awaited);
+                const int done = stats ? stats->done : 0;
+                const bool someone_has_it = stats && stats->peers > 0;
+                if (state->wait_focus->due(awaited, done, someone_has_it,
+                                           WaitFocusWatch::Clock::now())) {
+                    ask_first(id, *state, handle, awaited);
                 }
             }
 

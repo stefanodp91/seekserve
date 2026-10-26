@@ -4,15 +4,15 @@ namespace seekserve {
 
 WaitFocusWatch::WaitFocusWatch(std::chrono::milliseconds after) : after_(after) {}
 
-bool WaitFocusWatch::due(PieceIndex piece, Clock::time_point now) {
-    if (piece != piece_) {
+bool WaitFocusWatch::due(PieceIndex piece, int done, bool someone_has_it, Clock::time_point now) {
+    if (piece != piece_ || done != done_) {
         piece_ = piece;
+        done_ = done;
         since_ = now;
-        told_ = false;
     }
-    if (after_.count() <= 0 || piece_ == kNoPiece || told_) return false;
+    if (after_.count() <= 0 || piece_ == kNoPiece || !someone_has_it) return false;
     if (now - since_ < after_) return false;
-    told_ = true;
+    since_ = now;
     return true;
 }
 

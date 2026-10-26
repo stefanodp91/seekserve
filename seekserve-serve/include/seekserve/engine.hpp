@@ -138,9 +138,10 @@ private:
         std::unique_ptr<StreamingScheduler> scheduler;
         // The start of the stream with priority (app BUG-228, DEC-656).
         std::unique_ptr<StartupFocus> focus;
-        // A reader that waits for the same piece too long gets the start
-        // with priority again, from that piece (app BUG-246, DEC-669).
+        // A reader that gets no block of the piece it waits for gets that
+        // piece asked first (app BUG-246, DEC-670), so many times so far.
         std::unique_ptr<WaitFocusWatch> wait_focus;
+        int wait_kicks = 0;
         // Since when the piece a reader waits for got no block (DEC-661).
         WaitPieceWatch wait_watch;
         FileIndex selected_file{-1};  // the reader's file
@@ -165,6 +166,16 @@ private:
     // Who has `piece` and where its blocks are (app BUG-238, BUG-228,
     // DEC-661); nothing when the torrent went. Called without mu_: it asks
     // libtorrent.
+    // `piece` as libtorrent's peers and download queue tell it, without
+    // `still_ms`; nothing when the torrent went. Takes no lock.
+    static std::optional<WaitPieceStats> piece_stats(const TorrentId& id,
+                                                     const lt::torrent_handle& handle,
+                                                     PieceIndex piece);
+    // Asks `piece` first: with its deadline the only one, libtorrent cancels
+    // the peers' requests of other pieces (app BUG-246, DEC-670). Called with
+    // mu_ held.
+    static void ask_first(const TorrentId& id, TorrentState& state,
+                          lt::torrent_handle& handle, PieceIndex piece);
     std::optional<WaitPieceStats> awaited_piece_stats(const TorrentId& id,
                                                       const lt::torrent_handle& handle,
                                                       PieceIndex piece);
