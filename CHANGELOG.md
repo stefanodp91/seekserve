@@ -2,15 +2,18 @@
 
 ## Unreleased
 
-### Added — The start with priority again for a reader that waits long
+### Added — The piece a stuck reader waits for, asked first
 
 #### `seekserve-core`, `seekserve-serve` and `seekserve-capi`
 
 - **`SchedulerConfig::wait_focus_after`** (0 by default: as before; C API key `"wait_focus_after"`, seconds): a reader
-  that waits for the same piece that long gets the start with priority (`StartupFocus`) again, from that piece, once
-  for each wait (`WaitFocusWatch`). libtorrent asks a peer for a piece with a deadline only while the peer's queue is
-  short, and through Tor the queue of pieces not due kept a piece a peer had from being asked for 75 s on the app's
-  phone (app BUG-246, DEC-669). `ByteRangeMapper::piece_start` gives where a piece starts in its file.
+  that waits for the same piece and gets no block of it that long, with a connected peer that has it, gets that piece
+  asked first: the engine clears the deadlines and sets only that piece's, so libtorrent cancels the peers' requests of
+  other pieces; again after each such while (`WaitFocusWatch`). The status says `wait_kicks`. libtorrent asks a peer
+  for a piece with a deadline only while the peer's queue is short, and through Tor the queue of pieces not due kept a
+  piece a peer had from being asked for 75 s on the app's phone (app BUG-246, DEC-670). In `413484e` the key began the
+  start with priority again from that piece (app DEC-669), which did not help on the phone: a piece with a deadline
+  has the top priority already.
 
 ### Fixed — The player that stands on a seek after its first frame
 
