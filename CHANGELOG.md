@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed — The player that stands on a seek after its first frame
+
+#### `flutter_seekserve_ui`
+
+- **`SsVideoPlayer.unstickAfter`** (null by default: as before) opens a local stream again, once, when the player has
+  stood on a seek for that long after its first frame (`SsPlayerUnstick`, read from `SsPlayerMotion`,
+  `ssReadPlayerMotion`). On Android media_kit switches the video output after the first frame and seeks; when mpv is
+  reading ahead into a missing piece, the seeks queue behind that read and the screen stays black with the data on the
+  phone (app BUG-246, DEC-669). The diagnostics get the stages `visible` and `unstuck` (`ssIsVisibleOutput`).
+
 ### Added — The video player's diagnostics
 
 #### `flutter_seekserve_ui`
