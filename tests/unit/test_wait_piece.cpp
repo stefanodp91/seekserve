@@ -61,6 +61,24 @@ TEST(WaitPieceTest, ThePeersThatHaveThePieceAndThoseThatSendIt) {
     EXPECT_EQ(stats.peers_open, 2);
 }
 
+// A peer that chokes us or is snubbed is asked nothing: asking the piece first
+// for it only cancels the other requests (app BUG-247).
+TEST(WaitPieceTest, OnlyAPeerThatSendsItIsWorthAskingItFirst) {
+    const std::vector<lt::peer_info> closed{
+        peer(1, true, lt::peer_info::remote_choked),
+        peer(2, true, lt::peer_info::snubbed),
+        peer(3, false),
+    };
+    const std::vector<lt::peer_info> open{
+        peer(1, true, lt::peer_info::remote_choked),
+        peer(2, true),
+    };
+
+    EXPECT_FALSE(someone_sends_it(wait_piece_stats(kPiece, 8, {}, {})));
+    EXPECT_FALSE(someone_sends_it(wait_piece_stats(kPiece, 8, closed, {})));
+    EXPECT_TRUE(someone_sends_it(wait_piece_stats(kPiece, 8, open, {})));
+}
+
 TEST(WaitPieceTest, ItsBlocksAndWhoWasAskedForThem) {
     const std::vector<lt::peer_info> peers{peer(1, true, {}, 3), peer(3, true, {}, 35)};
     std::vector<lt::block_info> blocks{

@@ -28,6 +28,10 @@ struct WaitPieceStats {
     std::int64_t still_ms = 0;  // since when `done` has not grown (WaitPieceWatch)
 };
 
+// Whether a connected peer that has the piece sends us blocks: libtorrent asks
+// nothing of one that chokes us or is snubbed (app BUG-247).
+bool someone_sends_it(const WaitPieceStats& stats);
+
 // `piece` as libtorrent's peers and download queue tell it; `blocks_in_piece`
 // for a piece no block of which was asked yet.
 WaitPieceStats wait_piece_stats(PieceIndex piece, int blocks_in_piece,

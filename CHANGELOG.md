@@ -7,13 +7,15 @@
 #### `seekserve-core`, `seekserve-serve` and `seekserve-capi`
 
 - **`SchedulerConfig::wait_focus_after`** (0 by default: as before; C API key `"wait_focus_after"`, seconds): a reader
-  that waits for the same piece and gets no block of it that long, with a connected peer that has it, gets that piece
+  that waits for the same piece and gets no block of it that long, with a connected peer that has it and sends us blocks, gets that piece
   asked first: the engine clears the deadlines and sets only that piece's, so libtorrent cancels the peers' requests of
   other pieces; again after each such while (`WaitFocusWatch`). The status says `wait_kicks`. libtorrent asks a peer
   for a piece with a deadline only while the peer's queue is short, and through Tor the queue of pieces not due kept a
   piece a peer had from being asked for 75 s on the app's phone (app BUG-246, DEC-670). In `413484e` the key began the
   start with priority again from that piece (app DEC-669), which did not help on the phone: a piece with a deadline
-  has the top priority already.
+  has the top priority already. A peer that has the piece counts only when it sends us blocks
+  (`someone_sends_it`, `WaitPieceStats::peers_open`): with the only peer choking us, the piece was asked first every
+  5 s for nothing on the app's phone, 9 times in 45 s (app BUG-247).
 
 #### `flutter_seekserve`
 

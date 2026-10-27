@@ -24,6 +24,8 @@ const lt::peer_info* peer_at(const std::vector<lt::peer_info>& peers, const lt::
 
 }  // namespace
 
+bool someone_sends_it(const WaitPieceStats& stats) { return stats.peers_open > 0; }
+
 WaitPieceStats wait_piece_stats(PieceIndex piece, int blocks_in_piece,
                                 const std::vector<lt::peer_info>& peers,
                                 const std::vector<lt::partial_piece_info>& queue) {

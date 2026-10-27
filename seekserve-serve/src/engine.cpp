@@ -1117,8 +1117,8 @@ void SeekServeEngine::on_tick(const boost::system::error_code& ec) {
                                        ? std::nullopt
                                        : piece_stats(id, handle, awaited);
                 const int done = stats ? stats->done : 0;
-                const bool someone_has_it = stats && stats->peers > 0;
-                if (state->wait_focus->due(awaited, done, someone_has_it,
+                const bool sends_it = stats && someone_sends_it(*stats);
+                if (state->wait_focus->due(awaited, done, sends_it,
                                            WaitFocusWatch::Clock::now())) {
                     ask_first(id, *state, handle, awaited);
                 }

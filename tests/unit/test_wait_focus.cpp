@@ -9,7 +9,7 @@ using namespace std::chrono_literals;
 
 // A reader that waits for the same piece and gets no block of it for a while
 // gets that piece asked first (app BUG-246, DEC-670), again after each such
-// while, as long as a connected peer has it.
+// while, as long as a connected peer that has it sends us blocks (BUG-247).
 namespace {
 
 const WaitFocusWatch::Clock::time_point t0{};
@@ -62,8 +62,9 @@ TEST(WaitFocusWatchTest, AReaderThatStopsWaitingCountsAgain) {
     EXPECT_TRUE(watch.due(5, 0, true, t0 + 3500ms));
 }
 
-// Asking first a piece nobody has would only cancel the other requests.
-TEST(WaitFocusWatchTest, WithNobodyWhoHasThePieceItWaitsForSomeone) {
+// Asking first a piece nobody sends would only cancel the other requests; as
+// soon as someone sends it, a wait already long is due at once.
+TEST(WaitFocusWatchTest, WithNobodyWhoSendsThePieceItWaitsForSomeone) {
     WaitFocusWatch watch(2s);
 
     EXPECT_FALSE(watch.due(5, 0, false, t0));

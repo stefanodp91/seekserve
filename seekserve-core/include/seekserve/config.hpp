@@ -71,8 +71,8 @@ struct SchedulerConfig {
     std::chrono::milliseconds startup_focus_timeout{30000};
     // A reader that waits for the same piece and gets no block of it for this
     // long gets that piece asked first, again after each such while, as long
-    // as a connected peer has it (app BUG-246, DEC-670; WaitFocusWatch). 0 =
-    // never, as before.
+    // as a connected peer that has it sends us blocks (app BUG-246, DEC-670,
+    // BUG-247; WaitFocusWatch). 0 = never, as before.
     std::chrono::milliseconds wait_focus_after{0};
 };
 
