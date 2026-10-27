@@ -325,6 +325,7 @@ Result<void> SeekServeEngine::remove_torrent(const TorrentId& id, bool delete_fi
         std::lock_guard lock(mu_);
         removed_ids_.insert(id);
         states_.erase(id);
+        ends_ahead_.erase(id);
     }
     catalog_.remove(id);
     return sessions_->remove_torrent(id, delete_files);
@@ -453,6 +454,43 @@ Result<void> SeekServeEngine::set_wanted_files(const TorrentId& id, FileIndex re
     return want_files(id, reader, background, /*new_reader=*/false);
 }
 
+Result<void> SeekServeEngine::fetch_ends_ahead(const TorrentId& id, FileIndex fi) {
+    auto handle = sessions_->get_handle(id);
+    if (!handle.is_valid()) {
+        return make_error_code(errc::torrent_not_found);
+    }
+    auto ti = catalog_.torrent_info(id);
+    if (!ti) {
+        return make_error_code(errc::metadata_not_ready);
+    }
+    if (auto file = catalog_.get_file(id, fi); !file) return file.error();
+    if (catalog_.wanted_files(id).reader == fi) return {};
+
+    ByteRangeMapper mapper(ti->layout(), fi);
+    auto pieces = file_end_pieces(mapper, config_.scheduler.startup_focus_bytes);
+    if (pieces.empty()) return {};
+
+    std::lock_guard lock(mu_);
+    ends_ahead_[id] = EndsAhead{fi, std::move(pieces)};
+    apply_ends_ahead(id, handle);
+    spdlog::info("Engine: the start and the end of file {} of {} come ahead", fi, id);
+    return {};
+}
+
+void SeekServeEngine::apply_ends_ahead(const TorrentId& id, lt::torrent_handle& handle) {
+    auto ahead = ends_ahead_.find(id);
+    if (ahead == ends_ahead_.end()) return;
+    // libtorrent throws on a handle whose torrent went in between.
+    try {
+        auto wanted = with_pieces_first(
+            handle.get_piece_priorities(), ahead->second.pieces,
+            [&handle](PieceIndex p) { return handle.have_piece(lt::piece_index_t{p}); });
+        handle.prioritize_pieces(wanted);
+    } catch (const std::exception& e) {
+        spdlog::debug("Engine: no ends ahead for {}: {}", id, e.what());
+    }
+}
+
 Result<void> SeekServeEngine::want_files(const TorrentId& id, FileIndex reader,
                                          FileIndex background, bool new_reader) {
     auto handle = sessions_->get_handle(id);
@@ -524,6 +562,18 @@ Result<void> SeekServeEngine::want_files(const TorrentId& id, FileIndex reader,
             cancel_requests(handle)) {
             result = catalog_.set_wanted_files(id, reader, background, handle);
             if (!result) return result;
+        }
+
+        // The ends of the next file stay ahead, until it is the reader's
+        // (app BUG-231).
+        {
+            std::lock_guard lock(mu_);
+            auto ahead = ends_ahead_.find(id);
+            if (ahead != ends_ahead_.end() && ahead->second.file == reader) {
+                ends_ahead_.erase(ahead);
+            } else {
+                apply_ends_ahead(id, handle);
+            }
         }
 
         if (reader >= 0 && !keeps_reader) {
@@ -680,8 +730,10 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
     }
 
     PieceIndex awaited = -1;
+    std::optional<EndsAhead> ahead;
     {
         std::lock_guard lock(mu_);
+        if (auto it = ends_ahead_.find(id); it != ends_ahead_.end()) ahead = it->second;
         auto* state = find_state(id);
         if (state && state->scheduler) {
             status_json["stream_mode"] = static_cast<int>(state->scheduler->current_mode());
@@ -704,6 +756,21 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
         if (state && http_server_) {
             status_json["range_requests"] = http_server_->requests(id, state->selected_file);
         }
+    }
+
+    // The file whose start and end come ahead, and how many of their pieces
+    // are not there yet (app BUG-231, DEC-678).
+    if (ahead) {
+        int left = 0;
+        try {
+            for (const auto p : ahead->pieces) {
+                if (!handle.have_piece(lt::piece_index_t{p})) ++left;
+            }
+        } catch (const std::exception&) {
+            left = static_cast<int>(ahead->pieces.size());
+        }
+        status_json["ends_ahead_file"] = ahead->file;
+        status_json["ends_ahead_left"] = left;
     }
 
     status_json["alerts_dropped"] = alerts_dropped_.load();
@@ -869,6 +936,7 @@ void SeekServeEngine::end_startup_focus(const TorrentId& id, TorrentState& state
             spdlog::warn("Engine: the priorities after the start of {}: {}", id,
                          result.error().message());
         }
+        apply_ends_ahead(id, handle);
     } catch (const std::exception& e) {
         spdlog::debug("Engine: torrent {} went at the end of its start: {}", id, e.what());
     }

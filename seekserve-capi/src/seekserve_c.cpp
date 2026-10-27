@@ -308,6 +308,16 @@ ss_error_t ss_set_wanted_files(SeekServeEngine* engine, const char* torrent_id,
     });
 }
 
+ss_error_t ss_fetch_ends_ahead(SeekServeEngine* engine, const char* torrent_id,
+                               int32_t file_index) {
+    if (!engine || !torrent_id) return SS_ERR_INVALID_ARG;
+
+    return guarded("ss_fetch_ends_ahead", [&]() -> ss_error_t {
+        auto result = engine->fetch_ends_ahead(torrent_id, file_index);
+        return result ? SS_OK : map_error(result.error());
+    });
+}
+
 ss_error_t ss_get_stream_url(SeekServeEngine* engine, const char* torrent_id,
                              int32_t file_index, char** out_url) {
     if (!engine || !torrent_id || !out_url) return SS_ERR_INVALID_ARG;

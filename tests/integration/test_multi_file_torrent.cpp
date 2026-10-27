@@ -1665,4 +1665,66 @@ TEST_F(MultiFileTorrent, ChoosingTheFilesOfATorrentBeingRemovedIsAnError) {
 }
 
 }  // namespace
+// The start and the end of the next episode's file come while another file
+// of the pack plays, and only them (app BUG-231, DEC-678): at the next
+// episode a TV reads both before it plays. The reader's files set again, as
+// the end of a start with priority or the queue do, keep them coming.
+TEST_F(MultiFileTorrent, TheNextFilesStartAndEndComeWhileAnotherPlays) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port());
+    config.scheduler.startup_focus_bytes = 2 * kPiece;
+    SeekServeEngine engine(config);
+    ASSERT_TRUE(engine.start_server());
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e01 = index_of(engine, id, kE01);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    ASSERT_GE(e01, 0);
+    ASSERT_GE(e02, 0);
+    ASSERT_TRUE(engine.select_file(id, e01));
+    ASSERT_TRUE(engine.fetch_ends_ahead(id, e02));
+    ASSERT_TRUE(engine.set_wanted_files(id, e01, -1));
+    proxy.limit_download(0);
+
+    // The status says which file comes ahead and how many of its pieces are
+    // missing. libtorrent keeps the pieces of a file it does not download in
+    // its part file, and moves them into the file when the file is wanted.
+    ASSERT_TRUE(wait_for([&] {
+        const auto status = status_of(engine, id);
+        return status.value("ends_ahead_file", -1) == e02 &&
+               status.value("ends_ahead_left", -1) == 0;
+    })) << engine.get_status_json(id);
+
+    // The next episode starts with the download all but stopped: its start
+    // and its end are there already.
+    proxy.limit_download(1);
+    ASSERT_TRUE(engine.select_file(id, e02));
+    auto url = engine.get_stream_url(id, e02);
+    ASSERT_TRUE(url);
+    const std::string theirs = seeded(kE02);
+    const std::size_t ends = 2 * kPiece;
+    const std::size_t last = theirs.size() - ends;
+    EXPECT_EQ(http_get_body(url.value(), "bytes=0-" + std::to_string(ends - 1)),
+              theirs.substr(0, ends));
+    EXPECT_EQ(http_get_body(url.value(), "bytes=" + std::to_string(last) + "-" +
+                                             std::to_string(theirs.size() - 1)),
+              theirs.substr(last));
+}
+
+TEST_F(MultiFileTorrent, TheEndsOfAFileThatIsNotThereAreRefused) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+    ASSERT_TRUE(engine.start_server());
+
+    const TorrentId id = add(engine, *seeder);
+    EXPECT_EQ(engine.fetch_ends_ahead(id, 99).error(), make_error_code(errc::file_not_found));
+    EXPECT_EQ(engine.fetch_ends_ahead("0000000000000000000000000000000000000000", 0).error(),
+              make_error_code(errc::torrent_not_found));
+}
+
 }  // namespace seekserve

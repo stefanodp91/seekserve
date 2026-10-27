@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added — The next episode's start and end, fetched ahead
+
+#### `seekserve-core`, `seekserve-serve`, `seekserve-capi`
+
+- **`SeekServeEngine::fetch_ends_ahead`** (C API `ss_fetch_ends_ahead`; app BUG-231, DEC-678): the first and the last
+  `startup_focus_bytes` of another file of the torrent go to the top priority while the reader's file plays, and stay
+  wanted when the files' priorities are set again (`apply_ends_ahead` after `set_wanted_files` and after a start with
+  priority), until that file is the reader's or the torrent goes. The status says `ends_ahead_file` and
+  `ends_ahead_left`, its pieces not there yet. libtorrent keeps them in its part file and moves them into the file
+  when the file is wanted. On the app's Pixel 4 a TV asked for the end of the next episode's MP4 right after its
+  first bytes, and the torrent, its previous file whole, had lost its peers: the end came in 14.2 s, after the TV gave
+  up. `file_end_pieces` and `with_pieces_first` (`seekserve-core`, `ends_ahead.hpp`) say which pieces and set them.
+
 ### Changed — The start of an MP4 asks for its end too
 
 #### `seekserve-core`, `seekserve-serve`

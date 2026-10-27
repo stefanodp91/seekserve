@@ -25,6 +25,7 @@
 #include "seekserve/byte_range_mapper.hpp"
 #include "seekserve/wait_piece.hpp"
 #include "seekserve/startup_focus.hpp"
+#include "seekserve/ends_ahead.hpp"
 #include "seekserve/wait_focus.hpp"
 #include "seekserve/piece_reader.hpp"
 #include "seekserve/byte_source.hpp"
@@ -82,6 +83,15 @@ public:
     // is not downloaded. The reader keeps its stream while only the file
     // behind it changes. select_file(id, fi) is a new reader alone.
     Result<void> set_wanted_files(const TorrentId& id, FileIndex reader, FileIndex background);
+    // The first and the last `startup_focus_bytes` of file `fi` of `id` come
+    // first while another file plays (app BUG-231, DEC-678): the next
+    // episode's, which a TV reads at once, and a torrent whose wanted files
+    // are all there has lost its peers by then. They stay wanted when the
+    // files' priorities are set again, until `fi` is the reader's or the
+    // torrent goes. Nothing for the reader's own file or without
+    // `startup_focus_bytes`; errc::file_not_found for a file that is not
+    // there, errc::metadata_not_ready before the files are known.
+    Result<void> fetch_ends_ahead(const TorrentId& id, FileIndex fi);
 
     // Streaming
     Result<std::string> get_stream_url(const TorrentId& id, FileIndex fi);
@@ -183,6 +193,9 @@ private:
     // Called with mu_ held.
     void end_startup_focus(const TorrentId& id, TorrentState& state,
                            lt::torrent_handle& handle);
+    // The ends ahead of `id` back at the top, after the files' priorities
+    // were set again. Called with mu_ held.
+    void apply_ends_ahead(const TorrentId& id, lt::torrent_handle& handle);
     // Stops a stream server and waits, bounded, for its connection threads,
     // which own sockets of ioc_.
     static void stop_and_drain(HttpRangeServer& server);
@@ -239,6 +252,13 @@ private:
     // Guards alert handlers against late alerts of a removed torrent; an id
     // leaves it when the torrent is added again (app BUG-68).
     std::unordered_set<TorrentId> removed_ids_;
+    // The file whose ends come ahead, by torrent, and their pieces (app
+    // BUG-231). Guarded by mu_.
+    struct EndsAhead {
+        FileIndex file;
+        std::vector<PieceIndex> pieces;
+    };
+    std::unordered_map<TorrentId, EndsAhead> ends_ahead_;
     mutable std::mutex mu_;
 
     EventCallback event_cb_;

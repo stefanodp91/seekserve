@@ -783,6 +783,38 @@ TEST_F(CApiTest, SetWantedFilesSaysWhichFileIsWhose) {
     ss_engine_destroy(engine);
 }
 
+// The start and the end of the next episode's file, fetched while another
+// file plays (app BUG-231, DEC-678): said in the status; a torrent or a file
+// that is not there, or files not known yet, an error code.
+TEST_F(CApiTest, FetchEndsAheadSaysTheFileInTheStatus) {
+    auto config = make_config(R"("startup_focus_bytes":65536)");
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+
+    EXPECT_EQ(ss_fetch_ends_ahead(nullptr, "abc", 0), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_fetch_ends_ahead(engine, nullptr, 0), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_fetch_ends_ahead(engine, "nonexistent_torrent_id", 0), SS_ERR_NOT_FOUND);
+
+    char id_buf[128] = {};
+    auto path = torrent_path();
+    ASSERT_EQ(ss_add_torrent(engine, path.c_str(), id_buf, sizeof(id_buf)), SS_OK);
+    std::string id(id_buf);
+    ASSERT_TRUE(status_becomes(engine, id, {"\"has_metadata\":true"})) << status_json(engine, id);
+
+    EXPECT_EQ(ss_fetch_ends_ahead(engine, id.c_str(), 99), SS_ERR_NOT_FOUND);
+    ASSERT_EQ(ss_select_file(engine, id.c_str(), 2), SS_OK);
+    ASSERT_EQ(ss_fetch_ends_ahead(engine, id.c_str(), 3), SS_OK);
+    EXPECT_TRUE(status_becomes(engine, id, {"\"ends_ahead_file\":3", "\"ends_ahead_left\":"}))
+        << status_json(engine, id);
+
+    // The next episode is the reader's now: nothing comes ahead any more.
+    ASSERT_EQ(ss_select_file(engine, id.c_str(), 3), SS_OK);
+    EXPECT_TRUE(status_becomes(engine, id, {"\"selected_file\":3"}, {"ends_ahead_file"}))
+        << status_json(engine, id);
+
+    ss_engine_destroy(engine);
+}
+
 // A torrent or a file that is not there, or files not known yet: an error
 // code, and what was wanted stays wanted.
 TEST_F(CApiTest, SetWantedFilesThatAreNotThereAreErrors) {

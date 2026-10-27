@@ -151,6 +151,19 @@ ss_error_t ss_set_wanted_files(SeekServeEngine* engine,
                                int32_t reader_file,
                                int32_t background_file);
 
+/* The first and the last "startup_focus_bytes" of another file of the
+ * torrent come first while the reader's file plays (app BUG-231, DEC-678):
+ * the next episode's, which a TV reads at once. They stay wanted until that
+ * file is the reader's or the torrent goes; the status says
+ * "ends_ahead_file" and "ends_ahead_left" (pieces not there yet). Nothing
+ * for the reader's own file or with "startup_focus_bytes" 0.
+ * SS_ERR_NOT_FOUND for a torrent or a file that is not there,
+ * SS_ERR_METADATA_PENDING before the files are known. */
+__attribute__((visibility("default")))
+ss_error_t ss_fetch_ends_ahead(SeekServeEngine* engine,
+                               const char* torrent_id,
+                               int32_t file_index);
+
 __attribute__((visibility("default")))
 ss_error_t ss_get_stream_url(SeekServeEngine* engine,
                              const char* torrent_id,

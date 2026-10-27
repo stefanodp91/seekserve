@@ -7,6 +7,7 @@ add_library(seekserve-core STATIC
     src/piece_availability.cpp
     src/streaming_scheduler.cpp
     src/startup_focus.cpp
+    src/ends_ahead.cpp
     src/piece_reader.cpp
     src/wait_piece.cpp
     src/wait_focus.cpp
