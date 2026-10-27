@@ -66,7 +66,8 @@ struct SchedulerConfig {
     // reader starts or jumps far, the pieces of its first
     // `startup_focus_bytes` come first and every other wanted piece last,
     // until those bytes are there or `startup_focus_timeout` passed. 0 = off,
-    // as before.
+    // as before. For an MP4 the file's last so many bytes come first too,
+    // where its index may be (app BUG-231).
     std::int64_t startup_focus_bytes = 0;
     std::chrono::milliseconds startup_focus_timeout{30000};
     // A reader that waits for the same piece and gets no block of it for this

@@ -574,7 +574,10 @@ Result<void> SeekServeEngine::want_files(const TorrentId& id, FileIndex reader,
 
             state->scheduler = std::make_unique<StreamingScheduler>(
                 config_.scheduler, state->avail, *state->mapper);
-            state->focus = std::make_unique<StartupFocus>(config_.scheduler);
+            // An MP4 may keep its index at the end: a reader asks for it
+            // before it plays (app BUG-231).
+            state->focus = std::make_unique<StartupFocus>(
+                config_.scheduler, keeps_index_at_end(file_info.value().path));
             state->wait_focus =
                 std::make_unique<WaitFocusWatch>(config_.scheduler.wait_focus_after);
 

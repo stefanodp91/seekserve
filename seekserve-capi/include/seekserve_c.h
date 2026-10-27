@@ -58,7 +58,9 @@ typedef void (*ss_event_callback_t)(const char* event_json, void* user_data);
 //     jumps far, the pieces of its first so many bytes go to the top
 //     priority and every other wanted piece to the lowest (never to zero),
 //     until those bytes are there. Through Tor this keeps the pieces a
-//     player waits for from queuing behind the rest of the file.
+//     player waits for from queuing behind the rest of the file. For an
+//     MP4 or QuickTime file the file's last so many bytes too, where its
+//     index may be (app BUG-231).
 //   "startup_focus_timeout" (int, seconds, default 30): the longest such a
 //     start lasts; then the files' priorities hold again.
 //   "wait_focus_after" (int, seconds, default 0 = never; app BUG-246,

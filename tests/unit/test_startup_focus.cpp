@@ -170,3 +170,92 @@ TEST(StartupFocusTest, OffWithoutBytes) {
     EXPECT_TRUE(wanted.empty());
     EXPECT_FALSE(focus.active());
 }
+
+// A file whose index may be at its end (an MP4): a reader that starts asks
+// for the end too before it plays, so the last bytes come first with the
+// first ones (app BUG-231).
+TEST(StartupFocusTest, TheEndOfAFileWithItsIndexThereComesFirstToo) {
+    auto ti = make_torrent({10 * kMb});  // 40 pieces
+    ByteRangeMapper mapper(ti->layout(), 0);
+    auto avail = make_avail(*ti);
+    StartupFocus focus(focus_config(), true);
+
+    auto wanted = focus.begin(0, mapper, avail, all(40, lt::default_priority),
+                              StartupFocus::Clock::now());
+
+    ASSERT_EQ(wanted.size(), 40u);
+    for (int p = 0; p < 8; ++p) EXPECT_EQ(wanted[p], lt::top_priority) << p;
+    for (int p = 8; p < 32; ++p) EXPECT_EQ(wanted[p], lt::low_priority) << p;
+    for (int p = 32; p < 40; ++p) EXPECT_EQ(wanted[p], lt::top_priority) << p;
+}
+
+TEST(StartupFocusTest, TheEndIsTheEndOfTheReadersFile) {
+    auto ti = make_torrent({6 * kMb, 4 * kMb});  // 24 + 16 pieces
+    ByteRangeMapper mapper(ti->layout(), 0);
+    auto avail = make_avail(*ti);
+    StartupFocus focus(focus_config(), true);
+
+    auto wanted = focus.begin(0, mapper, avail, all(40, lt::default_priority),
+                              StartupFocus::Clock::now());
+
+    ASSERT_EQ(wanted.size(), 40u);
+    for (int p = 0; p < 8; ++p) EXPECT_EQ(wanted[p], lt::top_priority) << p;
+    for (int p = 8; p < 16; ++p) EXPECT_EQ(wanted[p], lt::low_priority) << p;
+    for (int p = 16; p < 24; ++p) EXPECT_EQ(wanted[p], lt::top_priority) << p;
+    for (int p = 24; p < 40; ++p) EXPECT_EQ(wanted[p], lt::low_priority) << p;
+}
+
+TEST(StartupFocusTest, AMissingEndAloneBeginsIt) {
+    auto ti = make_torrent({10 * kMb});
+    ByteRangeMapper mapper(ti->layout(), 0);
+    auto avail = make_avail(*ti);
+    for (int p = 0; p < 8; ++p) avail.mark_complete(p);
+    StartupFocus focus(focus_config(), true);
+
+    auto wanted = focus.begin(0, mapper, avail, all(40, lt::default_priority),
+                              StartupFocus::Clock::now());
+
+    ASSERT_EQ(wanted.size(), 40u);
+    for (int p = 32; p < 40; ++p) EXPECT_EQ(wanted[p], lt::top_priority) << p;
+    EXPECT_TRUE(focus.active());
+}
+
+TEST(StartupFocusTest, NothingToDoWhenTheFirstAndLastBytesAreThere) {
+    auto ti = make_torrent({10 * kMb});
+    ByteRangeMapper mapper(ti->layout(), 0);
+    auto avail = make_avail(*ti);
+    for (int p = 0; p < 8; ++p) avail.mark_complete(p);
+    for (int p = 32; p < 40; ++p) avail.mark_complete(p);
+    StartupFocus focus(focus_config(), true);
+
+    auto wanted = focus.begin(0, mapper, avail, all(40, lt::default_priority),
+                              StartupFocus::Clock::now());
+
+    EXPECT_TRUE(wanted.empty());
+    EXPECT_FALSE(focus.active());
+}
+
+TEST(StartupFocusTest, OverOnlyWhenTheLastBytesAreThereToo) {
+    auto ti = make_torrent({10 * kMb});
+    ByteRangeMapper mapper(ti->layout(), 0);
+    auto avail = make_avail(*ti);
+    StartupFocus focus(focus_config(), true);
+    const auto start = StartupFocus::Clock::now();
+    focus.begin(0, mapper, avail, all(40, lt::default_priority), start);
+
+    for (int p = 0; p < 8; ++p) avail.mark_complete(p);
+    EXPECT_FALSE(focus.over(avail, start + 1s));
+    for (int p = 32; p < 40; ++p) avail.mark_complete(p);
+    EXPECT_TRUE(focus.over(avail, start + 1s));
+}
+
+TEST(StartupFocusTest, OnlyMp4AndMovFilesMayKeepTheirIndexAtTheEnd) {
+    EXPECT_TRUE(keeps_index_at_end("Show/Show.S01E02.mp4"));
+    EXPECT_TRUE(keeps_index_at_end("film.MP4"));
+    EXPECT_TRUE(keeps_index_at_end("film.m4v"));
+    EXPECT_TRUE(keeps_index_at_end("film.mov"));
+    EXPECT_FALSE(keeps_index_at_end("film.mkv"));
+    EXPECT_FALSE(keeps_index_at_end("film.mp4.part"));
+    EXPECT_FALSE(keeps_index_at_end("mp4"));
+    EXPECT_FALSE(keeps_index_at_end(""));
+}

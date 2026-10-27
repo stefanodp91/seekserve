@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Changed — The start of an MP4 asks for its end too
+
+#### `seekserve-core`, `seekserve-serve`
+
+- **`StartupFocus`** (app BUG-231): for a file that may keep its index at the end, MP4 or QuickTime by its extension
+  (`keeps_index_at_end`: `.mp4`, `.m4v`, `.mov`), the file's last `startup_focus_bytes` go to the top priority with the
+  first ones, and the start is over only when both are there. On the app's Pixel 4 a TV asked for the last piece of an
+  MP4 right after its first bytes and waited 10.6 s for it before it played; another time it gave up after 15 s. The
+  engine gives the focus the file's kind when the file is selected.
+
 ### Added — The piece a stuck reader waits for, asked first
 
 #### `seekserve-core`, `seekserve-serve` and `seekserve-capi`
