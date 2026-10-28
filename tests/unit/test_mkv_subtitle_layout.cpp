@@ -157,6 +157,27 @@ TEST(MkvStructure, CuesThatNameNoClusterAreNoCues) {
     EXPECT_EQ(why, "no Cues naming a Cluster");
 }
 
+// A file that makes the rebuild do much work is not rebuilt: a second Cues
+// or Tracks, too many tracks (a hostile file of a torrent).
+TEST(MkvStructure, FilesThatWouldCostTooMuchAreNotRebuilt) {
+    std::string why;
+    Synthetic many;
+    many.extra_tracks = 130;
+    auto file = synthetic_mkv(many);
+    EXPECT_FALSE(read_mkv_structure(reader_of(file), static_cast<std::int64_t>(file.size()), why));
+    EXPECT_EQ(why, "malformed Tracks");
+
+    // The Cues once more at the end, inside the Segment.
+    file = synthetic_mkv(Synthetic{});
+    auto s = read_mkv_structure(reader_of(file), static_cast<std::int64_t>(file.size()), why).value();
+    Bytes cues(file.begin() + s.cues_start, file.end());
+    file.insert(file.end(), cues.begin(), cues.end());
+    auto segment_size = static_cast<std::uint64_t>(file.size() - s.segment_data);
+    for (int b = 0; b < 7; ++b) file[s.segment_data - 1 - b] = static_cast<std::uint8_t>(segment_size >> (8 * b));
+    EXPECT_FALSE(read_mkv_structure(reader_of(file), static_cast<std::int64_t>(file.size()), why));
+    EXPECT_EQ(why, "two Cues");
+}
+
 TEST(MkvStructure, AMissingPieceIsATimeoutNotAVerdict) {
     auto file = read_file(fixture());
     MkvRead slow = [&](std::int64_t offset, std::int64_t len) -> Result<std::vector<std::uint8_t>> {

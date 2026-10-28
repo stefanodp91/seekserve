@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <map>
+#include <unordered_set>
 
 #include "seekserve/ebml.hpp"
 
@@ -26,7 +27,7 @@ std::int64_t to_units(std::int64_t ms, std::uint64_t scale) {
 std::vector<std::uint8_t> rebuilt_tracks(const std::vector<std::uint8_t>& tracks,
                                          const SubtitleTrack& track, std::uint64_t& number) {
     std::vector<std::uint8_t> out;
-    std::vector<std::uint64_t> uids;
+    std::unordered_set<std::uint64_t> uids;
     number = 0;
     auto entries = ebml::children(tracks.data(), tracks.size());  // read, so never empty
     for (const auto& entry : entries.value_or(std::vector<ebml::Child>{})) {
@@ -38,7 +39,7 @@ std::vector<std::uint8_t> rebuilt_tracks(const std::vector<std::uint8_t>& tracks
         for (const auto& f : *fields) {
             auto v = ebml::read_uint(p + f.data, f.end - f.data).value_or(0);
             if (f.id == ebml::kTrackNumber) number = std::max(number, v);
-            if (f.id == ebml::kTrackUid) uids.push_back(v);
+            if (f.id == ebml::kTrackUid) uids.insert(v);
             if (f.id == ebml::kTrackType) type = v;
         }
         if (type != ebml::kSubtitleTrackType) {
@@ -54,7 +55,7 @@ std::vector<std::uint8_t> rebuilt_tracks(const std::vector<std::uint8_t>& tracks
     }
     ++number;
     auto uid = kTrackUidBase + number;
-    while (std::find(uids.begin(), uids.end(), uid) != uids.end()) ++uid;
+    while (uids.count(uid)) ++uid;
 
     std::vector<std::uint8_t> entry;
     ebml::append(entry, ebml::uint_element(ebml::kTrackNumber, number));
@@ -156,6 +157,8 @@ private:
     const SubtitleTrack& track_;
     MkvSubtitleLayout out_;
     std::map<std::int64_t, std::vector<std::uint8_t>> inserts_;
+    // Per insert, in order of place: the bytes added up to it, included.
+    std::vector<std::pair<std::int64_t, std::int64_t>> added_;
     std::map<std::int64_t, std::int64_t> starts_;  // head and tail element: old -> new start
     std::int64_t segment_data_ = 0;
     std::int64_t region_start_ = 0;
@@ -165,11 +168,9 @@ private:
 std::int64_t Builder::new_position(std::int64_t old) const {
     if (auto it = starts_.find(old); it != starts_.end()) return it->second;
     if (old >= s_.first_cluster && old <= s_.clusters_end) {
-        std::int64_t added = 0;
-        for (const auto& [at, bytes] : inserts_) {
-            if (at > old) break;
-            added += static_cast<std::int64_t>(bytes.size());
-        }
+        auto it = std::upper_bound(added_.begin(), added_.end(), old,
+                                   [](std::int64_t o, const auto& a) { return o < a.first; });
+        auto added = it == added_.begin() ? 0 : std::prev(it)->second;
         return region_start_ + (old - s_.first_cluster) + added;
     }
     return old;  // before the Segment: copied where it was
@@ -240,6 +241,11 @@ void Builder::add(std::vector<std::uint8_t> bytes) {
 MkvSubtitleLayout Builder::build() {
     auto tracks = rebuilt_tracks(s_.tracks, track_, out_.track_number);
     inserts_ = subtitle_clusters(s_, track_, out_.track_number);
+    std::int64_t total = 0;
+    for (const auto& [at, bytes] : inserts_) {
+        total += static_cast<std::int64_t>(bytes.size());
+        added_.emplace_back(at, total);
+    }
     // Cues in the head take wide positions, like the SeekHead; after the
     // Clusters nothing before them depends on their length.
     bool cues_in_head = s_.cues_start < s_.first_cluster;

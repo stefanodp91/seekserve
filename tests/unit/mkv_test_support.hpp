@@ -91,6 +91,7 @@ struct Synthetic {
     bool cues_in_head = false;
     bool with_cues = true;
     bool with_crc = false;
+    int extra_tracks = 0;  // more audio tracks
 };
 
 inline Bytes synthetic_mkv(const Synthetic& o) {
@@ -113,6 +114,12 @@ inline Bytes synthetic_mkv(const Synthetic& o) {
         append(sub, uint_element(kFlagDefault, 1));
         append(sub, string_element(kCodecId, "S_TEXT/UTF8"));
         append(tracks, element(kTrackEntry, sub));
+    }
+    for (int i = 0; i < o.extra_tracks; ++i) {
+        Bytes audio = uint_element(kTrackNumber, static_cast<std::uint64_t>(10 + i));
+        append(audio, uint_element(kTrackUid, static_cast<std::uint64_t>(100 + i)));
+        append(audio, uint_element(kTrackType, 2));
+        append(tracks, element(kTrackEntry, audio));
     }
     if (o.with_crc) tracks.insert(tracks.begin(), {0xBF, 0x84, 1, 2, 3, 4});
 

@@ -14,6 +14,9 @@ constexpr std::int64_t kMaxSmallElement = 64 * 1024;   // SeekHead, Info, EBML h
 constexpr std::int64_t kMaxTracks = 1024 * 1024;
 constexpr std::int64_t kMaxCues = 16 * 1024 * 1024;
 constexpr int kMaxTopElements = 1024;
+// A film has a few thousand cue points and a handful of tracks.
+constexpr std::size_t kMaxCuePositions = 200000;
+constexpr std::size_t kMaxTrackEntries = 128;
 constexpr std::uint32_t kDocType = 0x4282;
 constexpr std::uint32_t kCueCodecState = 0xEA;
 constexpr std::uint32_t kCueReference = 0xDB;
@@ -96,6 +99,7 @@ std::optional<std::vector<MkvCuePoint>> cue_points(const std::vector<std::uint8_
     auto points = ebml::children(p.data(), p.size());
     if (!points) return std::nullopt;
     std::vector<MkvCuePoint> out;
+    std::size_t positions = 0;
     for (const auto& point : *points) {
         if (point.id != ebml::kCuePoint) continue;  // CRC-32: the rebuilt Cues have none
         auto fields = ebml::children(p.data() + point.data, point.end - point.data);
@@ -126,13 +130,13 @@ std::optional<std::vector<MkvCuePoint>> cue_points(const std::vector<std::uint8_
                 else if (part.id != kCueCodecState && part.id != kCueReference)
                     ebml::append(pos.rest, raw);  // CueDuration: a place in time, not in the file
             }
-            if (!track || !cluster) return std::nullopt;
+            if (!track || !cluster || ++positions > kMaxCuePositions) return std::nullopt;
             pos.track = *track;
             pos.cluster = segment_data + static_cast<std::int64_t>(*cluster);
             cue.positions.push_back(std::move(pos));
         }
         if (!timed) return std::nullopt;
-        out.push_back(std::move(cue));
+        if (!cue.positions.empty()) out.push_back(std::move(cue));
     }
     return out;
 }
@@ -182,10 +186,11 @@ Result<MkvStructure> read_mkv_structure(const MkvRead& read, std::int64_t file_s
         return {};
     };
     auto parse_cues = [&](const MkvElement& e) -> Result<void> {
+        if (!s.cues.empty() || s.cues_start != 0) return r.fail("two Cues");
         auto p = r.payload(e, kMaxCues);
         if (!p) return p.error();
         auto points = cue_points(p.value(), s.segment_data);
-        if (!points) return r.fail("malformed Cues");
+        if (!points) return r.fail("malformed or too large Cues");
         s.cues = std::move(*points);
         s.cues_start = e.start;
         return {};
@@ -206,8 +211,13 @@ Result<MkvStructure> read_mkv_structure(const MkvRead& read, std::int64_t file_s
             }
         }
         if (e.id == ebml::kTracks) {
+            if (!s.tracks.empty()) return r.fail("two Tracks");
             auto p = r.payload(e, kMaxTracks);
             if (!p) return p.error();
+            auto entries = ebml::children(p.value().data(), p.value().size());
+            if (!entries || entries->empty() || entries->size() > kMaxTrackEntries) {
+                return r.fail("malformed Tracks");
+            }
             s.tracks = std::move(p).value();
         }
         return {};
