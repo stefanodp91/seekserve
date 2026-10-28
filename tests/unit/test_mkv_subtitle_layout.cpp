@@ -219,7 +219,10 @@ TEST(MkvSubtitleLayout, TheVideoIsCopiedAndTheLinesAreThereAtTheirTimes) {
     }
 }
 
-TEST(MkvSubtitleLayout, TheNewTrackIsTheDefaultAndTheOldSubtitlesAreNot) {
+// A TV that shows only the first subtitle track of the file, and only when
+// it is the default, shows none of a film with subtitles of its own after
+// which the new track comes (app WORK-37 step 7c3): the new track goes first.
+TEST(MkvSubtitleLayout, TheNewTrackIsTheFirstSubtitleTrackAndTheOnlyDefault) {
     Synthetic with;
     with.with_subtitles = true;
     auto file = synthetic_mkv(with);
@@ -227,18 +230,22 @@ TEST(MkvSubtitleLayout, TheNewTrackIsTheDefaultAndTheOldSubtitlesAreNot) {
     EXPECT_EQ(r.track, 3u);
     auto entries = ebml::children(r.structure.tracks.data(), r.structure.tracks.size());
     ASSERT_EQ(entries->size(), 3u);
-    std::vector<std::uint64_t> defaults;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> subtitles;  // number, default
+    std::vector<std::uint64_t> types;
     for (const auto& e : *entries) {
         const auto* p = r.structure.tracks.data() + e.data;
-        std::uint64_t type = 0, def = 1;
+        std::uint64_t type = 0, number = 0, def = 1;
         auto fields = ebml::children(p, e.end - e.data);
         for (const auto& f : fields.value()) {
             if (f.id == ebml::kTrackType) type = *ebml::read_uint(p + f.data, f.end - f.data);
+            if (f.id == ebml::kTrackNumber) number = *ebml::read_uint(p + f.data, f.end - f.data);
             if (f.id == ebml::kFlagDefault) def = *ebml::read_uint(p + f.data, f.end - f.data);
         }
-        if (type == ebml::kSubtitleTrackType) defaults.push_back(def);
+        types.push_back(type);
+        if (type == ebml::kSubtitleTrackType) subtitles.emplace_back(number, def);
     }
-    EXPECT_EQ(defaults, (std::vector<std::uint64_t>{0, 1}));
+    EXPECT_NE(types.front(), ebml::kSubtitleTrackType);  // the video stays first
+    EXPECT_EQ(subtitles, (std::vector<std::pair<std::uint64_t, std::uint64_t>>{{3, 1}, {2, 0}}));
 }
 
 // A TV that finds, where a cue points, a Cluster timed after the cue drops

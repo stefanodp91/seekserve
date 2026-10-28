@@ -22,41 +22,9 @@ std::int64_t to_units(std::int64_t ms, std::uint64_t scale) {
     return (ms * 1000000 + s / 2) / s;
 }
 
-// The Tracks payload with the subtitle track last and the only default
-// subtitle track: an existing one is no longer the default.
-std::vector<std::uint8_t> rebuilt_tracks(const std::vector<std::uint8_t>& tracks,
-                                         const SubtitleTrack& track, std::uint64_t& number) {
-    std::vector<std::uint8_t> out;
-    std::unordered_set<std::uint64_t> uids;
-    number = 0;
-    auto entries = ebml::children(tracks.data(), tracks.size());  // read, so never empty
-    for (const auto& entry : entries.value_or(std::vector<ebml::Child>{})) {
-        if (entry.id != ebml::kTrackEntry) continue;  // CRC-32, Void
-        const auto* p = tracks.data() + entry.data;
-        auto fields = ebml::children(p, entry.end - entry.data);
-        if (!fields) continue;
-        std::uint64_t type = 0;
-        for (const auto& f : *fields) {
-            auto v = ebml::read_uint(p + f.data, f.end - f.data).value_or(0);
-            if (f.id == ebml::kTrackNumber) number = std::max(number, v);
-            if (f.id == ebml::kTrackUid) uids.insert(v);
-            if (f.id == ebml::kTrackType) type = v;
-        }
-        if (type != ebml::kSubtitleTrackType) {
-            out.insert(out.end(), tracks.begin() + entry.start, tracks.begin() + entry.end);
-            continue;
-        }
-        std::vector<std::uint8_t> payload;
-        for (const auto& f : *fields) {
-            if (f.id != ebml::kFlagDefault) payload.insert(payload.end(), p + f.start, p + f.end);
-        }
-        ebml::append(payload, ebml::uint_element(ebml::kFlagDefault, 0));
-        ebml::append(out, ebml::element(ebml::kTrackEntry, payload));
-    }
-    ++number;
-    auto uid = kTrackUidBase + number;
-    while (uids.count(uid)) ++uid;
-
+// The TrackEntry of the new subtitle track, numbered `number`.
+std::vector<std::uint8_t> new_track_entry(const SubtitleTrack& track, std::uint64_t number,
+                                          std::uint64_t uid) {
     std::vector<std::uint8_t> entry;
     ebml::append(entry, ebml::uint_element(ebml::kTrackNumber, number));
     ebml::append(entry, ebml::uint_element(ebml::kTrackUid, uid));
@@ -66,7 +34,64 @@ std::vector<std::uint8_t> rebuilt_tracks(const std::vector<std::uint8_t>& tracks
     ebml::append(entry, ebml::string_element(ebml::kCodecId, "S_TEXT/UTF8"));
     ebml::append(entry, ebml::string_element(ebml::kLanguage, track.language));
     if (!track.name.empty()) ebml::append(entry, ebml::string_element(ebml::kName, track.name));
-    ebml::append(out, ebml::element(ebml::kTrackEntry, entry));
+    return ebml::element(ebml::kTrackEntry, entry);
+}
+
+// The Tracks payload with the subtitle track as the first subtitle track and
+// the only default one: an existing one is no longer the default. A TV that
+// shows only the first subtitle track, when it is the default, shows none
+// of a film with subtitles of its own after which the new track comes (app
+// WORK-37 step 7c3, the TCL).
+std::vector<std::uint8_t> rebuilt_tracks(const std::vector<std::uint8_t>& tracks,
+                                         const SubtitleTrack& track, std::uint64_t& number) {
+    struct Entry {
+        ebml::Child child;
+        std::vector<ebml::Child> fields;
+        std::uint64_t type = 0;
+    };
+    std::vector<Entry> read;
+    std::unordered_set<std::uint64_t> uids;
+    number = 0;
+    auto entries = ebml::children(tracks.data(), tracks.size());  // read, so never empty
+    for (const auto& entry : entries.value_or(std::vector<ebml::Child>{})) {
+        if (entry.id != ebml::kTrackEntry) continue;  // CRC-32, Void
+        const auto* p = tracks.data() + entry.data;
+        auto fields = ebml::children(p, entry.end - entry.data);
+        if (!fields) continue;
+        Entry e{entry, *fields, 0};
+        for (const auto& f : *fields) {
+            auto v = ebml::read_uint(p + f.data, f.end - f.data).value_or(0);
+            if (f.id == ebml::kTrackNumber) number = std::max(number, v);
+            if (f.id == ebml::kTrackUid) uids.insert(v);
+            if (f.id == ebml::kTrackType) e.type = v;
+        }
+        read.push_back(std::move(e));
+    }
+    ++number;
+    auto uid = kTrackUidBase + number;
+    while (uids.count(uid)) ++uid;
+    auto added = new_track_entry(track, number, uid);
+
+    std::vector<std::uint8_t> out;
+    bool placed = false;
+    for (const auto& e : read) {
+        if (e.type != ebml::kSubtitleTrackType) {
+            out.insert(out.end(), tracks.begin() + e.child.start, tracks.begin() + e.child.end);
+            continue;
+        }
+        if (!placed) {
+            ebml::append(out, added);
+            placed = true;
+        }
+        const auto* p = tracks.data() + e.child.data;
+        std::vector<std::uint8_t> payload;
+        for (const auto& f : e.fields) {
+            if (f.id != ebml::kFlagDefault) payload.insert(payload.end(), p + f.start, p + f.end);
+        }
+        ebml::append(payload, ebml::uint_element(ebml::kFlagDefault, 0));
+        ebml::append(out, ebml::element(ebml::kTrackEntry, payload));
+    }
+    if (!placed) ebml::append(out, added);
     return out;
 }
 
