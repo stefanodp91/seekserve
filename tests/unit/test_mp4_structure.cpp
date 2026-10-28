@@ -226,6 +226,33 @@ TEST(Mp4Structure, TablesThatDisagreeAreRefused) {
     EXPECT_EQ(why, "a sample outside the file");
 }
 
+// A 64-bit chunk offset near the top of int64 would wrap the check of the
+// sample's end: it is refused as a chunk past the file.
+TEST(Mp4Structure, AChunkOffsetNearTheTopOfInt64IsRefused) {
+    auto file = read_file(fixture("mp4_avc_aac.mp4"));
+    std::string why;
+    auto s = read_mp4_structure(reader_of(file), static_cast<std::int64_t>(file.size()), why).value();
+    std::size_t stco = 0;
+    for (std::size_t i = s.moov_start; i + 4 < file.size() && stco == 0; ++i) {
+        if (std::equal("stco", "stco" + 4, file.begin() + i)) stco = i;
+    }
+    ASSERT_GT(stco, 0u);
+    // The video's stco (count n) as a co64 with the same count, its first
+    // entry 0x7FFFFFFFFFFFFF00, the rest dropped to keep the box's length.
+    auto box = stco - 4;
+    std::uint32_t box_size = file[box] << 24 | file[box + 1] << 16 | file[box + 2] << 8 | file[box + 3];
+    std::uint32_t fits = (box_size - 16) / 8;
+    file[stco + 2] = '6';
+    file[stco + 3] = '4';
+    file[stco] = 'c';
+    file[stco + 1] = 'o';
+    for (int b = 0; b < 4; ++b) file[stco + 8 + b] = static_cast<std::uint8_t>(fits >> (24 - 8 * b));
+    const std::uint8_t top[8] = {0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00};
+    std::copy(top, top + 8, file.begin() + stco + 12);
+    EXPECT_FALSE(read_mp4_structure(reader_of(file), static_cast<std::int64_t>(file.size()), why));
+    EXPECT_EQ(why, "a sample outside the file");
+}
+
 TEST(Mp4Structure, AMissingPieceIsATimeoutNotAVerdict) {
     auto file = read_file(fixture("mp4_avc_aac.mp4"));
     Mp4Read slow = [&](std::int64_t offset, std::int64_t len) -> Result<std::vector<std::uint8_t>> {

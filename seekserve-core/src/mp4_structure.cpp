@@ -95,8 +95,8 @@ std::optional<Box> path(const Bytes& b, Box box, std::initializer_list<std::uint
 
 class TrackReader {
 public:
-    TrackReader(const Bytes& b, std::uint32_t movie_timescale, std::string& why)
-        : b_(b), movie_timescale_(movie_timescale), why_(why) {}
+    TrackReader(const Bytes& b, std::uint32_t movie_timescale, std::int64_t file_size, std::string& why)
+        : b_(b), movie_timescale_(movie_timescale), file_size_(file_size), why_(why) {}
 
     // The track of `trak`; nullopt with an empty `why` for a track that is
     // neither video nor audio, which the MKV leaves out.
@@ -123,6 +123,7 @@ private:
 
     const Bytes& b_;
     const std::uint32_t movie_timescale_;
+    const std::int64_t file_size_;
     std::string& why_;
 };
 
@@ -276,7 +277,11 @@ bool TrackReader::tables(const Box& stbl, Mp4Track& t) {
     std::size_t width = stco ? 4 : 8;
     if (!entries(co, co.data + 4, width, n)) return fail("malformed or too large sample tables");
     for (std::uint32_t i = 0; i < n; ++i) {
-        t.chunk_offsets.push_back(static_cast<std::int64_t>(b_.be(co.data + 8 + width * i, static_cast<int>(width))));
+        auto at = b_.be(co.data + 8 + width * i, static_cast<int>(width));
+        // A chunk past the end of the file: the cursor then never adds a
+        // sample's size to an offset near the top of int64.
+        if (at > static_cast<std::uint64_t>(file_size_)) return fail("a sample outside the file");
+        t.chunk_offsets.push_back(static_cast<std::int64_t>(at));
     }
     if (auto stss = child(b_, stbl, fourcc("stss"))) {
         if (!entries(*stss, stss->data + 4, 4, n)) return fail("malformed or too large sample tables");
@@ -413,7 +418,7 @@ Result<Mp4Structure> read_mp4_structure(const Mp4Read& read, std::int64_t file_s
         if (k.type != fourcc("trak")) continue;
         if (++traks > kMaxTracks) return fail("too many tracks");
         why.clear();
-        auto track = TrackReader(moov, s.movie_timescale, why).read(k);
+        auto track = TrackReader(moov, s.movie_timescale, file_size, why).read(k);
         if (!track) {
             if (!why.empty()) return make_error_code(errc::invalid_argument);
             continue;
@@ -429,7 +434,9 @@ Result<Mp4Structure> read_mp4_structure(const Mp4Read& read, std::int64_t file_s
         Mp4Sample x;
         std::uint64_t seen = 0;
         while (c.next(x)) {
-            if (x.offset < 0 || x.offset + static_cast<std::int64_t>(x.size) > file_size) {
+            // Compared without a sum, which a hostile offset near the top of
+            // int64 would wrap past the check.
+            if (x.offset < 0 || x.offset > file_size || static_cast<std::int64_t>(x.size) > file_size - x.offset) {
                 return fail("a sample outside the file");
             }
             ++seen;
