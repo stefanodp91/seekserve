@@ -12,6 +12,7 @@ add_executable(seekserve-unit-tests
     unit/test_mkv_subtitle_layout.cpp
     unit/test_mkv_subtitle_source.cpp
     unit/test_mp4_structure.cpp
+    unit/test_mp4_mkv_file.cpp
     unit/test_streaming_scheduler.cpp
     unit/test_startup_focus.cpp
     unit/test_ends_ahead.cpp

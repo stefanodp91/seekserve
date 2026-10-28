@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "seekserve/error.hpp"
@@ -44,6 +45,9 @@ public:
     // Where the byte at `offset` comes from in the underlying file, for the
     // scheduler: the same offset unless the file is rebuilt.
     virtual std::int64_t file_offset(std::int64_t offset) const { return offset; }
+    // The media type of what it serves, once prepared, when it is not the
+    // one of its file's name (an MP4 served as Matroska, app WORK-37 step 7d).
+    virtual std::optional<std::string> content_type() const { return std::nullopt; }
 };
 
 } // namespace seekserve

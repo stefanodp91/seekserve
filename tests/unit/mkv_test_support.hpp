@@ -33,6 +33,7 @@ struct Block {
     std::int64_t time;  // absolute, in TimestampScale units
     std::int64_t duration;
     std::string data;
+    bool key = false;  // a SimpleBlock's keyframe flag
 };
 
 struct Cluster {
@@ -73,7 +74,8 @@ inline std::vector<Cluster> clusters_of(const Bytes& file, const MkvStructure& s
             std::uint64_t track = block[0] & 0x7F;  // tracks below 127
             auto rel = static_cast<std::int16_t>((block[1] << 8) | block[2]);
             c.blocks.push_back(Block{track, c.timestamp + rel, duration,
-                                     std::string(block + 4, block + block_len)});
+                                     std::string(block + 4, block + block_len),
+                                     part.id == 0xA3 && (block[3] & 0x80) != 0});
         }
         out.push_back(std::move(c));
     }

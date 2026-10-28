@@ -13,6 +13,12 @@ constexpr int kMaxTopBoxes = 1024;
 constexpr std::size_t kMaxTracks = 32;
 constexpr std::uint64_t kMaxSamples = 4000000;
 constexpr std::int64_t kNsPerSecond = 1000000000;
+// No film waits two days before it starts, or starts two days into its media.
+constexpr std::int64_t kMaxEditNs = 48LL * 3600 * kNsPerSecond;
+
+bool media_start_out_of_range(std::int64_t media_time, std::uint32_t timescale) {
+    return static_cast<__int128>(media_time) * kNsPerSecond / timescale > kMaxEditNs;
+}
 
 constexpr std::uint32_t fourcc(const char (&s)[5]) {
     return static_cast<std::uint32_t>(static_cast<std::uint8_t>(s[0])) << 24 |
@@ -337,11 +343,14 @@ bool TrackReader::edits(const Box& trak, Mp4Track& t) {
             delay += duration;
             continue;
         }
+        if (media_start_out_of_range(time, t.timescale)) return fail("a malformed edit list");
         if (time < 0 || rate != 0x00010000) return fail("an edit list with more than one part");
         t.media_start = time;
         media = true;
     }
-    t.delay_ns = static_cast<std::int64_t>(static_cast<__int128>(delay) * kNsPerSecond / movie_timescale_);
+    auto delay_ns = static_cast<__int128>(delay) * kNsPerSecond / movie_timescale_;
+    if (delay_ns > kMaxEditNs) return fail("a malformed edit list");
+    t.delay_ns = static_cast<std::int64_t>(delay_ns);
     return true;
 }
 

@@ -1110,7 +1110,7 @@ TEST_F(CApiTest, AFileShareWithSubtitlesSaysWhereTheyAre) {
     auto state = nlohmann::json::parse(out);
     ss_free_string(out);
     EXPECT_EQ(state["state"], "unsupported");
-    EXPECT_EQ(state["reason"], "not a Matroska file");
+    EXPECT_EQ(state["reason"], "neither a Matroska nor an MP4 file");
 
     ASSERT_EQ(ss_open_file_share(engine, film.c_str(), "127.0.0.1", "127.0.0.1", &out), SS_OK);
     auto plain = nlohmann::json::parse(out)["share_id"].get<std::string>();

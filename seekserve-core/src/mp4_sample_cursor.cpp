@@ -1,5 +1,7 @@
 #include "seekserve/mp4_structure.hpp"
 
+#include <cstdint>
+
 namespace seekserve {
 
 namespace {
@@ -7,17 +9,21 @@ namespace {
 constexpr std::int64_t kNsPerSecond = 1000000000;
 
 // num / den rounded to the nearest, half away from zero; den > 0.
-std::int64_t rounded_div(__int128 num, __int128 den) {
+__int128 rounded_div(__int128 num, __int128 den) {
     __int128 q = num / den;
     __int128 r = num % den;
     if (2 * (r < 0 ? -r : r) >= den) q += num < 0 ? -1 : 1;
-    return static_cast<std::int64_t>(q);
+    return q;
 }
 
 }  // namespace
 
 std::int64_t Mp4Track::presentation_ns(std::int64_t media_time) const {
-    return rounded_div(static_cast<__int128>(media_time - media_start) * kNsPerSecond, timescale) + delay_ns;
+    // Saturated: a hostile file's times past int64 stay at its ends, where
+    // the rebuild refuses them, instead of wrapping.
+    auto ns = rounded_div((static_cast<__int128>(media_time) - media_start) * kNsPerSecond, timescale) + delay_ns;
+    auto top = static_cast<__int128>(INT64_MAX);
+    return static_cast<std::int64_t>(ns > top ? top : ns < -top ? -top : ns);
 }
 
 Mp4SampleCursor::Mp4SampleCursor(const Mp4Track& track) : track_(&track) {

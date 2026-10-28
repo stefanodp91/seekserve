@@ -21,6 +21,8 @@ add_library(seekserve-core STATIC
     src/mkv_subtitle_source.cpp
     src/mp4_structure.cpp
     src/mp4_sample_cursor.cpp
+    src/mp4_mkv_plan.cpp
+    src/mp4_mkv_file.cpp
     src/offline_cache.cpp
     src/resume_data.cpp
 )

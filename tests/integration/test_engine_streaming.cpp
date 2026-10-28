@@ -352,7 +352,7 @@ TEST_F(EngineShareTest, AShareWithSubtitlesOfAFileThatIsNoMatroskaServesItAsItIs
     auto subtitles = engine_->share_subtitles(id);
     ASSERT_TRUE(subtitles);
     EXPECT_EQ(subtitles.value().state, SubtitleShareState::unsupported);
-    EXPECT_EQ(subtitles.value().reason, "not a Matroska file");
+    EXPECT_EQ(subtitles.value().reason, "neither a Matroska nor an MP4 file");
 
     ASSERT_TRUE(engine_->select_file(id_, 0));
     EXPECT_EQ(engine_->share_subtitles(id).value().state, SubtitleShareState::pending)
@@ -469,6 +469,39 @@ TEST_F(EngineFileShareTest, AFileShareWithSubtitlesServesTheFilmWithTheirTrack) 
     ASSERT_TRUE(subtitles);
     EXPECT_EQ(subtitles.value().state, SubtitleShareState::ready);
     EXPECT_TRUE(subtitles.value().reason.empty());
+}
+
+// An MP4 on disk served with the subtitles: the TV gets a Matroska file
+// made from it, and the server says so whatever the file's name (app
+// WORK-37 step 7d).
+TEST_F(EngineFileShareTest, AnMp4ShareWithSubtitlesServesAMatroskaFile) {
+    auto film = (dir_ / "engine" / "Film (2024)" / "clip.mp4").string();
+    fs::copy_file(std::string(SEEKSERVE_FIXTURE_DIR) + "/mp4_avc_aac.mp4", film);
+    auto share = engine_->open_file_share(film, "127.0.0.1", "127.0.0.1", two_lines());
+    ASSERT_TRUE(share) << share.error().message();
+
+    auto reply = http_get(share.value().url, "bytes=0-");
+    ASSERT_NE(reply.find("206"), std::string::npos) << reply.substr(0, 200);
+    auto headers = reply.substr(0, reply.find("\r\n\r\n"));
+    EXPECT_NE(headers.find("video/x-matroska"), std::string::npos) << headers;
+    auto text = reply.substr(reply.find("\r\n\r\n") + 4);
+    std::vector<std::uint8_t> body(text.begin(), text.end());
+    MkvRead read = [&](std::int64_t offset, std::int64_t len) -> Result<std::vector<std::uint8_t>> {
+        auto end = std::min<std::int64_t>(offset + len, static_cast<std::int64_t>(body.size()));
+        return std::vector<std::uint8_t>(body.begin() + offset, body.begin() + end);
+    };
+    std::string why;
+    auto structure = read_mkv_structure(read, static_cast<std::int64_t>(body.size()), why);
+    ASSERT_TRUE(structure) << why;
+    std::string tracks(structure.value().tracks.begin(), structure.value().tracks.end());
+    EXPECT_NE(tracks.find("V_MPEG4/ISO/AVC"), std::string::npos);
+    EXPECT_NE(tracks.find("A_AAC"), std::string::npos);
+    EXPECT_NE(tracks.find("S_TEXT/UTF8"), std::string::npos);
+    EXPECT_NE(text.find("Riga due"), std::string::npos);
+
+    auto subtitles = engine_->share_subtitles(share.value().id);
+    ASSERT_TRUE(subtitles);
+    EXPECT_EQ(subtitles.value().state, SubtitleShareState::ready);
 }
 
 TEST_F(EngineFileShareTest, AFileShareServesNoOtherAddressAndEndsWithTheServers) {

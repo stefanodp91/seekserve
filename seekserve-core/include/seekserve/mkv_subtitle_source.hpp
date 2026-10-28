@@ -6,7 +6,7 @@
 #include <optional>
 #include <string>
 
-#include "seekserve/mkv_subtitle_layout.hpp"
+#include "seekserve/rebuilt_file.hpp"
 #include "seekserve/stream_source.hpp"
 #include "seekserve/subtitle_track.hpp"
 
@@ -21,10 +21,11 @@ enum class SubtitleShareState {
 
 /// The file of `inner` with a subtitle track inside, for a TV that shows only
 /// the subtitles in the file (app WORK-37 step 7, DEC-618). prepare() reads
-/// the head and the Cues of the file and lays out the rebuilt file
-/// (MkvSubtitleLayout); every read then comes from `inner` and from the new
-/// bytes. A file that cannot be rebuilt (not Matroska, no Cues…) is served
-/// as it is, and state() says so.
+/// the head and the Cues of a Matroska file and lays out the rebuilt file
+/// (MkvSubtitleLayout), or the index of an MP4 and lays out a Matroska file
+/// from it (Mp4MkvFile, step 7d); every read then comes from `inner` and
+/// from the new bytes. A file that cannot be rebuilt (neither, no Cues, a
+/// fragmented MP4…) is served as it is, and state() says so.
 class MkvSubtitleSource final : public StreamSource {
 public:
     MkvSubtitleSource(std::shared_ptr<StreamSource> inner, std::shared_ptr<const SubtitleTrack> track);
@@ -39,14 +40,19 @@ public:
     Result<void> prepare(std::chrono::milliseconds wait) override;
     std::optional<ByteRange> preparing_range() const override;
     std::int64_t file_offset(std::int64_t offset) const override;
+    // "video/x-matroska" for an MP4 served as Matroska.
+    std::optional<std::string> content_type() const override;
 
     SubtitleShareState state() const;
     // Why the file is served as it is; empty otherwise.
     std::string reason() const;
 
 private:
-    // The layout once prepared, without locking: it never changes after.
-    const MkvSubtitleLayout* layout() const;
+    // The file once prepared, without locking: it never changes after.
+    const RebuiltFile* layout() const;
+    // The file for what `read` reads, or nullptr with the reason in `why`;
+    // a timeout comes back as it is. `from_mp4` when an MP4 is laid out.
+    Result<std::shared_ptr<const RebuiltFile>> rebuild(const MkvRead& read, std::string& why, bool& from_mp4);
 
     const std::shared_ptr<StreamSource> inner_;
     const std::shared_ptr<const SubtitleTrack> track_;
@@ -56,8 +62,9 @@ private:
     std::optional<ByteRange> waiting_for_;
     std::string reason_;
     SubtitleShareState state_ = SubtitleShareState::pending;
-    std::shared_ptr<const MkvSubtitleLayout> layout_;
-    std::atomic<const MkvSubtitleLayout*> ready_{nullptr};
+    bool from_mp4_ = false;
+    std::shared_ptr<const RebuiltFile> layout_;
+    std::atomic<const RebuiltFile*> ready_{nullptr};
     std::atomic<bool> cancelled_{false};
 };
 

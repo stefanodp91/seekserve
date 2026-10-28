@@ -805,6 +805,8 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
     }
 
     auto file_size = source->file_size();
+    // An MP4 served as Matroska says so, whatever its name (app WORK-37 7d).
+    if (auto type = source->content_type()) content_type = *type;
 
     // Check for Range header
     auto range_it = req.find(http::field::range);

@@ -11,6 +11,8 @@
 #include "mkv_test_support.hpp"
 #include "seekserve/mkv_subtitle_layout.hpp"
 #include "seekserve/mkv_subtitle_source.hpp"
+#include "seekserve/mp4_mkv_file.hpp"
+#include "seekserve/mp4_structure.hpp"
 
 namespace seekserve {
 namespace {
@@ -156,9 +158,70 @@ TEST(MkvSubtitleSource, AFileItCannotRebuildIsServedAsItIs) {
     MkvSubtitleSource source(inner, some_lines());
     ASSERT_TRUE(source.prepare(0ms));
     EXPECT_EQ(source.state(), SubtitleShareState::unsupported);
-    EXPECT_EQ(source.reason(), "not a Matroska file");
+    EXPECT_EQ(source.reason(), "neither a Matroska nor an MP4 file");
     EXPECT_EQ(source.file_size(), 40000);
     EXPECT_EQ(read_all(source, 9000), text);
+}
+
+Bytes mp4_fixture() { return read_file(std::string(SEEKSERVE_FIXTURE_DIR) + "/mp4_avc_aac.mp4"); }
+
+// An MP4 is served as the Matroska file rebuilt from it (app WORK-37 step
+// 7d): a TV that does not show an MP4's text tracks shows the lines.
+TEST(MkvSubtitleSource, AnMp4IsServedAsAMatroskaFileWithTheLines) {
+    auto file = mp4_fixture();
+    auto inner = std::make_shared<PieceSource>(file);
+    auto size = static_cast<std::int64_t>(file.size());
+    inner->lose(size - 3000, size - 1);  // the moov, at the end
+    MkvSubtitleSource source(inner, some_lines());
+    EXPECT_EQ(source.prepare(0ms).error(), make_error_code(errc::timeout_waiting_for_piece));
+    auto waiting = source.preparing_range();
+    ASSERT_TRUE(waiting);
+    EXPECT_GE(waiting->end, size - 3000) << "it waits for the moov";
+
+    inner->arrive();
+    ASSERT_TRUE(source.prepare(0ms));
+    EXPECT_EQ(source.state(), SubtitleShareState::ready);
+    EXPECT_EQ(source.content_type(), std::optional<std::string>("video/x-matroska"));
+
+    std::string why;
+    auto mp4 = read_mp4_structure(reader_of(file), size, why).value();
+    auto rebuilt = Mp4MkvFile::build(mp4, *some_lines(), why);
+    ASSERT_TRUE(rebuilt);
+    EXPECT_EQ(source.file_size(), rebuilt->size());
+    auto got = read_all(source, 5000);
+    ASSERT_EQ(static_cast<std::int64_t>(got.size()), rebuilt->size());
+    auto m = read_mkv_structure(reader_of(got), static_cast<std::int64_t>(got.size()), why);
+    ASSERT_TRUE(m) << why;
+    auto clusters = clusters_of(got, m.value());
+    int lines = 0;
+    for (const auto& c : clusters) {
+        for (const auto& b : c.blocks) lines += b.track == rebuilt->subtitle_track() ? 1 : 0;
+    }
+    EXPECT_EQ(lines, 9);
+    // For the scheduler, its bytes stand for the MP4's.
+    EXPECT_EQ(source.file_offset(source.file_size() - 1), size - 1) << "the Cues for the end";
+    EXPECT_LT(source.file_offset(0), 100) << "the head for the first sample";
+}
+
+// A Matroska file stays one: the type the server says comes from its name.
+TEST(MkvSubtitleSource, AMatroskaFileKeepsTheTypeOfItsName) {
+    auto inner = std::make_shared<PieceSource>(fixture());
+    MkvSubtitleSource source(inner, some_lines());
+    EXPECT_FALSE(source.content_type());
+    ASSERT_TRUE(source.prepare(0ms));
+    EXPECT_FALSE(source.content_type());
+}
+
+// An MP4 this cannot rebuild is served as it is, with the reason.
+TEST(MkvSubtitleSource, AFragmentedMp4IsServedAsItIs) {
+    auto file = read_file(std::string(SEEKSERVE_FIXTURE_DIR) + "/mp4_fragmented.mp4");
+    auto inner = std::make_shared<PieceSource>(file);
+    MkvSubtitleSource source(inner, some_lines());
+    ASSERT_TRUE(source.prepare(0ms));
+    EXPECT_EQ(source.state(), SubtitleShareState::unsupported);
+    EXPECT_EQ(source.reason(), "a fragmented MP4");
+    EXPECT_FALSE(source.content_type());
+    EXPECT_EQ(read_all(source, 9000), file);
 }
 
 TEST(MkvSubtitleSource, CancellingStopsItAndTheSourceItWraps) {
