@@ -8,6 +8,7 @@
 #include <fstream>
 #include <vector>
 
+#include <nlohmann/json.hpp>
 #include <sqlite3.h>
 
 #include <arpa/inet.h>
@@ -1029,5 +1030,93 @@ TEST_F(CApiTest, AFileShareOpensAFileOfTheSavePathOnly) {
 
     ss_engine_destroy(engine);
     fs::remove(outside);
+}
+
+// Subtitles put into the shared file (app WORK-37 step 7): the lines as JSON,
+// checked before anything opens.
+TEST_F(CApiTest, FileShareWithSubtitlesRefusesMissingArgumentsAndBadLines) {
+    char* json = nullptr;
+    auto* engine = reinterpret_cast<SeekServeEngine*>(0x1);
+    const char* good = R"({"language":"ita","cues":[{"start_ms":0,"end_ms":1000,"text":"a"}]})";
+    EXPECT_EQ(ss_open_file_share_with_subtitles(nullptr, "/a", "127.0.0.1", "127.0.0.1", good, &json),
+              SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_open_file_share_with_subtitles(engine, "/a", "127.0.0.1", "127.0.0.1", nullptr, &json),
+              SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_open_share_with_subtitles(engine, "abc", 0, "127.0.0.1", "127.0.0.1", nullptr, &json),
+              SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_get_share_subtitles(nullptr, "x", &json), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_get_share_subtitles(engine, nullptr, &json), SS_ERR_INVALID_ARG);
+
+    auto config = make_config();
+    SeekServeEngine* real = ss_engine_create(config.c_str());
+    ASSERT_NE(real, nullptr);
+    uint16_t port = 0;
+    ASSERT_EQ(ss_start_server(real, 0, &port), SS_OK);
+    auto film = tmp_dir_ + "/film.mkv";
+    { std::ofstream(film, std::ios::binary) << std::string(1000, 'f'); }
+    for (const char* bad : {"{", "[]", R"({"cues":[]})", R"({"cues":[{"start_ms":0,"end_ms":1000}]})",
+                            R"({"cues":[{"start_ms":"0","end_ms":1000,"text":"a"}]})",
+                            R"({"cues":[{"start_ms":900,"end_ms":100,"text":"a"}]})",
+                            R"({"language":"italiano","cues":[{"start_ms":0,"end_ms":1000,"text":"a"}]})"}) {
+        EXPECT_EQ(ss_open_file_share_with_subtitles(real, film.c_str(), "127.0.0.1", "127.0.0.1", bad, &json),
+                  SS_ERR_INVALID_ARG) << bad;
+    }
+    ss_engine_destroy(real);
+}
+
+// A file in the save path that is no Matroska: the share opens, says its
+// subtitles are pending, and after the first request that the file is
+// served as it is, and why. Offline: no torrent.
+TEST_F(CApiTest, AFileShareWithSubtitlesSaysWhereTheyAre) {
+    auto config = make_config();
+    SeekServeEngine* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+    uint16_t port = 0;
+    ASSERT_EQ(ss_start_server(engine, 0, &port), SS_OK);
+    auto film = tmp_dir_ + "/film.mkv";
+    { std::ofstream(film, std::ios::binary) << std::string(1000, 'f'); }
+
+    const char* lines = R"({"language":"ita","name":"Italiano","cues":[{"start_ms":500,"end_ms":2000,"text":"Riga àè"}]})";
+    char* out = nullptr;
+    ASSERT_EQ(ss_open_file_share_with_subtitles(engine, film.c_str(), "127.0.0.1", "127.0.0.1", lines, &out),
+              SS_OK);
+    auto json = nlohmann::json::parse(out);
+    ss_free_string(out);
+    auto share_id = json["share_id"].get<std::string>();
+    auto url = json["url"].get<std::string>();
+
+    ASSERT_EQ(ss_get_share_subtitles(engine, share_id.c_str(), &out), SS_OK);
+    EXPECT_EQ(nlohmann::json::parse(out)["state"], "pending");
+    ss_free_string(out);
+
+    int share_port = std::stoi(url.substr(std::string("http://127.0.0.1:").size()));
+    auto path = url.substr(url.find('/', 7));
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(static_cast<uint16_t>(share_port));
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
+    std::string req = "GET " + path + " HTTP/1.1\r\nHost: x\r\nRange: bytes=0-\r\nConnection: close\r\n\r\n";
+    ::send(fd, req.data(), req.size(), 0);
+    std::string reply;
+    char buf[4096];
+    ssize_t n;
+    while ((n = ::recv(fd, buf, sizeof(buf), 0)) > 0) reply.append(buf, static_cast<std::size_t>(n));
+    ::close(fd);
+    EXPECT_NE(reply.find("bytes 0-999/1000"), std::string::npos) << reply.substr(0, 300);
+
+    ASSERT_EQ(ss_get_share_subtitles(engine, share_id.c_str(), &out), SS_OK);
+    auto state = nlohmann::json::parse(out);
+    ss_free_string(out);
+    EXPECT_EQ(state["state"], "unsupported");
+    EXPECT_EQ(state["reason"], "not a Matroska file");
+
+    ASSERT_EQ(ss_open_file_share(engine, film.c_str(), "127.0.0.1", "127.0.0.1", &out), SS_OK);
+    auto plain = nlohmann::json::parse(out)["share_id"].get<std::string>();
+    ss_free_string(out);
+    EXPECT_EQ(ss_get_share_subtitles(engine, plain.c_str(), &out), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_get_share_subtitles(engine, "nobody", &out), SS_ERR_NOT_FOUND);
+    ss_engine_destroy(engine);
 }
 

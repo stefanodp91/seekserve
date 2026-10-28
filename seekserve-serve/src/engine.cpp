@@ -961,7 +961,10 @@ void SeekServeEngine::update_shares(const TorrentId& id, FileIndex fi,
     std::lock_guard lock(shares_mu_);
     for (auto& [share_id, share] : shares_) {
         if (share.torrent != id || (fi >= 0 && share.file != fi)) continue;
-        if (source) {
+        if (source && share.subtitles) {
+            share.rebuilt = std::make_shared<MkvSubtitleSource>(source, share.subtitles);
+            share.server->set_byte_source(share.rebuilt, share_id, 0, file_path);
+        } else if (source) {
             share.server->set_byte_source(source, share_id, 0, file_path);
         } else {
             share.server->remove_byte_source(share_id, 0);
@@ -984,7 +987,8 @@ Result<SeekServeEngine::Share> SeekServeEngine::start_share(std::shared_ptr<Stre
                                                             const std::string& file_path,
                                                             const std::string& bind_address,
                                                             const std::string& peer_address,
-                                                            const TorrentId& torrent, FileIndex fi) {
+                                                            const TorrentId& torrent, FileIndex fi,
+                                                            std::shared_ptr<const SubtitleTrack> subtitles) {
     ServerConfig server_config = config_.server;
     server_config.bind_address = bind_address;
     server_config.allowed_peer = peer_address;
@@ -994,6 +998,11 @@ Result<SeekServeEngine::Share> SeekServeEngine::start_share(std::shared_ptr<Stre
     // The share's id is the stream id of its URL: random, like its token.
     auto share_id = random_hex(16);
     server->set_auth_token(random_hex(16));
+    std::shared_ptr<MkvSubtitleSource> rebuilt;
+    if (subtitles) {
+        rebuilt = std::make_shared<MkvSubtitleSource>(source, subtitles);
+        source = rebuilt;
+    }
     server->set_byte_source(std::move(source), share_id, 0, file_path);
     if (!torrent.empty()) {
         server->set_range_callback(
@@ -1006,14 +1015,15 @@ Result<SeekServeEngine::Share> SeekServeEngine::start_share(std::shared_ptr<Stre
     if (!started) return started.error();
 
     Share share{share_id, server->stream_url(share_id, 0)};
-    shares_[share_id] = ShareState{std::move(server), torrent, fi};
+    shares_[share_id] = ShareState{std::move(server), torrent, fi, std::move(subtitles), std::move(rebuilt)};
     spdlog::info("Engine: share opened on {} for one client", bind_address);
     return share;
 }
 
 Result<SeekServeEngine::Share> SeekServeEngine::open_share(const TorrentId& id, FileIndex fi,
                                                            const std::string& bind_address,
-                                                           const std::string& peer_address) {
+                                                           const std::string& peer_address,
+                                                           std::shared_ptr<const SubtitleTrack> subtitles) {
     if (!are_share_addresses(bind_address, peer_address)) {
         return make_error_code(errc::invalid_argument);
     }
@@ -1034,12 +1044,14 @@ Result<SeekServeEngine::Share> SeekServeEngine::open_share(const TorrentId& id, 
     auto file = catalog_.get_file(id, fi);
     if (!file) return file.error();
 
-    return start_share(std::move(source), file.value().path, bind_address, peer_address, id, fi);
+    return start_share(std::move(source), file.value().path, bind_address, peer_address, id, fi,
+                       std::move(subtitles));
 }
 
 Result<SeekServeEngine::Share> SeekServeEngine::open_file_share(const std::string& file_path,
                                                                 const std::string& bind_address,
-                                                                const std::string& peer_address) {
+                                                                const std::string& peer_address,
+                                                                std::shared_ptr<const SubtitleTrack> subtitles) {
     namespace fs = std::filesystem;
     if (!are_share_addresses(bind_address, peer_address)) {
         return make_error_code(errc::invalid_argument);
@@ -1070,7 +1082,8 @@ Result<SeekServeEngine::Share> SeekServeEngine::open_file_share(const std::strin
 
     std::lock_guard shares_lock(shares_mu_);
     if (!server_running_.load()) return make_error_code(errc::session_not_started);
-    return start_share(source.value(), file.string(), bind_address, peer_address, {}, -1);
+    return start_share(source.value(), file.string(), bind_address, peer_address, {}, -1,
+                       std::move(subtitles));
 }
 
 Result<void> SeekServeEngine::close_share(const std::string& share_id) {
@@ -1090,6 +1103,14 @@ Result<void> SeekServeEngine::close_share(const std::string& share_id) {
     stop_and_drain(*server);
     spdlog::info("Engine: share closed");
     return {};
+}
+
+Result<SeekServeEngine::ShareSubtitles> SeekServeEngine::share_subtitles(const std::string& share_id) {
+    std::lock_guard lock(shares_mu_);
+    auto it = shares_.find(share_id);
+    if (it == shares_.end()) return make_error_code(errc::file_not_found);
+    if (!it->second.rebuilt) return make_error_code(errc::invalid_argument);
+    return ShareSubtitles{it->second.rebuilt->state(), it->second.rebuilt->reason()};
 }
 
 void SeekServeEngine::stop_server() {

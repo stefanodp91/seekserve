@@ -48,6 +48,12 @@ static bool wait_ready(int fd, short events,
     }
 }
 
+// `range` of a stream, in the file its bytes come from: the scheduler counts
+// in that file's pieces (a rebuilt file, app WORK-37 step 7).
+static ByteRange in_file(const StreamSource& source, const ByteRange& range) {
+    return ByteRange{source.file_offset(range.start), source.file_offset(range.end)};
+}
+
 static bool would_block(const boost::system::error_code& ec) {
     return ec == net::error::would_block || ec == net::error::try_again;
 }
@@ -659,7 +665,8 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
             auto current_piece = src->piece_at(offset);
             if (current_piece >= 0 && current_piece != piece) {
                 piece = current_piece;
-                report_if_owner(key, reader, ByteRange{offset, last_offset}, torrent_id, file_index);
+                report_if_owner(key, reader, in_file(*src, ByteRange{offset, last_offset}),
+                                torrent_id, file_index);
             }
 
             // The headers promised the whole range, and a body that ends
@@ -684,7 +691,7 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
                 // The scheduler may have been moved by another request since
                 // (a HEAD, a finished reader): the waiting owner re-anchors it.
                 if (++slices % kReportEverySlices == 0) {
-                    report_if_owner(key, reader, ByteRange{offset, last_offset},
+                    report_if_owner(key, reader, in_file(*src, ByteRange{offset, last_offset}),
                                     torrent_id, file_index);
                 }
                 if (!running_.load()) return;
@@ -770,6 +777,33 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
             : mime_type(it->second.file_path);
     }
 
+    // A rebuilt file knows its size only once it has read its head and its
+    // Cues (app WORK-37 step 7): wait for it as for a piece, for as long as
+    // the client stays, telling the scheduler which bytes it waits for.
+    std::optional<Clock::time_point> preparing_since;
+    for (int slices = 0;; ++slices) {
+        auto prepared = source->prepare(kWaitSlice);
+        if (prepared) break;
+        if (prepared.error() != make_error_code(errc::timeout_waiting_for_piece)) {
+            spdlog::error("HttpRangeServer: cannot prepare the stream: {}", prepared.error().message());
+            send_error(http::status::internal_server_error, "Stream not ready");
+            return;
+        }
+        auto now = Clock::now();
+        if (!preparing_since) preparing_since = now;
+        if (slices % kReportEverySlices == 0) {
+            if (auto waiting = source->preparing_range()) {
+                notify_range(*waiting, parsed->torrent_id, parsed->file_index);
+            }
+        }
+        if (!running_.load() || peer_closed(socket)) return;
+        if (config_.stall_timeout.count() > 0 && now - *preparing_since >= config_.stall_timeout) {
+            spdlog::warn("HttpRangeServer: the stream was not ready for {} s, giving up",
+                         config_.stall_timeout.count());
+            return;
+        }
+    }
+
     auto file_size = source->file_size();
 
     // Check for Range header
@@ -785,7 +819,7 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
             res.set(http::field::accept_ranges, "bytes");
             send_head(res, file_size);
         } else {
-            auto reader = claim_and_report(key, ByteRange{0, file_size - 1},
+            auto reader = claim_and_report(key, in_file(*source, ByteRange{0, file_size - 1}),
                                            parsed->torrent_id, parsed->file_index);
             stream_body(http::status::ok, content_type, file_size, "", source, 0, file_size,
                         key, parsed->torrent_id, parsed->file_index, reader);
@@ -819,7 +853,7 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
     }
 
     // 206 Partial Content — stream body chunks
-    auto reader = claim_and_report(key, ByteRange{range->start, range->end},
+    auto reader = claim_and_report(key, in_file(*source, ByteRange{range->start, range->end}),
                                    parsed->torrent_id, parsed->file_index);
     stream_body(http::status::partial_content, content_type, content_length,
                 content_range, source, range->start, content_length,

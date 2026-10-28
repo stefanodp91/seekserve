@@ -365,6 +365,85 @@ ss_error_t ss_open_file_share(SeekServeEngine* engine, const char* file_path,
     });
 }
 
+// The subtitle lines of subtitles_json, checked; null when they are not
+// what ss_open_share_with_subtitles takes.
+static std::shared_ptr<const seekserve::SubtitleTrack> parse_subtitles(const char* subtitles_json) {
+    auto j = json::parse(subtitles_json, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return nullptr;
+    seekserve::SubtitleTrack track;
+    if (j.contains("language")) {
+        if (!j["language"].is_string()) return nullptr;
+        track.language = j["language"].get<std::string>();
+    }
+    if (j.contains("name")) {
+        if (!j["name"].is_string()) return nullptr;
+        track.name = j["name"].get<std::string>();
+    }
+    if (!j.contains("cues") || !j["cues"].is_array()) return nullptr;
+    for (const auto& cue : j["cues"]) {
+        if (!cue.is_object() || !cue.contains("start_ms") || !cue.contains("end_ms") ||
+            !cue.contains("text") || !cue["start_ms"].is_number_integer() ||
+            !cue["end_ms"].is_number_integer() || !cue["text"].is_string()) {
+            return nullptr;
+        }
+        track.cues.push_back({cue["start_ms"].get<std::int64_t>(), cue["end_ms"].get<std::int64_t>(),
+                              cue["text"].get<std::string>()});
+    }
+    auto checked = seekserve::checked_subtitle_track(std::move(track));
+    if (!checked) return nullptr;
+    return std::make_shared<const seekserve::SubtitleTrack>(std::move(checked).value());
+}
+
+static ss_error_t share_out(const seekserve::Result<seekserve::SeekServeEngine::Share>& result,
+                            char** out_json) {
+    if (!result) return map_error(result.error());
+    json out = {{"share_id", result.value().id}, {"url", result.value().url}};
+    *out_json = alloc_string(out.dump());
+    return *out_json ? SS_OK : SS_ERR_IO;
+}
+
+ss_error_t ss_open_share_with_subtitles(SeekServeEngine* engine, const char* torrent_id,
+                                        int32_t file_index, const char* bind_address,
+                                        const char* peer_address, const char* subtitles_json,
+                                        char** out_json) {
+    if (!engine || !torrent_id || !bind_address || !peer_address || !subtitles_json || !out_json) {
+        return SS_ERR_INVALID_ARG;
+    }
+    return guarded("ss_open_share_with_subtitles", [&]() -> ss_error_t {
+        auto subtitles = parse_subtitles(subtitles_json);
+        if (!subtitles) return SS_ERR_INVALID_ARG;
+        return share_out(engine->open_share(torrent_id, file_index, bind_address, peer_address,
+                                            std::move(subtitles)), out_json);
+    });
+}
+
+ss_error_t ss_open_file_share_with_subtitles(SeekServeEngine* engine, const char* file_path,
+                                             const char* bind_address, const char* peer_address,
+                                             const char* subtitles_json, char** out_json) {
+    if (!engine || !file_path || !bind_address || !peer_address || !subtitles_json || !out_json) {
+        return SS_ERR_INVALID_ARG;
+    }
+    return guarded("ss_open_file_share_with_subtitles", [&]() -> ss_error_t {
+        auto subtitles = parse_subtitles(subtitles_json);
+        if (!subtitles) return SS_ERR_INVALID_ARG;
+        return share_out(engine->open_file_share(file_path, bind_address, peer_address,
+                                                 std::move(subtitles)), out_json);
+    });
+}
+
+ss_error_t ss_get_share_subtitles(SeekServeEngine* engine, const char* share_id, char** out_json) {
+    if (!engine || !share_id || !out_json) return SS_ERR_INVALID_ARG;
+    return guarded("ss_get_share_subtitles", [&]() -> ss_error_t {
+        auto result = engine->share_subtitles(share_id);
+        if (!result) return map_error(result.error());
+        static constexpr const char* kStates[] = {"pending", "ready", "unsupported"};
+        json out = {{"state", kStates[static_cast<int>(result.value().state)]},
+                    {"reason", result.value().reason}};
+        *out_json = alloc_string(out.dump());
+        return *out_json ? SS_OK : SS_ERR_IO;
+    });
+}
+
 ss_error_t ss_close_share(SeekServeEngine* engine, const char* share_id) {
     if (!engine || !share_id) return SS_ERR_INVALID_ARG;
 

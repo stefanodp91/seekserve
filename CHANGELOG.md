@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Added — Subtitles put into the file a TV share serves
+
+#### `seekserve-core`, `seekserve-serve`, `seekserve-capi`
+
+- **A TV share with subtitles** (C API `ss_open_share_with_subtitles`, `ss_open_file_share_with_subtitles`,
+  `ss_get_share_subtitles`; app WORK-37 step 7, DEC-618, DEC-700): the app gives the lines of a subtitle file it has
+  read (`SubtitleTrack`, checked by `checked_subtitle_track`), and a Matroska file is served rebuilt on the fly with
+  them as its default `S_TEXT/UTF8` track, for a TV that shows only the subtitles inside the file. `MkvSubtitleSource`
+  reads only the head of the file and its Cues (`read_mkv_structure`), lays out the rebuilt file
+  (`build_mkv_subtitle_layout`): a small Cluster of lines before each Cluster the Cues name, timed no later than its
+  cue (a TCL TV that finds a later one drops the Cues and reads from the start at every jump), the Tracks, SeekHead,
+  Cues and Segment size rewritten, every Cluster of the original copied byte for byte. Its size and the place of
+  every byte are known before any Cluster is read, so a TV can ask for any range and jump. Any other file, or one
+  that cannot be rebuilt (no Cues, Clusters after the Cues, an unknown size…), is served as it is, and the share
+  says why. `StreamSource` gets `prepare`, `preparing_range` and `file_offset`: the server waits for a source to be
+  prepared as for a piece, tells the scheduler what it waits for, and reports a reader's place in the underlying file.
+
 ### Added — The next episode's start and end, fetched ahead
 
 #### `seekserve-core`, `seekserve-serve`, `seekserve-capi`

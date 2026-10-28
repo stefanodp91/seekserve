@@ -28,6 +28,8 @@
 #include "seekserve/ends_ahead.hpp"
 #include "seekserve/wait_focus.hpp"
 #include "seekserve/piece_reader.hpp"
+#include "seekserve/mkv_subtitle_source.hpp"
+#include "seekserve/subtitle_track.hpp"
 #include "seekserve/byte_source.hpp"
 #include "seekserve/streaming_scheduler.hpp"
 #include "seekserve/offline_cache.hpp"
@@ -113,9 +115,14 @@ public:
         std::string id;   // for close_share
         std::string url;  // for the device
     };
+    // With `subtitles` the file is served with them inside, as its default
+    // text track (app WORK-37 step 7, DEC-618): a Matroska file rebuilt on
+    // the fly (MkvSubtitleSource), or the file as it is when it cannot be;
+    // share_subtitles says which. They must be checked_subtitle_track's.
     Result<Share> open_share(const TorrentId& id, FileIndex fi,
                              const std::string& bind_address,
-                             const std::string& peer_address);
+                             const std::string& peer_address,
+                             std::shared_ptr<const SubtitleTrack> subtitles = nullptr);
     // A share of a whole file on disk, no torrent's (app WORK-37, DEC-627):
     // a download already complete, served the same way, with no torrent and
     // no peer, so also while the session cannot reach the network (the
@@ -124,8 +131,19 @@ public:
     // there errc::file_not_found. It lasts until close_share or stop_server.
     Result<Share> open_file_share(const std::string& file_path,
                                   const std::string& bind_address,
-                                  const std::string& peer_address);
+                                  const std::string& peer_address,
+                                  std::shared_ptr<const SubtitleTrack> subtitles = nullptr);
     Result<void> close_share(const std::string& share_id);
+
+    // Where the subtitles of a share are: pending until its first request
+    // has read the head and the Cues, then ready, or unsupported with the
+    // reason. errc::file_not_found for a share that is not open,
+    // errc::invalid_argument for one opened without subtitles.
+    struct ShareSubtitles {
+        SubtitleShareState state = SubtitleShareState::pending;
+        std::string reason;
+    };
+    Result<ShareSubtitles> share_subtitles(const std::string& share_id);
 
     // Proxy configuration (runtime update via apply_settings)
     void set_proxy(const ProxyConfig& proxy);
@@ -207,7 +225,8 @@ private:
                               const std::string& file_path,
                               const std::string& bind_address,
                               const std::string& peer_address,
-                              const TorrentId& torrent, FileIndex fi);
+                              const TorrentId& torrent, FileIndex fi,
+                              std::shared_ptr<const SubtitleTrack> subtitles);
     void update_shares(const TorrentId& id, FileIndex fi,
                        const std::shared_ptr<ByteSource>& source,
                        const std::string& file_path = "");
@@ -273,6 +292,8 @@ private:
         std::shared_ptr<HttpRangeServer> server;
         TorrentId torrent;  // empty for a file share
         FileIndex file;     // -1 for a file share
+        std::shared_ptr<const SubtitleTrack> subtitles;  // null without
+        std::shared_ptr<MkvSubtitleSource> rebuilt;      // what serves them
     };
     // By share id, which is also the share's stream id in its URL.
     std::unordered_map<std::string, ShareState> shares_;

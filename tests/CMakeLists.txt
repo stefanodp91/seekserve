@@ -9,6 +9,8 @@ add_executable(seekserve-unit-tests
     unit/test_metadata_catalog.cpp
     unit/test_byte_source.cpp
     unit/test_file_source.cpp
+    unit/test_mkv_subtitle_layout.cpp
+    unit/test_mkv_subtitle_source.cpp
     unit/test_streaming_scheduler.cpp
     unit/test_startup_focus.cpp
     unit/test_ends_ahead.cpp
@@ -42,6 +44,7 @@ add_executable(seekserve-integration-tests
     integration/test_session_lifecycle.cpp
     integration/test_http_range_server.cpp
     integration/test_http_range_server_wait.cpp
+    integration/test_http_range_server_prepare.cpp
     integration/test_http_range_server_limits.cpp
     integration/test_engine_streaming.cpp
     integration/test_end_to_end_stream.cpp
@@ -75,6 +78,7 @@ add_executable(seekserve-capi-tests
 target_link_libraries(seekserve-capi-tests
     PRIVATE
         seekserve-capi
+        nlohmann_json::nlohmann_json
         unofficial::sqlite3::sqlite3
         GTest::gtest
         GTest::gtest_main
