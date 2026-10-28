@@ -258,6 +258,27 @@ TEST(Mp4MkvFile, NewBytesStandForTheSampleAfterThem) {
     }
 }
 
+// A Cluster holds at most so many blocks, whatever the times say: a hostile
+// file whose samples share one time cannot make one Cluster of them all.
+TEST(Mp4MkvFile, AClusterHoldsAtMostSoManyBlocks) {
+    auto mp4 = read_file(fixture("mp4_avc_aac.mp4"));
+    std::string why;
+    auto s = read_mp4_structure(reader_of(mp4), static_cast<std::int64_t>(mp4.size()), why).value();
+    auto file = Mp4MkvFile::build(s, every_second(), why, 16);
+    ASSERT_TRUE(file) << why;
+    auto mkv = assemble(*file, mp4);
+    auto m = read_mkv_structure(reader_of(mkv), static_cast<std::int64_t>(mkv.size()), why);
+    ASSERT_TRUE(m) << why;
+    auto clusters = clusters_of(mkv, m.value());
+    std::size_t blocks = 0;
+    for (const auto& c : clusters) {
+        EXPECT_LE(c.blocks.size(), 16u);
+        blocks += c.blocks.size();
+    }
+    EXPECT_EQ(blocks, s.tracks[0].sample_count + s.tracks[1].sample_count + 6);
+    EXPECT_GE(file->cluster_count(), blocks / 16);
+}
+
 TEST(Mp4MkvFile, AnMp4WithoutLinesAfterTheVideoKeepsAllItsSamples) {
     auto r = rebuild("mp4_avc_aac.mp4", lines({{3600000, "after the end"}}));
     ASSERT_TRUE(r.file);

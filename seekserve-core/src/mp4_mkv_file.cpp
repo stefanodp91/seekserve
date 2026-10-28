@@ -49,10 +49,14 @@ void put_block(std::vector<std::uint8_t>& out, const Event& e, std::int64_t tc,
 }  // namespace
 
 Mp4MkvFile::Pieces Mp4MkvFile::cluster_pieces(std::size_t k) const {
-    std::lock_guard lock(cache_mu_);
-    for (const auto& [index, pieces] : cache_) {
-        if (index == k) return pieces;
+    {
+        std::lock_guard lock(cache_mu_);
+        for (const auto& [index, pieces] : cache_) {
+            if (index == k) return pieces;
+        }
     }
+    // Laid out without the lock: other reads go on meanwhile, and two that
+    // lay out the same Cluster make the same pieces.
 
     const auto& c = clusters_[k];
     auto bytes = std::make_shared<std::vector<std::uint8_t>>();
@@ -97,6 +101,7 @@ Mp4MkvFile::Pieces Mp4MkvFile::cluster_pieces(std::size_t k) const {
     }
 
     Pieces out = pieces;
+    std::lock_guard lock(cache_mu_);
     if (cache_.size() >= kCachedClusters) cache_.erase(cache_.begin());
     cache_.emplace_back(k, out);
     return out;

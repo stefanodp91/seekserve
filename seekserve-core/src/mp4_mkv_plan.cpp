@@ -244,6 +244,7 @@ private:
         Mp4MkvFile::ClusterPlan cur;
         bool open = false;
         std::int64_t lo = 0, hi = 0, key_ms = -1, blocks = 0;
+        std::uint32_t count = 0;
         auto close = [&] {
             cur.timestamp = lo;
             auto payload = static_cast<std::int64_t>(
@@ -259,7 +260,7 @@ private:
             bool key = !e.text && e.track == video_ && e.sample.key;
             auto span = std::max(hi, e.pts_ms) - std::min(lo, e.pts_ms);
             if (!open || (key && (key_ms < 0 || e.pts_ms - key_ms >= kMinKeySpacingMs)) ||
-                span > kMaxClusterSpanMs) {
+                span > kMaxClusterSpanMs || count >= f_.max_blocks_) {
                 if (open) close();
                 cur = Mp4MkvFile::ClusterPlan{};
                 cur.cursors = w.cursors();
@@ -268,11 +269,13 @@ private:
                 lo = hi = e.pts_ms;
                 key_ms = key ? e.pts_ms : -1;
                 blocks = 0;
+                count = 0;
                 open = true;
             }
             lo = std::min(lo, e.pts_ms);
             hi = std::max(hi, e.pts_ms);
             blocks += mp4mkv::block_size(e, f_.track_);
+            ++count;
             if (e.text) {
                 ++cur.lines;
             } else {
@@ -307,8 +310,9 @@ private:
 };
 
 std::shared_ptr<const Mp4MkvFile> Mp4MkvFile::build(Mp4Structure mp4, const SubtitleTrack& track,
-                                                    std::string& why) {
+                                                    std::string& why, std::uint32_t max_blocks) {
     auto f = std::make_shared<Mp4MkvFile>();
+    f->max_blocks_ = std::max<std::uint32_t>(1, max_blocks);
     f->mp4_ = std::move(mp4);
     f->track_ = track;
     if (!Mp4MkvPlanner(*f, why).plan()) return nullptr;

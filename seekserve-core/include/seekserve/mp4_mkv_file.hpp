@@ -22,10 +22,17 @@ namespace seekserve {
 /// so a film of two hours takes a few hundred KB instead of tens of MB.
 class Mp4MkvFile final : public RebuiltFile {
 public:
-    // The file for `mp4` and the checked `track`; nullptr with the reason in
-    // `why` for an MP4 whose times or size this cannot lay out.
+    /// A film's Cluster holds a few hundred blocks; a hostile file whose
+    /// samples all share one time would otherwise make one Cluster of all of
+    /// them, laid out again at every read.
+    static constexpr std::uint32_t kMaxClusterBlocks = 4096;
+
+    // The file for `mp4` and the checked `track`, with at most `max_blocks`
+    // blocks in a Cluster; nullptr with the reason in `why` for an MP4 whose
+    // times or size this cannot lay out.
     static std::shared_ptr<const Mp4MkvFile> build(Mp4Structure mp4, const SubtitleTrack& track,
-                                                   std::string& why);
+                                                   std::string& why,
+                                                   std::uint32_t max_blocks = kMaxClusterBlocks);
 
     std::int64_t size() const override { return size_; }
     std::optional<MkvPiece> piece_at(std::int64_t offset) const override;
@@ -65,6 +72,7 @@ private:
     std::vector<ClusterPlan> clusters_;
     std::int64_t cues_at_ = 0;
     std::int64_t size_ = 0;
+    std::uint32_t max_blocks_ = kMaxClusterBlocks;
 
     mutable std::mutex cache_mu_;
     mutable std::vector<std::pair<std::size_t, Pieces>> cache_;  // the last Clusters read
