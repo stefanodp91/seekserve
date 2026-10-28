@@ -1064,9 +1064,10 @@ TEST_F(CApiTest, FileShareWithSubtitlesRefusesMissingArgumentsAndBadLines) {
     ss_engine_destroy(real);
 }
 
-// A file in the save path that is no Matroska: the share opens, says its
-// subtitles are pending, and after the first request that the file is
-// served as it is, and why. Offline: no torrent.
+// A file in the save path that is no Matroska: the share opens and, asked,
+// tries the file at once: before any request it says that the file is
+// served as it is, and why (app WORK-37 step 7d3: the app tells the TV the
+// type of the file before the TV asks for it). Offline: no torrent.
 TEST_F(CApiTest, AFileShareWithSubtitlesSaysWhereTheyAre) {
     auto config = make_config();
     SeekServeEngine* engine = ss_engine_create(config.c_str());
@@ -1086,7 +1087,7 @@ TEST_F(CApiTest, AFileShareWithSubtitlesSaysWhereTheyAre) {
     auto url = json["url"].get<std::string>();
 
     ASSERT_EQ(ss_get_share_subtitles(engine, share_id.c_str(), &out), SS_OK);
-    EXPECT_EQ(nlohmann::json::parse(out)["state"], "pending");
+    EXPECT_EQ(nlohmann::json::parse(out)["state"], "unsupported") << "known before any request";
     ss_free_string(out);
 
     int share_port = std::stoi(url.substr(std::string("http://127.0.0.1:").size()));

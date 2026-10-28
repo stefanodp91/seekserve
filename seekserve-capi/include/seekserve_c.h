@@ -238,8 +238,9 @@ ss_error_t ss_open_file_share(SeekServeEngine* engine,
 /* ss_open_share and ss_open_file_share with subtitles put into the file
  * (app WORK-37 step 7, DEC-618), for a TV that shows only the subtitles
  * inside the file: a Matroska file is served rebuilt on the fly with them
- * as its default text track; any other file, or one that cannot be rebuilt,
- * as it is (ss_get_share_subtitles says which). subtitles_json:
+ * as its default text track, an MP4 as a Matroska file made from it with
+ * them (Content-Type video/x-matroska); any other file, or one that cannot
+ * be rebuilt, as it is (ss_get_share_subtitles says which). subtitles_json:
  * {"language": "ita", "name": "Italiano", "cues": [{"start_ms": 500,
  * "end_ms": 2000, "text": "…"}, …]}: the language is three ASCII letters
  * (optional, "und"), the name optional; at least one cue, each with an end
@@ -265,9 +266,10 @@ ss_error_t ss_open_file_share_with_subtitles(SeekServeEngine* engine,
 
 /* Where the subtitles of a share opened with them are. out_json:
  * {"state": "pending" | "ready" | "unsupported", "reason": "…"}: pending
- * until the share's first request has read the head and the index of the
- * file, then ready, or unsupported with the reason (the file is served
- * without them). Freed with ss_free_string. SS_ERR_NOT_FOUND for a share
+ * while the head and the index of the file are not on the device, then
+ * ready, or unsupported with the reason (the file is served without them).
+ * Asked while pending, it tries the file at once without waiting, so an
+ * app knows before the device asks whether an MP4 goes as Matroska. Freed with ss_free_string. SS_ERR_NOT_FOUND for a share
  * that is not open, SS_ERR_INVALID_ARG for one opened without subtitles. */
 __attribute__((visibility("default")))
 ss_error_t ss_get_share_subtitles(SeekServeEngine* engine, const char* share_id,

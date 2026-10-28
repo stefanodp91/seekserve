@@ -333,13 +333,15 @@ std::shared_ptr<const SubtitleTrack> two_lines() {
     return std::make_shared<const SubtitleTrack>(checked_subtitle_track(t).value());
 }
 
-// A file that is no Matroska is served as it is, and the share says why; it
-// keeps its subtitles when the file is selected again.
+// A file that is no Matroska is served as it is, and the share says why,
+// asked before any request when its bytes are there (app WORK-37 step 7d3);
+// it keeps its subtitles when the file is selected again.
 TEST_F(EngineShareTest, AShareWithSubtitlesOfAFileThatIsNoMatroskaServesItAsItIs) {
     auto share = engine_->open_share(id_, 0, "127.0.0.1", "127.0.0.1", two_lines());
     ASSERT_TRUE(share) << share.error().message();
     const auto& id = share.value().id;
-    EXPECT_EQ(engine_->share_subtitles(id).value().state, SubtitleShareState::pending);
+    EXPECT_EQ(engine_->share_subtitles(id).value().state, SubtitleShareState::unsupported)
+        << "the torrent is complete: known before any request";
 
     auto check = [&] {
         auto reply = http_get(share.value().url, "bytes=" + std::to_string(10 * kPiece) + "-");
@@ -355,8 +357,8 @@ TEST_F(EngineShareTest, AShareWithSubtitlesOfAFileThatIsNoMatroskaServesItAsItIs
     EXPECT_EQ(subtitles.value().reason, "neither a Matroska nor an MP4 file");
 
     ASSERT_TRUE(engine_->select_file(id_, 0));
-    EXPECT_EQ(engine_->share_subtitles(id).value().state, SubtitleShareState::pending)
-        << "the new stream is wrapped again";
+    EXPECT_EQ(engine_->share_subtitles(id).value().state, SubtitleShareState::unsupported)
+        << "the new stream is wrapped again, and tried at once";
     check();
 }
 
@@ -479,6 +481,8 @@ TEST_F(EngineFileShareTest, AnMp4ShareWithSubtitlesServesAMatroskaFile) {
     fs::copy_file(std::string(SEEKSERVE_FIXTURE_DIR) + "/mp4_avc_aac.mp4", film);
     auto share = engine_->open_file_share(film, "127.0.0.1", "127.0.0.1", two_lines());
     ASSERT_TRUE(share) << share.error().message();
+    EXPECT_EQ(engine_->share_subtitles(share.value().id).value().state, SubtitleShareState::ready)
+        << "known before the TV asks: the app tells it the type";
 
     auto reply = http_get(share.value().url, "bytes=0-");
     ASSERT_NE(reply.find("206"), std::string::npos) << reply.substr(0, 200);

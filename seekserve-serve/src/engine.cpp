@@ -1106,11 +1106,20 @@ Result<void> SeekServeEngine::close_share(const std::string& share_id) {
 }
 
 Result<SeekServeEngine::ShareSubtitles> SeekServeEngine::share_subtitles(const std::string& share_id) {
-    std::lock_guard lock(shares_mu_);
-    auto it = shares_.find(share_id);
-    if (it == shares_.end()) return make_error_code(errc::file_not_found);
-    if (!it->second.rebuilt) return make_error_code(errc::invalid_argument);
-    return ShareSubtitles{it->second.rebuilt->state(), it->second.rebuilt->reason()};
+    std::shared_ptr<MkvSubtitleSource> rebuilt;
+    {
+        std::lock_guard lock(shares_mu_);
+        auto it = shares_.find(share_id);
+        if (it == shares_.end()) return make_error_code(errc::file_not_found);
+        if (!it->second.rebuilt) return make_error_code(errc::invalid_argument);
+        rebuilt = it->second.rebuilt;
+    }
+    // Still pending: the file is tried at once, without waiting for a
+    // missing piece, so the app knows before the TV asks whether an MP4 goes
+    // as Matroska (app WORK-37 step 7d3). Outside the lock: reading the
+    // index of a film takes a moment.
+    if (rebuilt->state() == SubtitleShareState::pending) (void)rebuilt->prepare(std::chrono::milliseconds(0));
+    return ShareSubtitles{rebuilt->state(), rebuilt->reason()};
 }
 
 void SeekServeEngine::stop_server() {

@@ -117,7 +117,8 @@ public:
     };
     // With `subtitles` the file is served with them inside, as its default
     // text track (app WORK-37 step 7, DEC-618): a Matroska file rebuilt on
-    // the fly (MkvSubtitleSource), or the file as it is when it cannot be;
+    // the fly, an MP4 as a Matroska file made from it (MkvSubtitleSource),
+    // or the file as it is when it cannot be;
     // share_subtitles says which. They must be checked_subtitle_track's.
     Result<Share> open_share(const TorrentId& id, FileIndex fi,
                              const std::string& bind_address,
@@ -135,9 +136,10 @@ public:
                                   std::shared_ptr<const SubtitleTrack> subtitles = nullptr);
     Result<void> close_share(const std::string& share_id);
 
-    // Where the subtitles of a share are: pending until its first request
-    // has read the head and the Cues, then ready, or unsupported with the
-    // reason. errc::file_not_found for a share that is not open,
+    // Where the subtitles of a share are: pending while the head and the
+    // index of its file are missing, then ready, or unsupported with the
+    // reason. Asked while pending, it tries the file at once without
+    // waiting (app WORK-37 step 7d3). errc::file_not_found for a share that is not open,
     // errc::invalid_argument for one opened without subtitles.
     struct ShareSubtitles {
         SubtitleShareState state = SubtitleShareState::pending;
