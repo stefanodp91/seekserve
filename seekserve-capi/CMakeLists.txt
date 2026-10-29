@@ -20,6 +20,11 @@ target_link_libraries(seekserve-capi
         seekserve-serve
 )
 
+# "log_to_system": the engine's warnings in logcat (app BUG-266).
+if(ANDROID)
+    target_link_libraries(seekserve-capi PRIVATE log)
+endif()
+
 set_target_properties(seekserve-capi PROPERTIES
     OUTPUT_NAME "seekserve"
     C_VISIBILITY_PRESET hidden

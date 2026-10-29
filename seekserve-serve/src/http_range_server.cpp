@@ -441,7 +441,8 @@ bool HttpRangeServer::close_oldest_reader_left_behind() {
     // Out of the list, so the next connection over the limit picks another.
     connections_->readers.erase(it);
     ::shutdown(oldest->first, SHUT_RDWR);
-    spdlog::info("HttpRangeServer: closed a reader left behind to let a new connection in");
+    // A warning: a reader closed by the server, which the system log shows (app BUG-266).
+    spdlog::warn("HttpRangeServer: closed a reader left behind to let a new connection in");
     return true;
 }
 

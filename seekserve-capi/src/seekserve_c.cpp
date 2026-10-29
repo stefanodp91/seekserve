@@ -4,8 +4,12 @@
 #include <libtorrent/error_code.hpp>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
+#ifdef __ANDROID__
+#include <spdlog/sinks/android_sink.h>
+#endif
 
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <utility>
 
@@ -61,6 +65,21 @@ static char* alloc_string(const std::string& s) {
         std::memcpy(buf, s.c_str(), s.size() + 1);
     }
     return buf;
+}
+
+// The engine's warnings and errors in the system log too, under the tag
+// "seekserve" (app BUG-266): on Android its own output goes nowhere. Only
+// when the app asks, in its debug builds: a release keeps the system log
+// free of what the user does (app WORK-16). Once per process.
+static void log_to_system() {
+#ifdef __ANDROID__
+    static std::once_flag once;
+    std::call_once(once, [] {
+        auto sink = std::make_shared<spdlog::sinks::android_sink_mt>("seekserve");
+        sink->set_level(spdlog::level::warn);
+        spdlog::default_logger()->sinks().push_back(std::move(sink));
+    });
+#endif
 }
 
 static seekserve::SeekServeEngine::Config parse_config(const char* config_json) {
@@ -148,6 +167,8 @@ static seekserve::SeekServeEngine::Config parse_config(const char* config_json) 
         // After every other key too (app BUG-236, DEC-657).
         if (j.contains("piece_cache_bytes"))
             config.server.piece_cache_bytes = j["piece_cache_bytes"].get<std::int64_t>();
+        // The last: a wrong value costs no other key.
+        if (j.contains("log_to_system") && j["log_to_system"].get<bool>()) log_to_system();
     } catch (const std::exception& e) {
         spdlog::warn("C API: failed to parse config JSON: {}", e.what());
     }

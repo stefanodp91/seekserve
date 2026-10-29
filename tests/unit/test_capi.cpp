@@ -109,6 +109,22 @@ TEST_F(CApiTest, CreateAndDestroyEngine) {
     ss_engine_destroy(engine);
 }
 
+// The engine's warnings in the system log too, when the app asks (its
+// debug builds, app BUG-266): on Android only; elsewhere the key changes
+// nothing, and any engine created after the first one works the same.
+TEST_F(CApiTest, LogToSystemKeepsTheEngineWorking) {
+    auto config = make_config(R"("log_to_system":true)");
+    SeekServeEngine* first = ss_engine_create(config.c_str());
+    ASSERT_NE(first, nullptr);
+    SeekServeEngine* second = ss_engine_create(config.c_str());
+    ASSERT_NE(second, nullptr);
+    uint16_t port = 0;
+    EXPECT_EQ(ss_start_server(first, 0, &port), SS_OK);
+    EXPECT_NE(port, 0);
+    ss_engine_destroy(second);
+    ss_engine_destroy(first);
+}
+
 TEST_F(CApiTest, CreateWithNullConfig) {
     SeekServeEngine* engine = ss_engine_create(nullptr);
     ASSERT_NE(engine, nullptr);  // should use defaults

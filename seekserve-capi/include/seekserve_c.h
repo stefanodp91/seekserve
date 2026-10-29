@@ -70,11 +70,17 @@ typedef void (*ss_event_callback_t)(const char* event_json, void* user_data);
 //     with a deadline only while the peer's queue is short, and through Tor
 //     the queue of pieces not due can keep it from being asked at all.
 // config_json key for the pieces a stream reads through libtorrent
-// (optional; read last; app BUG-236, DEC-657):
+// (optional; read after the keys above; app BUG-236, DEC-657):
 //   "piece_cache_bytes" (int, default 16 MB): how many bytes of such pieces a
 //     stream keeps for its next chunks, always at least one piece. A piece
 //     that arrives during the stream is read through libtorrent, which has
 //     it before it is written to the file.
+// config_json key for the system log (optional; read last; app BUG-266):
+//   "log_to_system" (bool, default false): on Android the engine's warnings
+//     and errors also go to logcat, tag "seekserve", from the first engine
+//     that asks until the process ends. Elsewhere it changes nothing. Meant
+//     for debug builds: a release keeps the system log free of what the
+//     user does.
 __attribute__((visibility("default")))
 SeekServeEngine* ss_engine_create(const char* config_json);
 
