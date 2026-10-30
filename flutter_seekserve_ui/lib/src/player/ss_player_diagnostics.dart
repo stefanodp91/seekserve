@@ -109,13 +109,11 @@ class SsPlayerWatch {
   Future<void> _watchVisible(NativePlayer platform) async {
     try {
       await platform.observeProperty('vo-configured', (configured) async {
-        final currentVo = await platform.getProperty(
-          'current-vo',
-          waitForInitialization: false,
+        final shows = await ssShowsImage(
+          configured,
+          (name) => platform.getProperty(name, waitForInitialization: false),
         );
-        if (ssIsVisibleOutput(voConfigured: configured, currentVo: currentVo)) {
-          _life.reach(SsPlayerStage.visible);
-        }
+        if (shows) _life.reach(SsPlayerStage.visible);
       });
     } catch (_) {
       // The player went before it was ready: nothing to say.

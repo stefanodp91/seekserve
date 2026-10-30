@@ -277,6 +277,21 @@ void main() {
         expect(ssIsVisibleOutput(voConfigured: 'yes', currentVo: ''), isFalse);
       },
     );
+
+    // App BUG-254: the output's change can come while the player closes;
+    // a player that has gone throws, and that says no image, quietly.
+    test('an image on the screen, read when the output changes', () async {
+      Future<String> gpu(String name) async =>
+          name == 'current-vo' ? 'gpu' : '';
+      expect(await ssShowsImage('yes', gpu), isTrue);
+      expect(await ssShowsImage('no', gpu), isFalse);
+    });
+
+    test('a player that has gone: no image, and no error', () async {
+      Future<String> gone(String name) async =>
+          throw AssertionError('[Player] has been disposed');
+      expect(await ssShowsImage('yes', gone), isFalse);
+    });
   });
 }
 

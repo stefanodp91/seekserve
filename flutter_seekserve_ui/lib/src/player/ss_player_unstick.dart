@@ -42,6 +42,20 @@ bool ssIsVisibleOutput({
   required String currentVo,
 }) => voConfigured == 'yes' && currentVo.isNotEmpty && currentVo != 'null';
 
+/// Whether an image is on the screen when mpv says [voConfigured]: reads
+/// `current-vo` with [get]. The change can come while the player closes,
+/// and a player that has gone throws: then no image, quietly (app BUG-254).
+Future<bool> ssShowsImage(String voConfigured, SsGetPlayerProperty get) async {
+  try {
+    return ssIsVisibleOutput(
+      voConfigured: voConfigured,
+      currentVo: await get('current-vo'),
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
 /// Reads how the player stands; null if it does not give one of the
 /// properties, or has gone.
 Future<SsPlayerMotion?> ssReadPlayerMotion(SsGetPlayerProperty get) async {
