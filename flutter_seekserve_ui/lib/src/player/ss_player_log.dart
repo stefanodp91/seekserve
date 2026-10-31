@@ -4,12 +4,14 @@
 library;
 
 final _url = RegExp(r'\b[a-zA-Z][a-zA-Z0-9+.-]*://\S+');
-final _file = RegExp(r'(?<![\w/])/(?:data|storage|sdcard|mnt)/\S+');
+// A path runs to the end of the line: a file's name may hold spaces, and
+// mpv does not say where it ends (app BUG-271, DEC-746).
+final _file = RegExp(r'(?<![\w/])/(?:data|storage|sdcard|mnt)/[^\n]*');
 final _address = RegExp(r'\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b');
 
 /// [text] with every address in it replaced: a URL (the stream's carries a
-/// token) by `<url>`, a path on the device by `<file>`, a network address by
-/// `<address>`.
+/// token) by `<url>`, a path on the device by `<file>` together with the rest
+/// of its line, a network address by `<address>`.
 String ssRedactPlayerLog(String text) => text
     .replaceAll(_url, '<url>')
     .replaceAll(_file, '<file>')

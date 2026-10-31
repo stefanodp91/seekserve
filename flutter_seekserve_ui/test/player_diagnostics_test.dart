@@ -17,14 +17,31 @@ void main() {
       );
     });
 
-    test('a file on the phone becomes <file>', () {
+    test('a file on the phone becomes <file>, with the rest of its line', () {
       expect(
         ssRedactPlayerLog(
           'Opening /data/user/0/it.app/files/Show.S01E01.mkv for reading',
         ),
-        'Opening <file> for reading',
+        'Opening <file>',
       );
       expect(ssRedactPlayerLog('file:///storage/emulated/0/a.mp4'), '<url>');
+    });
+
+    test('no part of a name with spaces is left (app BUG-271)', () {
+      expect(
+        ssRedactPlayerLog(
+          'Opening /data/user/0/it.app/files/Night Of The Living Dead '
+          '1990 1080p BluRay HEVC x265 5.1.mkv',
+        ),
+        'Opening <file>',
+      );
+      expect(
+        ssRedactPlayerLog(
+          'Loading external files in /storage/emulated/0/A Film/\n'
+          'next line',
+        ),
+        'Loading external files in <file>\nnext line',
+      );
     });
 
     test('a network address becomes <address>', () {
