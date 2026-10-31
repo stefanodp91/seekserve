@@ -753,7 +753,9 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
 
     if (selected.startsWith('extra:')) {
       final host = widget.subtitleHost;
-      if (host != null) widget.onExtraSubtitleSelected?.call(selected.substring('extra:'.length), host);
+      if (host != null) {
+        widget.onExtraSubtitleSelected?.call(selected.substring('extra:'.length), host);
+      }
       _onInteraction();
       return;
     }
@@ -793,7 +795,9 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
         // Buffering indicator (always visible when buffering)
         StreamBuilder<bool>(
           stream: widget.player.stream.buffering,
-          initialData: true,
+          // The controls can be built again while the video plays (a new
+          // subtitle configuration): start from what the player says now.
+          initialData: widget.player.state.buffering,
           builder: (ctx, snap) {
             if (snap.data != true) return const SizedBox.shrink();
             return Center(
@@ -923,6 +927,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
         const Spacer(),
         StreamBuilder<bool>(
           stream: widget.player.stream.playing,
+          initialData: widget.player.state.playing,
           builder: (ctx, snap) {
             final playing = snap.data ?? false;
             return SsIconButton(
@@ -985,9 +990,11 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: StreamBuilder<Duration>(
         stream: widget.player.stream.position,
+        initialData: widget.player.state.position,
         builder: (ctx, posSnap) {
           return StreamBuilder<Duration>(
             stream: widget.player.stream.duration,
+            initialData: widget.player.state.duration,
             builder: (ctx, durSnap) {
               final duration = durSnap.data ?? Duration.zero;
               final position = _scrubTarget ?? posSnap.data ?? Duration.zero;
@@ -1049,14 +1056,17 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
   Widget _buildTransportRow() {
     return StreamBuilder<bool>(
       stream: widget.player.stream.playing,
+      initialData: widget.player.state.playing,
       builder: (ctx, snap) {
         final playing = snap.data ?? false;
         return StreamBuilder<Duration>(
           stream: widget.player.stream.position,
+          initialData: widget.player.state.position,
           builder: (ctx, posSnap) {
             final position = posSnap.data ?? Duration.zero;
             return StreamBuilder<Duration>(
               stream: widget.player.stream.duration,
+              initialData: widget.player.state.duration,
               builder: (ctx, durSnap) {
                 final duration = durSnap.data ?? Duration.zero;
                 return Row(
