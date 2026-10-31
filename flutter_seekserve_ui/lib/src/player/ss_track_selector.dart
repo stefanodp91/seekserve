@@ -8,10 +8,14 @@ class SsTrackOption {
   final String label;
   final String? subtitle;
 
+  /// A disabled option shows dimmed and does not respond.
+  final bool enabled;
+
   const SsTrackOption({
     required this.id,
     required this.label,
     this.subtitle,
+    this.enabled = true,
   });
 }
 
@@ -102,9 +106,9 @@ class SsTrackSelector extends StatelessWidget {
                   itemBuilder: (ctx, i) {
                     final option = options[i];
                     final isSelected = option.id == selectedId;
-                    return GestureDetector(
+                    final row = GestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      onTap: () => onSelected(option.id),
+                      onTap: option.enabled ? () => onSelected(option.id) : null,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
@@ -148,6 +152,7 @@ class SsTrackSelector extends StatelessWidget {
                         ),
                       ),
                     );
+                    return option.enabled ? row : Opacity(opacity: 0.45, child: row);
                   },
                 ),
               ),

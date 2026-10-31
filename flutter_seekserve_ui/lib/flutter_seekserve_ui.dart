@@ -44,6 +44,7 @@ export 'src/player/ss_position_reporter.dart';
 export 'src/player/ss_seek_controls.dart';
 export 'src/player/ss_strings.dart';
 export 'src/player/ss_track_selector.dart';
+export 'src/player/ss_extra_subtitles.dart';
 export 'src/player/ss_video_player.dart';
 
 // Controllers
