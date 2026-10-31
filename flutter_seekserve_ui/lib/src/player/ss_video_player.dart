@@ -10,6 +10,7 @@ import '../atoms/ss_icon_button.dart';
 import '../atoms/ss_slider.dart';
 import '../theme/ss_theme.dart';
 import '../utils/format.dart';
+import 'ss_extra_subtitles.dart';
 import 'ss_buffering_overlay.dart';
 import 'ss_player_diagnostics.dart';
 import 'ss_player_unstick.dart';
@@ -100,6 +101,21 @@ class SsVideoPlayer extends StatefulWidget {
   /// subtitles, fullscreen).
   final List<Widget> topBarActions;
 
+  /// Subtitle choices the host adds after the tracks and the files.
+  final List<SsExtraSubtitle> extraSubtitles;
+
+  /// The host choice in use, if any: the player's own subtitles stay hidden.
+  final String? selectedExtraSubtitleId;
+
+  /// Called when a host choice is tapped, with what the host can do.
+  final void Function(String id, SsSubtitleHost host)? onExtraSubtitleSelected;
+
+  /// Called when another subtitle, or none, replaces a host choice.
+  final VoidCallback? onExtraSubtitleCleared;
+
+  /// The subtitle tracks inside the video, when the player knows them.
+  final void Function(List<SsSubtitleTrackInfo> tracks)? onSubtitleTracks;
+
   /// What the app wants to know of the player, for its debug log, and its
   /// choice of decoder; null, the default, for a player as before (app
   /// BUG-238, BUG-239, DEC-662).
@@ -133,6 +149,11 @@ class SsVideoPlayer extends StatefulWidget {
     this.strings = const SsStrings(),
     this.showStreamUrl = true,
     this.topBarActions = const [],
+    this.extraSubtitles = const [],
+    this.selectedExtraSubtitleId,
+    this.onExtraSubtitleSelected,
+    this.onExtraSubtitleCleared,
+    this.onSubtitleTracks,
     this.diagnostics,
     this.unstickAfter,
   });
@@ -164,6 +185,8 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
   VideoController? _videoController;
   SsPlayerWatch? _watch;
   SsPlayerUnstick? _unstick;
+  SsSubtitleHostController? _subtitleHost;
+  StreamSubscription<Tracks>? _tracks;
   String _error = '';
   bool _noVideoFrames = false;
   Timer? _formatRetryTimer;
@@ -248,6 +271,10 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
     _watch = diagnostics == null
         ? null
         : SsPlayerWatch(diagnostics, _player!, _videoController!);
+    _subtitleHost = SsSubtitleHostController(_PlayerSubtitlePort(_player!));
+    _tracks = _player!.stream.tracks.listen(
+      (tracks) => widget.onSubtitleTracks?.call(ssSubtitleTrackInfos(tracks.subtitle)),
+    );
     final watch = _watch;
     _unstick = _unstickFor(url, _player!, _videoController!, watch);
 
@@ -350,6 +377,10 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
   void _disposePlayer() {
     _unstick?.close();
     _unstick = null;
+    unawaited(_tracks?.cancel());
+    _tracks = null;
+    _subtitleHost?.dispose();
+    _subtitleHost = null;
     final player = _player;
     final watch = _watch;
     _watch = null;
@@ -456,6 +487,11 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
       onReopenAt: widget.streamUrl.startsWith('file://') ? null : _reopenAt,
       strings: widget.strings,
       topBarActions: widget.topBarActions,
+      extraSubtitles: widget.extraSubtitles,
+      selectedExtraSubtitleId: widget.selectedExtraSubtitleId,
+      subtitleHost: _subtitleHost,
+      onExtraSubtitleSelected: widget.onExtraSubtitleSelected,
+      onExtraSubtitleCleared: widget.onExtraSubtitleCleared,
     );
   }
 
@@ -477,6 +513,8 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
       return Video(
         controller: _videoController!,
         controls: _buildControls,
+        // A host choice draws its own line: the player's subtitles stay hidden.
+        subtitleViewConfiguration: SubtitleViewConfiguration(visible: widget.selectedExtraSubtitleId == null),
       );
     }
 
@@ -548,6 +586,11 @@ class _PlayerOverlay extends StatefulWidget {
 
   final SsStrings strings;
   final List<Widget> topBarActions;
+  final List<SsExtraSubtitle> extraSubtitles;
+  final String? selectedExtraSubtitleId;
+  final SsSubtitleHostController? subtitleHost;
+  final void Function(String id, SsSubtitleHost host)? onExtraSubtitleSelected;
+  final VoidCallback? onExtraSubtitleCleared;
 
   const _PlayerOverlay({
     required this.player,
@@ -565,6 +608,11 @@ class _PlayerOverlay extends StatefulWidget {
     this.onReopenAt,
     this.strings = const SsStrings(),
     this.topBarActions = const [],
+    this.extraSubtitles = const [],
+    this.selectedExtraSubtitleId,
+    this.subtitleHost,
+    this.onExtraSubtitleSelected,
+    this.onExtraSubtitleCleared,
   });
 
   @override
@@ -671,45 +719,27 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
   }
 
   Future<void> _showSubtitleSelector() async {
-    // Embedded subtitle tracks from the media container
     final embeddedTracks = widget.player.state.tracks.subtitle
         .where((t) => t.id != 'auto' && t.id != 'no')
         .toList();
     final current = widget.player.state.track.subtitle;
+    final options = ssSubtitleMenuOptions(
+      strings: widget.strings,
+      embedded: ssSubtitleTrackInfos(embeddedTracks),
+      externalFiles: _subtitleFiles,
+      extras: widget.extraSubtitles,
+    );
 
-    final options = <SsTrackOption>[
-      SsTrackOption(id: 'off', label: widget.strings.subtitlesOff),
-    ];
-
-    // Add embedded tracks
-    for (final t in embeddedTracks) {
-      options.add(SsTrackOption(
-        id: 'embedded:${t.id}',
-        label: t.title ?? t.language ?? widget.strings.track(t.id),
-        subtitle: t.language,
-      ));
-    }
-
-    // Add external subtitle files from the torrent
-    for (final f in _subtitleFiles) {
-      options.add(SsTrackOption(
-        id: 'external:${f.index}',
-        label: f.name,
-      ));
-    }
-
-    // Determine current selection ID
+    // Determine current selection ID. External tracks have no stable
+    // "current" ID from media_kit, so they are not highlighted.
     String? selectedId;
-    if (current.id == 'no' || current.id == 'auto') {
+    final extra = widget.selectedExtraSubtitleId;
+    if (extra != null) {
+      selectedId = 'extra:$extra';
+    } else if (current.id == 'no' || current.id == 'auto') {
       selectedId = 'off';
-    } else {
-      // Check if it's an embedded track
-      final isEmbedded = embeddedTracks.any((t) => t.id == current.id);
-      if (isEmbedded) {
-        selectedId = 'embedded:${current.id}';
-      }
-      // External tracks don't have a stable "current" ID from media_kit,
-      // so we can't reliably highlight them after selection.
+    } else if (embeddedTracks.any((t) => t.id == current.id)) {
+      selectedId = 'embedded:${current.id}';
     }
 
     final selected = await SsTrackSelector.show(
@@ -721,6 +751,16 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
 
     if (selected == null || !mounted) return;
 
+    if (selected.startsWith('extra:')) {
+      final host = widget.subtitleHost;
+      if (host != null) widget.onExtraSubtitleSelected?.call(selected.substring('extra:'.length), host);
+      _onInteraction();
+      return;
+    }
+    if (extra != null) {
+      widget.subtitleHost?.clear();
+      widget.onExtraSubtitleCleared?.call();
+    }
     if (selected == 'off') {
       widget.player.setSubtitleTrack(SubtitleTrack.no());
     } else if (selected.startsWith('embedded:')) {
@@ -774,6 +814,9 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
             );
           },
         ),
+        // The host's subtitle line, under the controls.
+        if (widget.subtitleHost != null)
+          IgnorePointer(child: SsSubtitleLine(text: widget.subtitleHost!.line)),
         // Controls overlay (shown/hidden with fade)
         IgnorePointer(
           ignoring: !_visible,
@@ -1054,4 +1097,32 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
       },
     );
   }
+}
+
+/// [SsSubtitlePort] over a media_kit [Player].
+class _PlayerSubtitlePort implements SsSubtitlePort {
+  _PlayerSubtitlePort(this._player);
+
+  final Player _player;
+
+  @override
+  Stream<Duration> get position => _player.stream.position;
+
+  @override
+  Stream<List<String>> get subtitleLines => _player.stream.subtitle;
+
+  @override
+  List<SsSubtitleTrackInfo> get tracks => ssSubtitleTrackInfos(_player.state.tracks.subtitle);
+
+  @override
+  Future<void> selectTrack(String id) async {
+    final track = _player.state.tracks.subtitle.where((t) => t.id == id).firstOrNull;
+    if (track != null) await _player.setSubtitleTrack(track);
+  }
+
+  @override
+  Future<void> selectUri(String uri, {String? title}) => _player.setSubtitleTrack(SubtitleTrack.uri(uri, title: title));
+
+  @override
+  Future<void> selectNone() => _player.setSubtitleTrack(SubtitleTrack.no());
 }
