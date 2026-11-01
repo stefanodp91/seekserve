@@ -850,7 +850,9 @@ TEST_F(MultiFileTorrent, ResumeDataKeepsTheFilePrioritiesNotTheSelection) {
         return params.file_priorities[static_cast<std::size_t>(fi)];
     };
     EXPECT_EQ(priority(e01), lt::default_priority);
-    EXPECT_EQ(priority(subtitles), lt::default_priority);
+    // Above the video's (app BUG-784); a restore takes them back to a
+    // download's priority (drop_reader_priorities).
+    EXPECT_EQ(priority(subtitles), lt::top_priority);
     EXPECT_EQ(priority(e02), lt::dont_download);
     EXPECT_EQ(priority(e03), lt::dont_download);
 

@@ -34,11 +34,14 @@ public:
 
     // The pieces' priorities for a reader at byte `offset` of the file of
     // `mapper`, from the ones libtorrent has now (`current`); empty, and
-    // nothing begun, when the focus is off or its bytes are there.
+    // nothing begun, when the focus is off or its bytes are there. The
+    // pieces of `along`, the torrent's subtitles, come first with the first
+    // bytes but do not keep the focus on (app BUG-784).
     std::vector<lt::download_priority_t> begin(
         std::int64_t offset, const ByteRangeMapper& mapper,
         const PieceAvailabilityIndex& avail,
-        const std::vector<lt::download_priority_t>& current, Clock::time_point now);
+        const std::vector<lt::download_priority_t>& current, Clock::time_point now,
+        const std::vector<PieceSpan>& along = {});
 
     // Whether the focus begun is over: its pieces, the end's too, are there
     // or its time passed.

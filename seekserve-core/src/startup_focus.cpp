@@ -27,7 +27,8 @@ StartupFocus::StartupFocus(SchedulerConfig config, bool with_end)
 std::vector<lt::download_priority_t> StartupFocus::begin(
     std::int64_t offset, const ByteRangeMapper& mapper,
     const PieceAvailabilityIndex& avail,
-    const std::vector<lt::download_priority_t>& current, Clock::time_point now) {
+    const std::vector<lt::download_priority_t>& current, Clock::time_point now,
+    const std::vector<PieceSpan>& along) {
     active_ = false;
     const std::int64_t size = mapper.file_size();
     const std::int64_t bytes = config_.startup_focus_bytes;
@@ -44,7 +45,9 @@ std::vector<lt::download_priority_t> StartupFocus::begin(
         if (contains(head_, p) || contains(end_, p)) {
             wanted[i] = lt::top_priority;
         } else if (wanted[i] != lt::dont_download) {
-            wanted[i] = lt::low_priority;
+            const bool subtitle = std::any_of(along.begin(), along.end(),
+                                              [p](const PieceSpan& s) { return contains(s, p); });
+            wanted[i] = subtitle ? lt::top_priority : lt::low_priority;
         }
     }
     active_ = true;

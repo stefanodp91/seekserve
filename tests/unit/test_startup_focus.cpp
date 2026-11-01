@@ -259,3 +259,49 @@ TEST(StartupFocusTest, OnlyMp4AndMovFilesMayKeepTheirIndexAtTheEnd) {
     EXPECT_FALSE(keeps_index_at_end("mp4"));
     EXPECT_FALSE(keeps_index_at_end(""));
 }
+
+// The subtitles of the torrent come with the first bytes (app BUG-784): a
+// player offers them from the start, and behind the rest of the file they
+// came long after the stream began.
+TEST(StartupFocusTest, TheSubtitlesComeWithTheFirstBytes) {
+    auto ti = make_torrent({8 * kMb, 1 * kMb});  // 32 + 4 pieces
+    ByteRangeMapper mapper(ti->layout(), 0);
+    auto avail = make_avail(*ti);
+    StartupFocus focus(focus_config());
+
+    auto wanted = focus.begin(0, mapper, avail, all(36, lt::default_priority),
+                              StartupFocus::Clock::now(), {PieceSpan{34, 35, 0, 0}});
+
+    ASSERT_EQ(wanted.size(), 36u);
+    for (int p = 0; p < 8; ++p) EXPECT_EQ(wanted[p], lt::top_priority) << p;
+    for (int p = 8; p < 34; ++p) EXPECT_EQ(wanted[p], lt::low_priority) << p;
+    for (int p = 34; p < 36; ++p) EXPECT_EQ(wanted[p], lt::top_priority) << p;
+}
+
+TEST(StartupFocusTest, TheSubtitlesDoNotKeepItOn) {
+    auto ti = make_torrent({8 * kMb, 1 * kMb});
+    ByteRangeMapper mapper(ti->layout(), 0);
+    auto avail = make_avail(*ti);
+    StartupFocus focus(focus_config());
+    const auto start = StartupFocus::Clock::now();
+    focus.begin(0, mapper, avail, all(36, lt::default_priority), start,
+                {PieceSpan{34, 35, 0, 0}});
+
+    for (int p = 0; p < 8; ++p) avail.mark_complete(p);
+    EXPECT_TRUE(focus.over(avail, start + 1s));
+}
+
+TEST(StartupFocusTest, ASubtitleNobodyWantsStaysUnwanted) {
+    auto ti = make_torrent({8 * kMb, 1 * kMb});
+    ByteRangeMapper mapper(ti->layout(), 0);
+    auto avail = make_avail(*ti);
+    auto current = all(36, lt::default_priority);
+    for (int p = 32; p < 36; ++p) current[p] = lt::dont_download;
+    StartupFocus focus(focus_config());
+
+    auto wanted = focus.begin(0, mapper, avail, current, StartupFocus::Clock::now(),
+                              {PieceSpan{34, 35, 0, 0}});
+
+    ASSERT_EQ(wanted.size(), 36u);
+    for (int p = 32; p < 36; ++p) EXPECT_EQ(wanted[p], lt::dont_download) << p;
+}
