@@ -281,6 +281,9 @@ private:
     struct EndsAhead {
         FileIndex file;
         std::vector<PieceIndex> pieces;
+        // A subtitle file: its pieces have a deadline too, so libtorrent
+        // asks several peers for them at once (app DEC-811).
+        bool urgent = false;
     };
     std::unordered_map<TorrentId, EndsAhead> ends_ahead_;
     mutable std::mutex mu_;

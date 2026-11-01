@@ -492,17 +492,35 @@ Result<void> SeekServeEngine::fetch_ends_ahead(const TorrentId& id, FileIndex fi
     if (!ti) {
         return make_error_code(errc::metadata_not_ready);
     }
-    if (auto file = catalog_.get_file(id, fi); !file) return file.error();
+    auto file = catalog_.get_file(id, fi);
+    if (!file) return file.error();
     if (catalog_.wanted_files(id).reader == fi) return {};
 
     ByteRangeMapper mapper(ti->layout(), fi);
     auto pieces = file_end_pieces(mapper, config_.scheduler.startup_focus_bytes);
     if (pieces.empty()) return {};
 
+    // A subtitle file is small and a player waits for it: a deadline makes
+    // libtorrent ask several peers for its pieces at once and drop the
+    // requests that are not urgent (app BUG-784, DEC-811). Not a video's
+    // ends, which come ahead behind a reader with deadlines of its own.
+    const bool urgent = is_subtitle_file(file.value().path);
     std::lock_guard lock(mu_);
-    ends_ahead_[id] = EndsAhead{fi, std::move(pieces)};
+    ends_ahead_[id] = EndsAhead{fi, pieces, urgent};
     apply_ends_ahead(id, handle);
-    spdlog::info("Engine: the start and the end of file {} of {} come ahead", fi, id);
+    if (urgent) {
+        try {
+            for (const auto p : pieces) {
+                if (!handle.have_piece(lt::piece_index_t{p})) {
+                    handle.set_piece_deadline(lt::piece_index_t{p}, 0);
+                }
+            }
+        } catch (const std::exception& e) {
+            spdlog::debug("Engine: no deadline for the subtitle of {}: {}", id, e.what());
+        }
+    }
+    spdlog::info("Engine: the start and the end of file {} of {} come ahead{}", fi, id,
+                 urgent ? ", with a deadline" : "");
     return {};
 }
 
@@ -808,6 +826,7 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
         }
         status_json["ends_ahead_file"] = ahead->file;
         status_json["ends_ahead_left"] = left;
+        status_json["ends_ahead_urgent"] = ahead->urgent;
     }
 
     status_json["alerts_dropped"] = alerts_dropped_.load();
