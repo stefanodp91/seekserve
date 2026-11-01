@@ -26,6 +26,13 @@ const lt::peer_info* peer_at(const std::vector<lt::peer_info>& peers, const lt::
 
 bool someone_sends_it(const WaitPieceStats& stats) { return stats.peers_open > 0; }
 
+int file_holders(const std::vector<PieceIndex>& missing, const std::vector<lt::peer_info>& peers) {
+    return static_cast<int>(std::count_if(peers.begin(), peers.end(), [&](const lt::peer_info& peer) {
+        return std::all_of(missing.begin(), missing.end(),
+                           [&](PieceIndex piece) { return has(peer, piece); });
+    }));
+}
+
 WaitPieceStats wait_piece_stats(PieceIndex piece, int blocks_in_piece,
                                 const std::vector<lt::peer_info>& peers,
                                 const std::vector<lt::partial_piece_info>& queue) {

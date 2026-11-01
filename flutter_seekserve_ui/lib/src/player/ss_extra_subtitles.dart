@@ -139,41 +139,9 @@ List<SsTrackOption> ssSubtitleMenuOptions({
       for (final t in embedded)
         SsTrackOption(id: 'embedded:${t.id}', label: t.title ?? t.language ?? strings.track(t.id), subtitle: t.language),
       for (final f in externalFiles)
-        SsTrackOption(
-          id: 'external:${f.index}',
-          label: f.name,
-          subtitle: pending.contains(f.index) ? strings.subtitleArriving : null,
-        ),
+        if (!pending.contains(f.index)) SsTrackOption(id: 'external:${f.index}', label: f.name),
       for (final e in extras) SsTrackOption(id: 'extra:${e.id}', label: e.label, subtitle: e.note, enabled: e.enabled),
     ];
-
-/// The subtitle file of the torrent chosen before it was on the device: it
-/// opens when it gets there, unless another choice came in between.
-class SsAwaitedSubtitle {
-  int? _fileIndex;
-
-  /// Whether file [fileIndex] can open now; otherwise it is awaited, in place
-  /// of any file awaited before. [pending] are the files not there yet.
-  bool choose(int fileIndex, Set<int> pending) {
-    if (!pending.contains(fileIndex)) {
-      _fileIndex = null;
-      return true;
-    }
-    _fileIndex = fileIndex;
-    return false;
-  }
-
-  /// The awaited file, once, when it is no longer in [pending].
-  int? update(Set<int> pending) {
-    final awaited = _fileIndex;
-    if (awaited == null || pending.contains(awaited)) return null;
-    _fileIndex = null;
-    return awaited;
-  }
-
-  /// Another choice, or another video: nothing is awaited any more.
-  void clear() => _fileIndex = null;
-}
 
 /// The host's line over the video, styled like the player's own subtitles.
 class SsSubtitleLine extends StatelessWidget {

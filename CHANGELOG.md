@@ -16,11 +16,18 @@
   `.TheSubtitlesDoNotKeepItOn`, `.ASubtitleNobodyWantsStaysUnwanted`; `MultiFileTorrent.ResumeDataKeepsTheFilePrioritiesNotTheSelection`
   expects the stored priority at the top.
 
+#### `seekserve-serve`, `flutter_seekserve`
+
+- **Who could send a file** (app BUG-784, DEC-809): in the status, each file not whole has `holders`, the connected
+  peers that have every piece it still misses (`file_holders`, choking peers included); `WantedFile.holders` reads it.
+  The app stops waiting for a subtitle file nobody has. Tests: `FileHoldersTest.*`,
+  `MultiFileTorrent.TheStatusSaysWhoHoldsAFileNotWhole` (seen failing first), `models_test.dart`.
+
 #### `flutter_seekserve_ui`
 
-- **`SsVideoPlayer.pendingSubtitleFiles`**: the subtitle files the host knows are not on the device yet. The menu shows
-  `SsStrings.subtitleArriving` ("Arriving…") under them, and one chosen opens by itself once it leaves the set
-  (`SsAwaitedSubtitle`), unless another choice or another video came in between. Tests in `test/extra_subtitles_test.dart`.
+- **`SsVideoPlayer.pendingSubtitleFiles`**: the subtitle files the host knows are not on the device yet are left out
+  of the menu, as choosing one would show nothing (app DEC-808). An "Arriving…" note with the file opening by itself
+  when it came, tried first, was dropped (app DEC-807). Test in `test/extra_subtitles_test.dart`.
 
 ### Added — Subtitles put into the file a TV share serves
 

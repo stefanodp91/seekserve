@@ -1729,4 +1729,39 @@ TEST_F(MultiFileTorrent, TheEndsOfAFileThatIsNotThereAreRefused) {
               make_error_code(errc::torrent_not_found));
 }
 
+
+// Who could send a file not whole yet (app BUG-784, DEC-809): the app stops
+// waiting for a subtitle file no connected peer has.
+TEST_F(MultiFileTorrent, TheStatusSaysWhoHoldsAFileNotWhole) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(kTrickle);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port()));
+    CompletedFiles completed(engine);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    const FileIndex subtitles = index_of(engine, id, kE01Subtitles);
+    ASSERT_GE(e02, 0);
+    ASSERT_GE(subtitles, 0);
+    ASSERT_TRUE(engine.select_file(id, e02));
+    ASSERT_TRUE(wait_for([&] { return bytes_of(wanted_file(status_of(engine, id), e02)) > 0; }))
+        << engine.get_status_json(id);
+
+    // The seeder has every piece the video still misses.
+    {
+        const auto status = status_of(engine, id);
+        const auto video = wanted_file(status, e02);
+        ASSERT_FALSE(whole(video)) << status.dump();
+        EXPECT_EQ(video.value("holders", -1), 1) << status.dump();
+    }
+
+    // A whole file needs nobody: no holders.
+    ASSERT_TRUE(wait_for([&] { return whole(wanted_file(status_of(engine, id), subtitles)); }))
+        << engine.get_status_json(id);
+    EXPECT_FALSE(wanted_file(status_of(engine, id), subtitles).contains("holders"))
+        << engine.get_status_json(id);
+}
+
 }  // namespace seekserve

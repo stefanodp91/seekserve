@@ -3,6 +3,7 @@
 #include "seekserve/auth_utils.hpp"
 #include "seekserve/file_source.hpp"
 #include "read_numbers.hpp"
+#include "seekserve/wait_piece.hpp"
 
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
@@ -15,6 +16,7 @@
 #include <libtorrent/file_storage.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <filesystem>
 #include <thread>
 
@@ -39,17 +41,44 @@ json wanted_files_json(const lt::torrent_handle& handle, const std::vector<FileI
     // second, it may be a piece ahead of the count above.
     const auto checked = handle.file_progress(lt::torrent_handle::piece_granularity);
 
+    // For a file not whole, who could send the rest of it (app BUG-784):
+    // the peers and the pieces there, asked once and only when needed.
+    std::optional<std::vector<lt::peer_info>> peers;
+    std::optional<lt::typed_bitfield<lt::piece_index_t>> have;
+    auto holders = [&](const FileInfo& file) {
+        auto ti = handle.torrent_file();
+        if (!ti || file.size <= 0) return 0;
+        if (!peers) {
+            peers.emplace();
+            handle.get_peer_info(*peers);
+            have = handle.status(lt::torrent_handle::query_pieces).pieces;
+        }
+        const auto& fs = ti->layout();
+        const lt::file_index_t fi{file.index};
+        const auto first = fs.map_file(fi, 0, 0).piece;
+        const auto last = fs.map_file(fi, file.size - 1, 0).piece;
+        std::vector<PieceIndex> missing;
+        for (auto p = first; p <= last; ++p) {
+            if (p >= have->end_index() || !have->get_bit(p)) {
+                missing.push_back(static_cast<PieceIndex>(static_cast<int>(p)));
+            }
+        }
+        return file_holders(missing, *peers);
+    };
+
     json wanted = json::array();
     for (const auto& file : files) {
         const auto i = static_cast<std::size_t>(file.index);
         if (i >= priorities.size() || i >= downloaded.size() || i >= checked.size()) continue;
         if (priorities[i] == lt::dont_download) continue;
+        const bool complete = checked[i] >= file.size;
         json entry = {
             {"index", file.index},
             {"size", file.size},
             {"downloaded", std::max(downloaded[i], checked[i])},
-            {"complete", checked[i] >= file.size},
+            {"complete", complete},
         };
+        if (!complete) entry["holders"] = holders(file);
         if (file.index == roles.reader) {
             entry["role"] = "reader";
         } else if (file.index == roles.background) {

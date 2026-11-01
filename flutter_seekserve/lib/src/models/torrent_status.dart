@@ -27,12 +27,18 @@ class WantedFile {
   /// (every file is wanted until one is selected).
   final WantedFileRole? role;
 
+  /// For a file not whole, how many connected peers have every piece it
+  /// still misses: 0 is nobody who could send the rest. Null for a whole
+  /// file, or an engine that does not say.
+  final int? holders;
+
   const WantedFile({
     required this.index,
     required this.size,
     required this.downloaded,
     required this.isComplete,
     this.role,
+    this.holders,
   });
 
   factory WantedFile.fromJson(Map<String, dynamic> json) {
@@ -42,6 +48,7 @@ class WantedFile {
       downloaded: json['downloaded'] as int? ?? 0,
       isComplete: json['complete'] as bool? ?? false,
       role: _parseRole(json['role']),
+      holders: json['holders'] as int?,
     );
   }
 
@@ -58,6 +65,7 @@ class WantedFile {
     'downloaded': downloaded,
     'complete': isComplete,
     if (role != null) 'role': role!.name,
+    if (holders != null) 'holders': holders,
   };
 }
 
