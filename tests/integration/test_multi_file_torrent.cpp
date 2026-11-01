@@ -1735,7 +1735,10 @@ TEST_F(MultiFileTorrent, TheStatusSaysWhoHoldsAFileNotWhole) {
     ASSERT_NE(proxy.port(), 0);
     proxy.limit_download(kTrickle);
     auto seeder = start_seeder();
-    SeekServeEngine engine(engine_config(proxy.port()));
+    auto config = engine_config(proxy.port());
+    // fetch_ends_ahead asks for the first and last of these bytes.
+    config.scheduler.startup_focus_bytes = 2 * kPiece;
+    SeekServeEngine engine(config);
     CompletedFiles completed(engine);
 
     const TorrentId id = add(engine, *seeder);
@@ -1756,12 +1759,20 @@ TEST_F(MultiFileTorrent, TheStatusSaysWhoHoldsAFileNotWhole) {
         const auto video = wanted_file(status, e02);
         ASSERT_FALSE(whole(video)) << status.dump();
         EXPECT_EQ(video.value("holders", -1), 1) << status.dump();
+        // The bytes of the pieces it is in: at least the file's, and at least
+        // what of the file is there (app DEC-811).
+        EXPECT_GE(video.value("span_size", std::int64_t{-1}), size_of(kE02)) << status.dump();
+        EXPECT_GE(video.value("span_downloaded", std::int64_t{-1}), bytes_of(video)) << status.dump();
+        EXPECT_LE(video.value("span_downloaded", std::int64_t{-1}), video.value("span_size", std::int64_t{-1}))
+            << status.dump();
     }
 
     // A whole file needs nobody: no holders.
     ASSERT_TRUE(wait_for([&] { return whole(wanted_file(status_of(engine, id), subtitles)); }))
         << engine.get_status_json(id);
     EXPECT_FALSE(wanted_file(status_of(engine, id), subtitles).contains("holders"))
+        << engine.get_status_json(id);
+    EXPECT_FALSE(wanted_file(status_of(engine, id), subtitles).contains("span_size"))
         << engine.get_status_json(id);
 }
 

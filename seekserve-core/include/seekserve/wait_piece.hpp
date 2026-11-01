@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include <libtorrent/peer_info.hpp>
@@ -36,6 +37,17 @@ bool someone_sends_it(const WaitPieceStats& stats);
 // still misses: who could send the whole of it (app BUG-784, DEC-809). A
 // peer that chokes us counts, as it may send later.
 int file_holders(const std::vector<PieceIndex>& missing, const std::vector<lt::peer_info>& peers);
+
+// The bytes of pieces `first` to `last`, those there (`have`) whole and of
+// those on their way (`queue`) the blocks finished or being written: how far
+// the pieces a small file is in are (app BUG-784, DEC-811).
+struct SpanBytes {
+    std::int64_t downloaded = 0;
+    std::int64_t size = 0;
+};
+SpanBytes span_bytes(PieceIndex first, PieceIndex last, const std::function<bool(PieceIndex)>& have,
+                     const std::function<int(PieceIndex)>& piece_size,
+                     const std::vector<lt::partial_piece_info>& queue);
 
 // `piece` as libtorrent's peers and download queue tell it; `blocks_in_piece`
 // for a piece no block of which was asked yet.

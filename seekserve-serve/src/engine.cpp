@@ -43,27 +43,40 @@ json wanted_files_json(const lt::torrent_handle& handle, const std::vector<FileI
 
     // For a file not whole, who could send the rest of it (app BUG-784):
     // the peers and the pieces there, asked once and only when needed.
+    // And how far the pieces it is in are, for a small file inside a big
+    // piece (app DEC-811). The download queue is libtorrent's until its next
+    // one: read at once.
     std::optional<std::vector<lt::peer_info>> peers;
     std::optional<lt::typed_bitfield<lt::piece_index_t>> have;
-    auto holders = [&](const FileInfo& file) {
-        auto ti = handle.torrent_file();
-        if (!ti || file.size <= 0) return 0;
+    std::vector<lt::partial_piece_info> queue;
+    auto ti = handle.torrent_file();
+    auto not_whole = [&](const FileInfo& file, json& entry) {
+        if (!ti || file.size <= 0) return;
         if (!peers) {
             peers.emplace();
             handle.get_peer_info(*peers);
             have = handle.status(lt::torrent_handle::query_pieces).pieces;
+            handle.get_download_queue(queue);
         }
         const auto& fs = ti->layout();
         const lt::file_index_t fi{file.index};
-        const auto first = fs.map_file(fi, 0, 0).piece;
-        const auto last = fs.map_file(fi, file.size - 1, 0).piece;
+        const auto first = static_cast<PieceIndex>(static_cast<int>(fs.map_file(fi, 0, 0).piece));
+        const auto last =
+            static_cast<PieceIndex>(static_cast<int>(fs.map_file(fi, file.size - 1, 0).piece));
+        auto there = [&](PieceIndex p) {
+            const lt::piece_index_t index{p};
+            return index < have->end_index() && have->get_bit(index);
+        };
         std::vector<PieceIndex> missing;
         for (auto p = first; p <= last; ++p) {
-            if (p >= have->end_index() || !have->get_bit(p)) {
-                missing.push_back(static_cast<PieceIndex>(static_cast<int>(p)));
-            }
+            if (!there(p)) missing.push_back(p);
         }
-        return file_holders(missing, *peers);
+        entry["holders"] = file_holders(missing, *peers);
+        const auto span = span_bytes(
+            first, last, there, [&](PieceIndex p) { return ti->piece_size(lt::piece_index_t{p}); },
+            queue);
+        entry["span_downloaded"] = span.downloaded;
+        entry["span_size"] = span.size;
     };
 
     json wanted = json::array();
@@ -78,7 +91,7 @@ json wanted_files_json(const lt::torrent_handle& handle, const std::vector<FileI
             {"downloaded", std::max(downloaded[i], checked[i])},
             {"complete", complete},
         };
-        if (!complete) entry["holders"] = holders(file);
+        if (!complete) not_whole(file, entry);
         if (file.index == roles.reader) {
             entry["role"] = "reader";
         } else if (file.index == roles.background) {
