@@ -13,6 +13,7 @@ class SsStrings {
     this.audioOff = 'Off',
     this.subtitles = 'Subtitles',
     this.subtitlesOff = 'Off',
+    this.subtitleArriving = 'Arriving…',
     this.noVideoFrames =
         'Video rendering not available on iOS Simulator.\n'
         'Audio and seek work — test on a real device.',
@@ -39,6 +40,9 @@ class SsStrings {
 
   /// The entry of the subtitle selector that turns them off.
   final String subtitlesOff;
+
+  /// Under a subtitle file of the torrent that is not on the device yet.
+  final String subtitleArriving;
 
   /// When the player gets no video frames.
   final String noVideoFrames;

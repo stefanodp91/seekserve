@@ -601,6 +601,14 @@ Result<void> SeekServeEngine::want_files(const TorrentId& id, FileIndex reader,
 
             state->mapper = std::make_unique<ByteRangeMapper>(ti->layout(), reader);
             state->selected_file = reader;
+            state->subtitles.clear();
+            if (auto files = catalog_.list_files(id)) {
+                for (const auto& f : files.value()) {
+                    if (f.size <= 0 || !is_subtitle_file(f.path)) continue;
+                    ByteRangeMapper subtitle(ti->layout(), f.index);
+                    state->subtitles.push_back(subtitle.map(ByteRange{0, f.size - 1}));
+                }
+            }
 
             // Build file path on disk
             auto file_info = catalog_.get_file(id, reader);
@@ -913,7 +921,7 @@ void SeekServeEngine::begin_startup_focus(TorrentState& state, lt::torrent_handl
     try {
         auto wanted = state.focus->begin(offset, *state.mapper, state.avail,
                                          handle.get_piece_priorities(),
-                                         StartupFocus::Clock::now());
+                                         StartupFocus::Clock::now(), state.subtitles);
         if (wanted.empty()) return;
         handle.prioritize_pieces(wanted);
         spdlog::info("Engine: start with priority from byte {} of file {}", offset,

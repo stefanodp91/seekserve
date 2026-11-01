@@ -168,6 +168,9 @@ private:
         std::unique_ptr<StreamingScheduler> scheduler;
         // The start of the stream with priority (app BUG-228, DEC-656).
         std::unique_ptr<StartupFocus> focus;
+        // The pieces of the torrent's subtitle files, which come with the
+        // first bytes of the start with priority (app BUG-784).
+        std::vector<PieceSpan> subtitles;
         // A reader that gets no block of the piece it waits for gets that
         // piece asked first (app BUG-246, DEC-670), so many times so far.
         std::unique_ptr<WaitFocusWatch> wait_focus;

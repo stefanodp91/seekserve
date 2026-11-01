@@ -40,12 +40,13 @@ std::vector<lt::download_priority_t> wanted_file_priorities(
     // behind it the reader's is ahead, and its last byte comes before the
     // other file's first. Alone, a file is a download like any other.
     const auto first = reads && downloads ? lt::top_priority : lt::default_priority;
-    // Subtitles come along with the video: they are a few KB, and the
+    // Subtitles come along with the video, first: they are a few KB, the
     // player loads them from disk instead of selecting them, which would
-    // stop the video from downloading.
+    // stop the video from downloading, and it offers them from the start
+    // (app BUG-784).
     for (FileIndex i = 0; i < count; ++i) {
         if (is_subtitle(files[static_cast<std::size_t>(i)].path)) {
-            priorities[static_cast<std::size_t>(i)] = first;
+            priorities[static_cast<std::size_t>(i)] = lt::top_priority;
         }
     }
     if (downloads) priorities[static_cast<std::size_t>(background)] = lt::default_priority;
