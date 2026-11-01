@@ -189,9 +189,9 @@ TEST(SpanBytesTest, WholePiecesCountWhole) {
 TEST(SpanBytesTest, TheBlocksOfAPieceOnItsWayCount) {
     std::vector<lt::block_info> blocks{block(lt::block_info::finished), block(lt::block_info::requested, 1),
                                        block(lt::block_info::writing), block(lt::block_info::none)};
-    const auto bytes = span_bytes(
-        4, 4, [](PieceIndex) { return false; }, [](PieceIndex) { return 4 * kBlock; },
-        {in_progress(4, blocks)});
+    const auto size = [](PieceIndex) { return 4 * kBlock; };
+    const auto bytes = span_bytes(4, 4, [](PieceIndex) { return false; }, size,
+                                  blocks_there({in_progress(4, blocks)}, size));
     EXPECT_EQ(bytes.downloaded, 2 * kBlock);
     EXPECT_EQ(bytes.size, 4 * kBlock);
 }
@@ -199,8 +199,18 @@ TEST(SpanBytesTest, TheBlocksOfAPieceOnItsWayCount) {
 TEST(SpanBytesTest, ThePiecesLastBlockMayBeShorter) {
     std::vector<lt::block_info> blocks{block(lt::block_info::none), block(lt::block_info::none),
                                        block(lt::block_info::finished)};
-    const auto bytes = span_bytes(
-        4, 4, [](PieceIndex) { return false; }, [](PieceIndex) { return 2 * kBlock + 8 * 1024; },
-        {in_progress(4, blocks)});
+    const auto size = [](PieceIndex) { return 2 * kBlock + 8 * 1024; };
+    const auto bytes = span_bytes(4, 4, [](PieceIndex) { return false; }, size,
+                                  blocks_there({in_progress(4, blocks)}, size));
     EXPECT_EQ(bytes.downloaded, 8 * 1024);
+}
+
+TEST(SpanBytesTest, TheBytesOfABlockOnItsWayCount) {
+    auto arriving = block(lt::block_info::requested, 1);
+    arriving.bytes_progress = 998;
+    std::vector<lt::block_info> blocks{block(lt::block_info::finished), arriving};
+    const auto size = [](PieceIndex) { return 2 * kBlock; };
+    const auto bytes = span_bytes(4, 4, [](PieceIndex) { return false; }, size,
+                                  blocks_there({in_progress(4, blocks)}, size));
+    EXPECT_EQ(bytes.downloaded, kBlock + 998);
 }

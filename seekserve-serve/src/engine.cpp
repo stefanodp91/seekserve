@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <mutex>
 #include <filesystem>
 #include <thread>
 
@@ -26,6 +27,14 @@ namespace net = boost::asio;
 using json = nlohmann::json;
 
 namespace {
+
+// libtorrent's download queue points into storage of the whole session,
+// written again by its next queue, of any torrent: every call here takes this
+// lock and copies what it needs before letting go.
+std::mutex& download_queue_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
 
 // One entry for each file libtorrent downloads (any priority above
 // dont_download): its index, its size, the bytes of it that are there,
@@ -48,15 +57,23 @@ json wanted_files_json(const lt::torrent_handle& handle, const std::vector<FileI
     // one: read at once.
     std::optional<std::vector<lt::peer_info>> peers;
     std::optional<lt::typed_bitfield<lt::piece_index_t>> have;
-    std::vector<lt::partial_piece_info> queue;
+    std::map<PieceIndex, std::int64_t> on_its_way;
     auto ti = handle.torrent_file();
+    auto piece_size = [&](PieceIndex p) { return ti->piece_size(lt::piece_index_t{p}); };
     auto not_whole = [&](const FileInfo& file, json& entry) {
         if (!ti || file.size <= 0) return;
         if (!peers) {
             peers.emplace();
             handle.get_peer_info(*peers);
+            {
+                std::lock_guard lock(download_queue_mutex());
+                std::vector<lt::partial_piece_info> queue;
+                handle.get_download_queue(queue);
+                on_its_way = blocks_there(queue, piece_size);
+            }
+            // After the queue: a piece done in between counts whole, never
+            // in neither.
             have = handle.status(lt::torrent_handle::query_pieces).pieces;
-            handle.get_download_queue(queue);
         }
         const auto& fs = ti->layout();
         const lt::file_index_t fi{file.index};
@@ -72,9 +89,7 @@ json wanted_files_json(const lt::torrent_handle& handle, const std::vector<FileI
             if (!there(p)) missing.push_back(p);
         }
         entry["holders"] = file_holders(missing, *peers);
-        const auto span = span_bytes(
-            first, last, there, [&](PieceIndex p) { return ti->piece_size(lt::piece_index_t{p}); },
-            queue);
+        const auto span = span_bytes(first, last, there, piece_size, on_its_way);
         entry["span_downloaded"] = span.downloaded;
         entry["span_size"] = span.size;
     };
@@ -876,6 +891,7 @@ std::optional<WaitPieceStats> SeekServeEngine::piece_stats(const TorrentId& id,
         const int size = ti->piece_size(lt::piece_index_t{piece});
         const int blocks = (size + kBlockSize - 1) / kBlockSize;
         handle.get_peer_info(peers);
+        std::lock_guard lock(download_queue_mutex());
         handle.get_download_queue(queue);
         return wait_piece_stats(piece, blocks, peers, queue);
     } catch (const std::exception& e) {
