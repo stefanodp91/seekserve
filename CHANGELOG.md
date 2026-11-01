@@ -28,6 +28,9 @@
   (`span_bytes`), so a bar moves for a small file inside a big piece; `WantedFile.spanDownloaded`, `spanSize`. Tests:
   `SpanBytesTest.*`, more checks in `MultiFileTorrent.TheStatusSaysWhoHoldsAFileNotWhole`, which now sets the bytes
   `fetch_ends_ahead` asks for (with none it asked nothing there, and had passed by luck).
+- **libtorrent's download queue copied at once**: its blocks point into storage of the whole session that the next
+  queue, of any torrent, writes again; every `get_download_queue` takes one lock and copies what it needs
+  (`blocks_there`), for the status and for `piece_stats` alike. Found by a review of the change above.
 - **Who could send a file** (app BUG-784, DEC-809): in the status, each file not whole has `holders`, the connected
   peers that have every piece it still misses (`file_holders`, choking peers included); `WantedFile.holders` reads it.
   The app stops waiting for a subtitle file nobody has. Tests: `FileHoldersTest.*`,

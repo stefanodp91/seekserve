@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <vector>
 
 #include <libtorrent/peer_info.hpp>
@@ -38,16 +39,23 @@ bool someone_sends_it(const WaitPieceStats& stats);
 // peer that chokes us counts, as it may send later.
 int file_holders(const std::vector<PieceIndex>& missing, const std::vector<lt::peer_info>& peers);
 
-// The bytes of pieces `first` to `last`, those there (`have`) whole and of
-// those on their way (`queue`) the blocks finished or being written: how far
-// the pieces a small file is in are (app BUG-784, DEC-811).
+// The bytes of each piece on its way in `queue`: its blocks finished or
+// being written, and the first bytes of those arriving. libtorrent's queue points into storage of the whole
+// session that its next queue, of any torrent, writes again: copy it with
+// this at once, under the one lock every caller takes.
+std::map<PieceIndex, std::int64_t> blocks_there(const std::vector<lt::partial_piece_info>& queue,
+                                                const std::function<int(PieceIndex)>& piece_size);
+
+// The bytes of pieces `first` to `last`, those there (`have`) whole and
+// those on their way as `on_its_way` says (`blocks_there`): how far the
+// pieces a small file is in are (app BUG-784, DEC-811).
 struct SpanBytes {
     std::int64_t downloaded = 0;
     std::int64_t size = 0;
 };
 SpanBytes span_bytes(PieceIndex first, PieceIndex last, const std::function<bool(PieceIndex)>& have,
                      const std::function<int(PieceIndex)>& piece_size,
-                     const std::vector<lt::partial_piece_info>& queue);
+                     const std::map<PieceIndex, std::int64_t>& on_its_way);
 
 // `piece` as libtorrent's peers and download queue tell it; `blocks_in_piece`
 // for a piece no block of which was asked yet.

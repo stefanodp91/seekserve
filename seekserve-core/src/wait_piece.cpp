@@ -26,27 +26,41 @@ const lt::peer_info* peer_at(const std::vector<lt::peer_info>& peers, const lt::
 
 bool someone_sends_it(const WaitPieceStats& stats) { return stats.peers_open > 0; }
 
-SpanBytes span_bytes(PieceIndex first, PieceIndex last, const std::function<bool(PieceIndex)>& have,
-                     const std::function<int(PieceIndex)>& piece_size,
-                     const std::vector<lt::partial_piece_info>& queue) {
+std::map<PieceIndex, std::int64_t> blocks_there(const std::vector<lt::partial_piece_info>& queue,
+                                                const std::function<int(PieceIndex)>& piece_size) {
     // libtorrent's own block size, smaller only in a smaller piece.
     constexpr int kBlockSize = 16 * 1024;
+    std::map<PieceIndex, std::int64_t> there;
+    for (const auto& partial : queue) {
+        if (partial.blocks == nullptr) continue;
+        const auto piece = static_cast<PieceIndex>(partial.piece_index);
+        const int size = piece_size(piece);
+        std::int64_t bytes = 0;
+        for (int b = 0; b < partial.blocks_in_piece; ++b) {
+            const auto& block = partial.blocks[b];
+            if (block.state == lt::block_info::finished || block.state == lt::block_info::writing) {
+                bytes += std::max(0, std::min(kBlockSize, size - b * kBlockSize));
+            } else if (block.state == lt::block_info::requested) {
+                // Its first bytes, as libtorrent's file_progress counts them.
+                bytes += block.bytes_progress;
+            }
+        }
+        there[piece] = bytes;
+    }
+    return there;
+}
+
+SpanBytes span_bytes(PieceIndex first, PieceIndex last, const std::function<bool(PieceIndex)>& have,
+                     const std::function<int(PieceIndex)>& piece_size,
+                     const std::map<PieceIndex, std::int64_t>& on_its_way) {
     SpanBytes bytes;
     for (PieceIndex p = first; p <= last; ++p) {
         const int size = piece_size(p);
         bytes.size += size;
         if (have(p)) {
             bytes.downloaded += size;
-            continue;
-        }
-        const auto partial = std::find_if(queue.begin(), queue.end(), [&](const auto& q) {
-            return static_cast<PieceIndex>(q.piece_index) == p;
-        });
-        if (partial == queue.end() || partial->blocks == nullptr) continue;
-        for (int b = 0; b < partial->blocks_in_piece; ++b) {
-            const auto state = partial->blocks[b].state;
-            if (state != lt::block_info::finished && state != lt::block_info::writing) continue;
-            bytes.downloaded += std::min(kBlockSize, size - b * kBlockSize);
+        } else if (auto it = on_its_way.find(p); it != on_its_way.end()) {
+            bytes.downloaded += it->second;
         }
     }
     return bytes;
