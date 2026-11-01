@@ -26,6 +26,32 @@ const lt::peer_info* peer_at(const std::vector<lt::peer_info>& peers, const lt::
 
 bool someone_sends_it(const WaitPieceStats& stats) { return stats.peers_open > 0; }
 
+SpanBytes span_bytes(PieceIndex first, PieceIndex last, const std::function<bool(PieceIndex)>& have,
+                     const std::function<int(PieceIndex)>& piece_size,
+                     const std::vector<lt::partial_piece_info>& queue) {
+    // libtorrent's own block size, smaller only in a smaller piece.
+    constexpr int kBlockSize = 16 * 1024;
+    SpanBytes bytes;
+    for (PieceIndex p = first; p <= last; ++p) {
+        const int size = piece_size(p);
+        bytes.size += size;
+        if (have(p)) {
+            bytes.downloaded += size;
+            continue;
+        }
+        const auto partial = std::find_if(queue.begin(), queue.end(), [&](const auto& q) {
+            return static_cast<PieceIndex>(q.piece_index) == p;
+        });
+        if (partial == queue.end() || partial->blocks == nullptr) continue;
+        for (int b = 0; b < partial->blocks_in_piece; ++b) {
+            const auto state = partial->blocks[b].state;
+            if (state != lt::block_info::finished && state != lt::block_info::writing) continue;
+            bytes.downloaded += std::min(kBlockSize, size - b * kBlockSize);
+        }
+    }
+    return bytes;
+}
+
 int file_holders(const std::vector<PieceIndex>& missing, const std::vector<lt::peer_info>& peers) {
     return static_cast<int>(std::count_if(peers.begin(), peers.end(), [&](const lt::peer_info& peer) {
         return std::all_of(missing.begin(), missing.end(),

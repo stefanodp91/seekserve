@@ -43,27 +43,40 @@ json wanted_files_json(const lt::torrent_handle& handle, const std::vector<FileI
 
     // For a file not whole, who could send the rest of it (app BUG-784):
     // the peers and the pieces there, asked once and only when needed.
+    // And how far the pieces it is in are, for a small file inside a big
+    // piece (app DEC-811). The download queue is libtorrent's until its next
+    // one: read at once.
     std::optional<std::vector<lt::peer_info>> peers;
     std::optional<lt::typed_bitfield<lt::piece_index_t>> have;
-    auto holders = [&](const FileInfo& file) {
-        auto ti = handle.torrent_file();
-        if (!ti || file.size <= 0) return 0;
+    std::vector<lt::partial_piece_info> queue;
+    auto ti = handle.torrent_file();
+    auto not_whole = [&](const FileInfo& file, json& entry) {
+        if (!ti || file.size <= 0) return;
         if (!peers) {
             peers.emplace();
             handle.get_peer_info(*peers);
             have = handle.status(lt::torrent_handle::query_pieces).pieces;
+            handle.get_download_queue(queue);
         }
         const auto& fs = ti->layout();
         const lt::file_index_t fi{file.index};
-        const auto first = fs.map_file(fi, 0, 0).piece;
-        const auto last = fs.map_file(fi, file.size - 1, 0).piece;
+        const auto first = static_cast<PieceIndex>(static_cast<int>(fs.map_file(fi, 0, 0).piece));
+        const auto last =
+            static_cast<PieceIndex>(static_cast<int>(fs.map_file(fi, file.size - 1, 0).piece));
+        auto there = [&](PieceIndex p) {
+            const lt::piece_index_t index{p};
+            return index < have->end_index() && have->get_bit(index);
+        };
         std::vector<PieceIndex> missing;
         for (auto p = first; p <= last; ++p) {
-            if (p >= have->end_index() || !have->get_bit(p)) {
-                missing.push_back(static_cast<PieceIndex>(static_cast<int>(p)));
-            }
+            if (!there(p)) missing.push_back(p);
         }
-        return file_holders(missing, *peers);
+        entry["holders"] = file_holders(missing, *peers);
+        const auto span = span_bytes(
+            first, last, there, [&](PieceIndex p) { return ti->piece_size(lt::piece_index_t{p}); },
+            queue);
+        entry["span_downloaded"] = span.downloaded;
+        entry["span_size"] = span.size;
     };
 
     json wanted = json::array();
@@ -78,7 +91,7 @@ json wanted_files_json(const lt::torrent_handle& handle, const std::vector<FileI
             {"downloaded", std::max(downloaded[i], checked[i])},
             {"complete", complete},
         };
-        if (!complete) entry["holders"] = holders(file);
+        if (!complete) not_whole(file, entry);
         if (file.index == roles.reader) {
             entry["role"] = "reader";
         } else if (file.index == roles.background) {
@@ -492,17 +505,35 @@ Result<void> SeekServeEngine::fetch_ends_ahead(const TorrentId& id, FileIndex fi
     if (!ti) {
         return make_error_code(errc::metadata_not_ready);
     }
-    if (auto file = catalog_.get_file(id, fi); !file) return file.error();
+    auto file = catalog_.get_file(id, fi);
+    if (!file) return file.error();
     if (catalog_.wanted_files(id).reader == fi) return {};
 
     ByteRangeMapper mapper(ti->layout(), fi);
     auto pieces = file_end_pieces(mapper, config_.scheduler.startup_focus_bytes);
     if (pieces.empty()) return {};
 
+    // A subtitle file is small and a player waits for it: a deadline makes
+    // libtorrent ask several peers for its pieces at once and drop the
+    // requests that are not urgent (app BUG-784, DEC-811). Not a video's
+    // ends, which come ahead behind a reader with deadlines of its own.
+    const bool urgent = is_subtitle_file(file.value().path);
     std::lock_guard lock(mu_);
-    ends_ahead_[id] = EndsAhead{fi, std::move(pieces)};
+    ends_ahead_[id] = EndsAhead{fi, pieces, urgent};
     apply_ends_ahead(id, handle);
-    spdlog::info("Engine: the start and the end of file {} of {} come ahead", fi, id);
+    if (urgent) {
+        try {
+            for (const auto p : pieces) {
+                if (!handle.have_piece(lt::piece_index_t{p})) {
+                    handle.set_piece_deadline(lt::piece_index_t{p}, 0);
+                }
+            }
+        } catch (const std::exception& e) {
+            spdlog::debug("Engine: no deadline for the subtitle of {}: {}", id, e.what());
+        }
+    }
+    spdlog::info("Engine: the start and the end of file {} of {} come ahead{}", fi, id,
+                 urgent ? ", with a deadline" : "");
     return {};
 }
 
@@ -808,6 +839,7 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
         }
         status_json["ends_ahead_file"] = ahead->file;
         status_json["ends_ahead_left"] = left;
+        status_json["ends_ahead_urgent"] = ahead->urgent;
     }
 
     status_json["alerts_dropped"] = alerts_dropped_.load();

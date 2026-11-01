@@ -32,6 +32,12 @@ class WantedFile {
   /// file, or an engine that does not say.
   final int? holders;
 
+  /// For a file not whole, the bytes of the pieces it is in that are there
+  /// and in all: how far a small file inside a big piece is. Null for a
+  /// whole file, or an engine that does not say.
+  final int? spanDownloaded;
+  final int? spanSize;
+
   const WantedFile({
     required this.index,
     required this.size,
@@ -39,6 +45,8 @@ class WantedFile {
     required this.isComplete,
     this.role,
     this.holders,
+    this.spanDownloaded,
+    this.spanSize,
   });
 
   factory WantedFile.fromJson(Map<String, dynamic> json) {
@@ -49,6 +57,8 @@ class WantedFile {
       isComplete: json['complete'] as bool? ?? false,
       role: _parseRole(json['role']),
       holders: json['holders'] as int?,
+      spanDownloaded: json['span_downloaded'] as int?,
+      spanSize: json['span_size'] as int?,
     );
   }
 
@@ -66,6 +76,8 @@ class WantedFile {
     'complete': isComplete,
     if (role != null) 'role': role!.name,
     if (holders != null) 'holders': holders,
+    if (spanDownloaded != null) 'span_downloaded': spanDownloaded,
+    if (spanSize != null) 'span_size': spanSize,
   };
 }
 

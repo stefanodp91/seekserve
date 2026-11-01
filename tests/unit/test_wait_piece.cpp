@@ -161,3 +161,46 @@ TEST(FileHoldersTest, APeerWithoutOneOfThemDoesNot) {
 TEST(FileHoldersTest, NoPeerNoHolder) {
     EXPECT_EQ(file_holders({3}, {}), 0);
 }
+
+// The bytes of the pieces a file is in (app BUG-784, DEC-811): a small file
+// inside a big piece shows how far that piece is, so a bar moves from the
+// first block.
+namespace {
+
+constexpr int kBlock = 16 * 1024;
+
+lt::partial_piece_info in_progress(PieceIndex piece, std::vector<lt::block_info>& blocks) {
+    lt::partial_piece_info partial{};
+    partial.piece_index = lt::piece_index_t{piece};
+    partial.blocks_in_piece = static_cast<int>(blocks.size());
+    partial.blocks = blocks.data();
+    return partial;
+}
+
+}  // namespace
+
+TEST(SpanBytesTest, WholePiecesCountWhole) {
+    const auto bytes = span_bytes(
+        3, 4, [](PieceIndex p) { return p == 3; }, [](PieceIndex) { return 4 * kBlock; }, {});
+    EXPECT_EQ(bytes.downloaded, 4 * kBlock);
+    EXPECT_EQ(bytes.size, 8 * kBlock);
+}
+
+TEST(SpanBytesTest, TheBlocksOfAPieceOnItsWayCount) {
+    std::vector<lt::block_info> blocks{block(lt::block_info::finished), block(lt::block_info::requested, 1),
+                                       block(lt::block_info::writing), block(lt::block_info::none)};
+    const auto bytes = span_bytes(
+        4, 4, [](PieceIndex) { return false; }, [](PieceIndex) { return 4 * kBlock; },
+        {in_progress(4, blocks)});
+    EXPECT_EQ(bytes.downloaded, 2 * kBlock);
+    EXPECT_EQ(bytes.size, 4 * kBlock);
+}
+
+TEST(SpanBytesTest, ThePiecesLastBlockMayBeShorter) {
+    std::vector<lt::block_info> blocks{block(lt::block_info::none), block(lt::block_info::none),
+                                       block(lt::block_info::finished)};
+    const auto bytes = span_bytes(
+        4, 4, [](PieceIndex) { return false; }, [](PieceIndex) { return 2 * kBlock + 8 * 1024; },
+        {in_progress(4, blocks)});
+    EXPECT_EQ(bytes.downloaded, 8 * 1024);
+}

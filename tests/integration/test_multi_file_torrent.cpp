@@ -1735,7 +1735,10 @@ TEST_F(MultiFileTorrent, TheStatusSaysWhoHoldsAFileNotWhole) {
     ASSERT_NE(proxy.port(), 0);
     proxy.limit_download(kTrickle);
     auto seeder = start_seeder();
-    SeekServeEngine engine(engine_config(proxy.port()));
+    auto config = engine_config(proxy.port());
+    // fetch_ends_ahead asks for the first and last of these bytes.
+    config.scheduler.startup_focus_bytes = 2 * kPiece;
+    SeekServeEngine engine(config);
     CompletedFiles completed(engine);
 
     const TorrentId id = add(engine, *seeder);
@@ -1756,6 +1759,12 @@ TEST_F(MultiFileTorrent, TheStatusSaysWhoHoldsAFileNotWhole) {
         const auto video = wanted_file(status, e02);
         ASSERT_FALSE(whole(video)) << status.dump();
         EXPECT_EQ(video.value("holders", -1), 1) << status.dump();
+        // The bytes of the pieces it is in: at least the file's, and at least
+        // what of the file is there (app DEC-811).
+        EXPECT_GE(video.value("span_size", std::int64_t{-1}), size_of(kE02)) << status.dump();
+        EXPECT_GE(video.value("span_downloaded", std::int64_t{-1}), bytes_of(video)) << status.dump();
+        EXPECT_LE(video.value("span_downloaded", std::int64_t{-1}), video.value("span_size", std::int64_t{-1}))
+            << status.dump();
     }
 
     // A whole file needs nobody: no holders.
@@ -1763,6 +1772,40 @@ TEST_F(MultiFileTorrent, TheStatusSaysWhoHoldsAFileNotWhole) {
         << engine.get_status_json(id);
     EXPECT_FALSE(wanted_file(status_of(engine, id), subtitles).contains("holders"))
         << engine.get_status_json(id);
+    EXPECT_FALSE(wanted_file(status_of(engine, id), subtitles).contains("span_size"))
+        << engine.get_status_json(id);
+}
+
+
+// A subtitle file asked ahead gets a deadline on its pieces, so libtorrent
+// asks several peers for it at once (app DEC-811); a video asked ahead, the
+// next episode, does not.
+TEST_F(MultiFileTorrent, ASubtitleAskedAheadHasADeadline) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(0);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port());
+    config.scheduler.startup_focus_bytes = 2 * kPiece;
+    SeekServeEngine engine(config);
+
+    const TorrentId id = add(engine, *seeder);
+    const FileIndex e01 = index_of(engine, id, kE01);
+    const FileIndex e02 = index_of(engine, id, kE02);
+    const FileIndex subtitles = index_of(engine, id, kE01Subtitles);
+    ASSERT_GE(e01, 0);
+    ASSERT_GE(e02, 0);
+    ASSERT_GE(subtitles, 0);
+    ASSERT_TRUE(engine.select_file(id, e01));
+
+    ASSERT_TRUE(engine.fetch_ends_ahead(id, e02));
+    EXPECT_EQ(status_of(engine, id).value("ends_ahead_urgent", true), false)
+        << engine.get_status_json(id);
+
+    ASSERT_TRUE(engine.fetch_ends_ahead(id, subtitles));
+    const auto status = status_of(engine, id);
+    EXPECT_EQ(status.value("ends_ahead_file", -1), subtitles) << status.dump();
+    EXPECT_EQ(status.value("ends_ahead_urgent", false), true) << status.dump();
 }
 
 }  // namespace seekserve

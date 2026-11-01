@@ -210,12 +210,16 @@ void main() {
       final files = TorrentStatus.fromJson({
         'torrent_id': 'abc',
         'files': [
-          {'index': 4, 'size': 1000, 'downloaded': 250, 'complete': false, 'holders': 0},
+          {'index': 4, 'size': 1000, 'downloaded': 250, 'complete': false, 'holders': 0,
+              'span_downloaded': 900, 'span_size': 2048},
           {'index': 5, 'size': 30, 'downloaded': 30, 'complete': true},
         ],
       }).files!;
       expect(files[0].holders, 0);
       expect(files[1].holders, isNull);
+      // The pieces it is in (DEC-811).
+      expect((files[0].spanDownloaded, files[0].spanSize), (900, 2048));
+      expect((files[1].spanDownloaded, files[1].spanSize), (null, null));
     });
 
     test('toJson writes the wanted files back', () {

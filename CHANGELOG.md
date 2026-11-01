@@ -9,8 +9,7 @@
 - **Subtitle files first** (app BUG-784, DEC-806; the file priorities taken back by DEC-810): `wanted_file_priorities`
   gave the torrent's subtitle files the top priority whatever else was wanted, which with forty of them brought the
   one the app waited for last; they are back at the reader's priority, and the app asks first for the one it waits
-  for with `fetch_ends_ahead`, right after the file is chosen (asked later, it waits behind the requests already
-  queued for the video). `StartupFocus::begin` takes their pieces (`along`, kept by the engine in
+  for with `fetch_ends_ahead`, right after the file is chosen. `StartupFocus::begin` takes their pieces (`along`, kept by the engine in
   `TorrentState::subtitles`) to the top with the first bytes instead of the lowest priority with the rest; they do not
   keep the start with priority on. Before, a stream through one slow peer had none of them a minute after it began,
   while the player offered them from the start. The resume data stores them at the top; a restore takes them back to
@@ -21,6 +20,14 @@
 
 #### `seekserve-serve`, `flutter_seekserve`
 
+- **A subtitle asked ahead has a deadline** (app DEC-811): `fetch_ends_ahead` of a subtitle file also sets a deadline on
+  its missing pieces, so libtorrent asks several peers for them at once and drops the requests that are not urgent;
+  a video asked ahead, the next episode, is as before. The status says `ends_ahead_urgent`. Test:
+  `MultiFileTorrent.ASubtitleAskedAheadHasADeadline`.
+- **The bytes of the pieces a file is in** (app DEC-811): each file not whole has `span_downloaded` and `span_size`
+  (`span_bytes`), so a bar moves for a small file inside a big piece; `WantedFile.spanDownloaded`, `spanSize`. Tests:
+  `SpanBytesTest.*`, more checks in `MultiFileTorrent.TheStatusSaysWhoHoldsAFileNotWhole`, which now sets the bytes
+  `fetch_ends_ahead` asks for (with none it asked nothing there, and had passed by luck).
 - **Who could send a file** (app BUG-784, DEC-809): in the status, each file not whole has `holders`, the connected
   peers that have every piece it still misses (`file_holders`, choking peers included); `WantedFile.holders` reads it.
   The app stops waiting for a subtitle file nobody has. Tests: `FileHoldersTest.*`,
