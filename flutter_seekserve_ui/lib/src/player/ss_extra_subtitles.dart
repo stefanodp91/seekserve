@@ -135,7 +135,9 @@ bool ssHasSubtitleChoices(
 
 /// The subtitle menu: off, the tracks inside the video, the files of the
 /// torrent, then the host's choices (ids `off`, `embedded:<id>`,
-/// `external:<index>`, `extra:<id>`).
+/// `external:<index>`, `extra:<id>`). A file of the torrent not on the
+/// phone yet ([pending]) shows dimmed with [SsStrings.subtitlePending]: it
+/// opens nothing until it arrives (app BUG-278).
 List<SsTrackOption> ssSubtitleMenuOptions({
   required SsStrings strings,
   required List<SsSubtitleTrackInfo> embedded,
@@ -148,7 +150,9 @@ List<SsTrackOption> ssSubtitleMenuOptions({
       for (final t in embedded)
         SsTrackOption(id: 'embedded:${t.id}', label: t.title ?? t.language ?? strings.track(t.id), subtitle: t.language),
       for (final f in externalFiles)
-        if (!pending.contains(f.index)) SsTrackOption(id: 'external:${f.index}', label: f.name),
+        pending.contains(f.index)
+            ? SsTrackOption(id: 'external:${f.index}', label: f.name, subtitle: strings.subtitlePending, enabled: false)
+            : SsTrackOption(id: 'external:${f.index}', label: f.name),
       for (final e in extras) SsTrackOption(id: 'extra:${e.id}', label: e.label, subtitle: e.note, enabled: e.enabled),
     ];
 

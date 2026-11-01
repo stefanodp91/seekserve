@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed — A subtitle not on the phone yet says so
+
+#### `flutter_seekserve_ui`
+
+- **Dimmed in the menu** (app BUG-278, DEC-763): a subtitle file of the torrent not on the phone yet (`pending`) is in
+  the subtitle menu, dimmed and not choosable, with `SsStrings.subtitlePending` under its name ("Not available yet");
+  before, it was left out until it arrived, and nobody knew it was coming. Test: `extra_subtitles_test.dart`.
+
 ### Fixed — A torrent's subtitles arrive with the start of a stream
 
 #### `seekserve-core`, `seekserve-serve`

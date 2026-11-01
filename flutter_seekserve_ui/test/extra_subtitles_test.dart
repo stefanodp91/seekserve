@@ -49,9 +49,10 @@ void main() {
       expect(options[4].enabled, isFalse);
     });
 
-    test('a subtitle file not on the phone yet is not in the menu', () {
+    test('a subtitle file not on the phone yet shows dimmed, saying so '
+        '(app BUG-278, DEC-763)', () {
       final options = ssSubtitleMenuOptions(
-        strings: const SsStrings(),
+        strings: const SsStrings(subtitlePending: 'Non ancora disponibile'),
         embedded: const [],
         externalFiles: [
           const FileInfo(index: 4, path: 'Subs/film.it.srt', size: 10),
@@ -60,7 +61,12 @@ void main() {
         extras: const [],
         pending: const {4},
       );
-      expect(options.map((o) => o.id), ['off', 'external:5']);
+      expect(options.map((o) => o.id), ['off', 'external:4', 'external:5']);
+      expect(options[1].enabled, isFalse);
+      expect(options[1].subtitle, 'Non ancora disponibile');
+      expect(options[2].enabled, isTrue);
+      expect(options[2].subtitle, isNull);
+      expect(const SsStrings().subtitlePending, 'Not available yet');
     });
 
     test('the subtitles button shows for tracks, files or host choices alone', () {
