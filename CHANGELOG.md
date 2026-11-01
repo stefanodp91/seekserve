@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Fixed — A torrent's subtitles arrive with the start of a stream
+
+#### `seekserve-core`, `seekserve-serve`
+
+- **Subtitle files first** (app BUG-784, DEC-806): `wanted_file_priorities` gives the torrent's subtitle files the
+  top priority whatever else is wanted, and `StartupFocus::begin` takes their pieces (`along`, kept by the engine in
+  `TorrentState::subtitles`) to the top with the first bytes instead of the lowest priority with the rest; they do not
+  keep the start with priority on. Before, a stream through one slow peer had none of them a minute after it began,
+  while the player offered them from the start. The resume data stores them at the top; a restore takes them back to
+  a download's priority, as before. Tests: `WantedFilePriorities.AReaderAloneIsWantedAsADownloadIsWithTheSubtitlesFirst`,
+  `.ADownloadAloneIsWantedTheSameWay`, `StartupFocusTest.TheSubtitlesComeWithTheFirstBytes` (seen failing first),
+  `.TheSubtitlesDoNotKeepItOn`, `.ASubtitleNobodyWantsStaysUnwanted`; `MultiFileTorrent.ResumeDataKeepsTheFilePrioritiesNotTheSelection`
+  expects the stored priority at the top.
+
+#### `flutter_seekserve_ui`
+
+- **`SsVideoPlayer.pendingSubtitleFiles`**: the subtitle files the host knows are not on the device yet. The menu shows
+  `SsStrings.subtitleArriving` ("Arriving…") under them, and one chosen opens by itself once it leaves the set
+  (`SsAwaitedSubtitle`), unless another choice or another video came in between. Tests in `test/extra_subtitles_test.dart`.
+
 ### Added — Subtitles put into the file a TV share serves
 
 #### `seekserve-core`, `seekserve-serve`, `seekserve-capi`
