@@ -63,6 +63,15 @@ void main() {
       expect(options.map((o) => o.id), ['off', 'external:5']);
     });
 
+    test('the subtitles button shows for tracks, files or host choices alone', () {
+      const extra = [SsExtraSubtitle(id: 'translated', label: 'Italiano (tradotto)')];
+      expect(ssHasSubtitleChoices(const [], hasExternalFiles: false, extras: const []), isFalse);
+      expect(ssHasSubtitleChoices([SubtitleTrack.auto(), SubtitleTrack.no()], hasExternalFiles: false, extras: const []), isFalse);
+      expect(ssHasSubtitleChoices(const [SubtitleTrack('1', 'SDH', 'eng')], hasExternalFiles: false, extras: const []), isTrue);
+      expect(ssHasSubtitleChoices(const [], hasExternalFiles: true, extras: const []), isTrue);
+      expect(ssHasSubtitleChoices(const [], hasExternalFiles: false, extras: extra), isTrue);
+    });
+
     test('lists the player tracks without auto and no', () {
       final infos = ssSubtitleTrackInfos([
         SubtitleTrack.auto(),

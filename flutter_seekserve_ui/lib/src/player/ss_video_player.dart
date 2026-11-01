@@ -864,14 +864,20 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
           ),
           child: StreamBuilder<Tracks>(
             stream: widget.player.stream.tracks,
+            // The controls are built again when a host choice changes the
+            // subtitle configuration: start from the tracks the player knows,
+            // or the buttons go until the video lists them again (app BUG-785).
+            initialData: widget.player.state.tracks,
             builder: (ctx, tracksSnap) {
               final tracks = tracksSnap.data;
               final hasMultipleAudio =
                   (tracks?.audio.where((t) => t.id != 'auto').length ?? 0) > 1;
-              final hasEmbeddedSubs =
-                  (tracks?.subtitle.where((t) => t.id != 'auto' && t.id != 'no').length ?? 0) > 0;
               final showAudio = hasMultipleAudio;
-              final showSubs = hasEmbeddedSubs || _hasExternalSubtitles;
+              final showSubs = ssHasSubtitleChoices(
+                tracks?.subtitle ?? const [],
+                hasExternalFiles: _hasExternalSubtitles,
+                extras: widget.extraSubtitles,
+              );
 
               return Row(
                 children: [
