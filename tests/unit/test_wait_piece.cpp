@@ -127,3 +127,37 @@ TEST(WaitPieceWatchTest, ItSaysSinceWhenThePieceGotNoBlock) {
     EXPECT_EQ(watch.still_ms(kPiece, 11, start + 4000ms), 1000);
     EXPECT_EQ(watch.still_ms(kPiece + 1, 11, start + 5000ms), 0);
 }
+
+// Who could send a file not whole yet (app BUG-784, DEC-809): the connected
+// peers that have every piece it still misses. The app stops waiting for a
+// subtitle file nobody has.
+namespace {
+
+lt::peer_info peer_with(int n, std::initializer_list<int> pieces, lt::peer_flags_t flags = {}) {
+    lt::peer_info p{};
+    p.set_endpoints(lt::tcp::endpoint{}, address_of(n));
+    p.flags = flags;
+    p.pieces.resize(kPieces);
+    for (int piece : pieces) p.pieces.set_bit(lt::piece_index_t{piece});
+    return p;
+}
+
+}  // namespace
+
+TEST(FileHoldersTest, APeerWithEveryMissingPieceHoldsIt) {
+    const std::vector<lt::peer_info> peers{
+        peer_with(1, {3, 4}),
+        peer_with(2, {}, lt::peer_info::seed),
+        peer_with(3, {3, 4, 7}, lt::peer_info::remote_choked),  // it has them all the same
+    };
+    EXPECT_EQ(file_holders({3, 4}, peers), 3);
+}
+
+TEST(FileHoldersTest, APeerWithoutOneOfThemDoesNot) {
+    const std::vector<lt::peer_info> peers{peer_with(1, {3}), peer_with(2, {4})};
+    EXPECT_EQ(file_holders({3, 4}, peers), 0);
+}
+
+TEST(FileHoldersTest, NoPeerNoHolder) {
+    EXPECT_EQ(file_holders({3}, {}), 0);
+}

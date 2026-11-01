@@ -206,11 +206,23 @@ void main() {
       expect(status.files!.single.role, isNull);
     });
 
+    test('fromJson reads who holds a file not whole (BUG-784)', () {
+      final files = TorrentStatus.fromJson({
+        'torrent_id': 'abc',
+        'files': [
+          {'index': 4, 'size': 1000, 'downloaded': 250, 'complete': false, 'holders': 0},
+          {'index': 5, 'size': 30, 'downloaded': 30, 'complete': true},
+        ],
+      }).files!;
+      expect(files[0].holders, 0);
+      expect(files[1].holders, isNull);
+    });
+
     test('toJson writes the wanted files back', () {
       final json = {
         'torrent_id': 'abc',
         'files': [
-          {'index': 4, 'size': 1000, 'downloaded': 250, 'complete': false, 'role': 'reader'},
+          {'index': 4, 'size': 1000, 'downloaded': 250, 'complete': false, 'role': 'reader', 'holders': 2},
           {'index': 6, 'size': 30, 'downloaded': 30, 'complete': true},
         ],
       };

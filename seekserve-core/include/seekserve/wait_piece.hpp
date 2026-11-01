@@ -32,6 +32,11 @@ struct WaitPieceStats {
 // nothing of one that chokes us or is snubbed (app BUG-247).
 bool someone_sends_it(const WaitPieceStats& stats);
 
+// How many connected peers have every piece of `missing`, the pieces a file
+// still misses: who could send the whole of it (app BUG-784, DEC-809). A
+// peer that chokes us counts, as it may send later.
+int file_holders(const std::vector<PieceIndex>& missing, const std::vector<lt::peer_info>& peers);
+
 // `piece` as libtorrent's peers and download queue tell it; `blocks_in_piece`
 // for a piece no block of which was asked yet.
 WaitPieceStats wait_piece_stats(PieceIndex piece, int blocks_in_piece,
