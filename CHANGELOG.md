@@ -29,6 +29,15 @@
   of the menu, as choosing one would show nothing (app DEC-808). An "Arriving…" note with the file opening by itself
   when it came, tried first, was dropped (app DEC-807). Test in `test/extra_subtitles_test.dart`.
 
+### Fixed — The subtitles button after a host choice
+
+#### `flutter_seekserve_ui`
+
+- **The tracks' `StreamBuilder` starts from `player.state.tracks`** (app BUG-785): selecting a host choice changes the
+  subtitle configuration of the `Video` widget, which builds the controls again, and the subtitles button was gone
+  until the video listed its tracks again, as `33e5b4b` fixed for the buffering, playing, position and duration.
+  `ssHasSubtitleChoices` decides the button, counting the host's choices too. Test in `test/extra_subtitles_test.dart`.
+
 ### Added — Subtitles put into the file a TV share serves
 
 #### `seekserve-core`, `seekserve-serve`, `seekserve-capi`

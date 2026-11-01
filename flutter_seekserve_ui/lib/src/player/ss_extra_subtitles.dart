@@ -124,6 +124,15 @@ List<SsSubtitleTrackInfo> ssSubtitleTrackInfos(List<SubtitleTrack> tracks) => [
         if (t.id != 'auto' && t.id != 'no') SsSubtitleTrackInfo(id: t.id, language: t.language, title: t.title),
     ];
 
+/// Whether the player shows its subtitles button: a track inside the video,
+/// a subtitle file of the torrent, or a choice of the host (app BUG-785).
+bool ssHasSubtitleChoices(
+  List<SubtitleTrack> tracks, {
+  required bool hasExternalFiles,
+  required List<SsExtraSubtitle> extras,
+}) =>
+    tracks.any((t) => t.id != 'auto' && t.id != 'no') || hasExternalFiles || extras.isNotEmpty;
+
 /// The subtitle menu: off, the tracks inside the video, the files of the
 /// torrent, then the host's choices (ids `off`, `embedded:<id>`,
 /// `external:<index>`, `extra:<id>`).
