@@ -190,18 +190,18 @@ using Priorities = std::vector<lt::download_priority_t>;
 
 }  // namespace
 
-// What select_file has always asked for: the file as a download, nothing
-// else but the subtitles, which come first: they are a few KB, and a player
-// that offers them should find them on disk (app BUG-784).
-TEST(WantedFilePriorities, AReaderAloneIsWantedAsADownloadIsWithTheSubtitlesFirst) {
+// What select_file has always asked for: the file and the subtitles as a
+// download, nothing else. Not all of them first: the app asks first for the
+// one it waits for (app BUG-784, DEC-810).
+TEST(WantedFilePriorities, AReaderAloneIsWantedAsADownloadIs) {
     EXPECT_EQ(wanted_file_priorities(pack(), kEpisode1, -1),
-              (Priorities{lt::default_priority, lt::top_priority,
+              (Priorities{lt::default_priority, lt::default_priority,
                           lt::dont_download, lt::dont_download}));
 }
 
 TEST(WantedFilePriorities, ADownloadAloneIsWantedTheSameWay) {
     EXPECT_EQ(wanted_file_priorities(pack(), -1, kEpisode3),
-              (Priorities{lt::dont_download, lt::top_priority,
+              (Priorities{lt::dont_download, lt::default_priority,
                           lt::dont_download, lt::default_priority}));
 }
 
