@@ -336,6 +336,9 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
           ),
         );
       },
+      onGoing: () {
+        if (mounted && identical(player, _player)) watch?.going();
+      },
     );
     unawaited(
       video.waitUntilFirstFrameRendered.then(

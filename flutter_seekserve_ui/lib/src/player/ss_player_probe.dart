@@ -1,12 +1,13 @@
 /// What a video player is doing, for an app's debug log (app BUG-238,
 /// DEC-662): which decoder it uses, the format, how much it holds, whether
-/// it waits for data or just stands, the frames it dropped. Null where the
-/// player does not say.
+/// it is paused, whether it waits for data or just stands, the frames it
+/// dropped. Null where the player does not say.
 class SsPlayerState {
   const SsPlayerState({
     this.decoder,
     this.format,
     this.cacheSeconds,
+    this.paused,
     this.pausedForCache,
     this.idle,
     this.drops,
@@ -20,6 +21,10 @@ class SsPlayerState {
 
   /// Seconds of the video the player holds ahead (`demuxer-cache-duration`).
   final double? cacheSeconds;
+
+  /// Whether it is paused, by the user or the app (`pause`): a paused player
+  /// stands, and is not stuck (app BUG-274).
+  final bool? paused;
 
   /// Whether it stands waiting for data (`paused-for-cache`).
   final bool? pausedForCache;
@@ -65,6 +70,7 @@ class SsPlayerProbe {
       cacheSeconds: double.tryParse(
         await property('demuxer-cache-duration') ?? '',
       ),
+      paused: yes(await property('pause')),
       pausedForCache: yes(await property('paused-for-cache')),
       idle: yes(await property('core-idle')),
       drops: int.tryParse(await property('decoder-frame-drop-count') ?? ''),

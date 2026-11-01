@@ -102,16 +102,19 @@ typedef SsStartPeriodicTimer =
 /// From [arm], at the first frame, it reads the player every quarter of
 /// [after]; when the player has stood on a seek for [after], it calls
 /// [onStuck], once. It stops reading once the image is on the screen and
-/// the video goes, or after [onStuck], or at [close].
+/// the video goes, and says so with [onGoing]; or after [onStuck], or at
+/// [close].
 class SsPlayerUnstick {
   SsPlayerUnstick({
     required this.after,
     required Future<SsPlayerMotion?> Function() read,
     required void Function() onStuck,
+    void Function()? onGoing,
     Duration Function()? elapsed,
     SsStartPeriodicTimer? startPeriodicTimer,
   }) : _read = read,
        _onStuck = onStuck,
+       _onGoing = onGoing,
        _elapsed = elapsed ?? ssElapsedFromNow(),
        _startPeriodicTimer = startPeriodicTimer ?? Timer.periodic;
 
@@ -119,6 +122,7 @@ class SsPlayerUnstick {
   final Duration after;
   final Future<SsPlayerMotion?> Function() _read;
   final void Function() _onStuck;
+  final void Function()? _onGoing;
   final Duration Function() _elapsed;
   final SsStartPeriodicTimer _startPeriodicTimer;
 
@@ -155,7 +159,11 @@ class SsPlayerUnstick {
       _reading = false;
     }
     if (_over || motion == null) return;
-    if (motion.goesOnScreen) return close();
+    if (motion.goesOnScreen) {
+      close();
+      _onGoing?.call();
+      return;
+    }
     if (!motion.standsOnASeek) {
       _standingSince = null;
       return;
