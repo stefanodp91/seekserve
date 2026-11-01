@@ -49,9 +49,9 @@ void main() {
       expect(options[4].enabled, isFalse);
     });
 
-    test('a subtitle file not on the phone yet says it is arriving', () {
+    test('a subtitle file not on the phone yet is not in the menu', () {
       final options = ssSubtitleMenuOptions(
-        strings: const SsStrings(subtitleArriving: 'Arriva…'),
+        strings: const SsStrings(),
         embedded: const [],
         externalFiles: [
           const FileInfo(index: 4, path: 'Subs/film.it.srt', size: 10),
@@ -60,7 +60,7 @@ void main() {
         extras: const [],
         pending: const {4},
       );
-      expect(options.map((o) => (o.id, o.subtitle)), [('off', null), ('external:4', 'Arriva…'), ('external:5', null)]);
+      expect(options.map((o) => o.id), ['off', 'external:5']);
     });
 
     test('lists the player tracks without auto and no', () {
@@ -145,37 +145,6 @@ void main() {
       expect(seen, [const Duration(seconds: 3)]);
       expect(host.embeddedTracks.single.id, '2');
       await sub.cancel();
-    });
-  });
-
-  group('a subtitle file that is arriving', () {
-    test('a file already there opens at once', () {
-      final awaited = SsAwaitedSubtitle();
-      expect(awaited.choose(5, const {4}), isTrue);
-      expect(awaited.update(const {}), isNull);
-    });
-
-    test('a file chosen while arriving opens once it is there', () {
-      final awaited = SsAwaitedSubtitle();
-      expect(awaited.choose(4, const {4}), isFalse);
-      expect(awaited.update(const {4}), isNull);
-      expect(awaited.update(const {}), 4);
-      expect(awaited.update(const {}), isNull);
-    });
-
-    test('another choice drops the file that was arriving', () {
-      final awaited = SsAwaitedSubtitle();
-      awaited.choose(4, const {4});
-      awaited.clear();
-      expect(awaited.update(const {}), isNull);
-    });
-
-    test('a second file chosen while the first arrives takes its place', () {
-      final awaited = SsAwaitedSubtitle();
-      awaited.choose(4, const {4, 6});
-      expect(awaited.choose(6, const {4, 6}), isFalse);
-      expect(awaited.update(const {6}), isNull);
-      expect(awaited.update(const {}), 6);
     });
   });
 }
