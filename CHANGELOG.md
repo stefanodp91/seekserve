@@ -6,8 +6,11 @@
 
 #### `seekserve-core`, `seekserve-serve`
 
-- **Subtitle files first** (app BUG-784, DEC-806): `wanted_file_priorities` gives the torrent's subtitle files the
-  top priority whatever else is wanted, and `StartupFocus::begin` takes their pieces (`along`, kept by the engine in
+- **Subtitle files first** (app BUG-784, DEC-806; the file priorities taken back by DEC-810): `wanted_file_priorities`
+  gave the torrent's subtitle files the top priority whatever else was wanted, which with forty of them brought the
+  one the app waited for last; they are back at the reader's priority, and the app asks first for the one it waits
+  for with `fetch_ends_ahead`, right after the file is chosen (asked later, it waits behind the requests already
+  queued for the video). `StartupFocus::begin` takes their pieces (`along`, kept by the engine in
   `TorrentState::subtitles`) to the top with the first bytes instead of the lowest priority with the rest; they do not
   keep the start with priority on. Before, a stream through one slow peer had none of them a minute after it began,
   while the player offered them from the start. The resume data stores them at the top; a restore takes them back to

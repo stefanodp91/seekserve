@@ -850,9 +850,7 @@ TEST_F(MultiFileTorrent, ResumeDataKeepsTheFilePrioritiesNotTheSelection) {
         return params.file_priorities[static_cast<std::size_t>(fi)];
     };
     EXPECT_EQ(priority(e01), lt::default_priority);
-    // Above the video's (app BUG-784); a restore takes them back to a
-    // download's priority (drop_reader_priorities).
-    EXPECT_EQ(priority(subtitles), lt::top_priority);
+    EXPECT_EQ(priority(subtitles), lt::default_priority);
     EXPECT_EQ(priority(e02), lt::dont_download);
     EXPECT_EQ(priority(e03), lt::dont_download);
 
@@ -1746,6 +1744,9 @@ TEST_F(MultiFileTorrent, TheStatusSaysWhoHoldsAFileNotWhole) {
     ASSERT_GE(e02, 0);
     ASSERT_GE(subtitles, 0);
     ASSERT_TRUE(engine.select_file(id, e02));
+    // Asked first, as the app asks for the subtitle it waits for as soon as
+    // the file is chosen (app DEC-810).
+    ASSERT_TRUE(engine.fetch_ends_ahead(id, subtitles));
     ASSERT_TRUE(wait_for([&] { return bytes_of(wanted_file(status_of(engine, id), e02)) > 0; }))
         << engine.get_status_json(id);
 
