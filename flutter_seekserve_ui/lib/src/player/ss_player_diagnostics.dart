@@ -86,6 +86,10 @@ class SsPlayerWatch {
   /// ([SsPlayerUnstick]).
   void unstuck() => _life.reach(SsPlayerStage.unstuck);
 
+  /// The unstick saw the video going on the screen and stopped reading the
+  /// player ([SsPlayerUnstick], app BUG-274).
+  void going() => _life.reach(SsPlayerStage.going);
+
   /// An error of the player, also one it tries again by itself.
   void error(String message) => _write('error: $message');
 

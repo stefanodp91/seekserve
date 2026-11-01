@@ -29,6 +29,11 @@ enum SsPlayerStage {
   /// (app BUG-246, DEC-669; `SsPlayerUnstick`).
   unstuck,
 
+  /// The unstick saw the image on the screen and the video going, and reads
+  /// the player no more: a player that stands after it is not opened again
+  /// (app BUG-274).
+  going,
+
   /// It started to go.
   disposing,
 
@@ -69,7 +74,11 @@ class SsPlayerLife {
   final Set<SsPlayerStage> _reached = {};
   Timer? _watch;
 
-  static const _last = {SsPlayerStage.visible, SsPlayerStage.disposed};
+  static const _last = {
+    SsPlayerStage.visible,
+    SsPlayerStage.going,
+    SsPlayerStage.disposed,
+  };
 
   void reach(SsPlayerStage stage) {
     if (!_reached.add(stage)) return;

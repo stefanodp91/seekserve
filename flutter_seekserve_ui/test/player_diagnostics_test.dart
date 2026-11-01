@@ -129,6 +129,14 @@ void main() {
       expect(timers, isEmpty);
     });
 
+    test('nor the unstick that stopped because the video goes on the screen '
+        '(app BUG-274)', () {
+      life.reach(SsPlayerStage.going);
+
+      expect(events.single.stage, SsPlayerStage.going);
+      expect(timers, isEmpty);
+    });
+
     test(
       'after the first frame the image on the screen is waited for: on '
       'Android the first frame goes to an output nobody sees (app BUG-246)',
@@ -170,6 +178,7 @@ void main() {
             'hwdec-current' => 'mediacodec',
             'video-format' => 'h264',
             'demuxer-cache-duration' => '12.500000',
+            'pause' => 'no',
             'paused-for-cache' => 'yes',
             'core-idle' => 'no',
             'decoder-frame-drop-count' => '3',
@@ -182,6 +191,7 @@ void main() {
       expect(state?.decoder, 'mediacodec');
       expect(state?.format, 'h264');
       expect(state?.cacheSeconds, 12.5);
+      expect(state?.paused, isFalse);
       expect(state?.pausedForCache, isTrue);
       expect(state?.idle, isFalse);
       expect(state?.drops, 3);
@@ -195,6 +205,7 @@ void main() {
 
       expect(state?.decoder, isNull);
       expect(state?.cacheSeconds, isNull);
+      expect(state?.paused, isNull);
       expect(state?.pausedForCache, isNull);
       expect(state?.drops, isNull);
     });

@@ -39,6 +39,7 @@ void main() {
     late SsPlayerMotion? motion;
     late int reads;
     late int stuck;
+    late int wentOnScreen;
     late List<Duration> periods;
     late List<void Function()> ticks;
     late List<_FakeTimer> timers;
@@ -69,6 +70,7 @@ void main() {
       motion = null;
       reads = 0;
       stuck = 0;
+      wentOnScreen = 0;
       periods = [];
       ticks = [];
       timers = [];
@@ -79,6 +81,7 @@ void main() {
           return motion;
         },
         onStuck: () => stuck++,
+        onGoing: () => wentOnScreen++,
         elapsed: () => now,
         startPeriodicTimer: fakePeriodic,
       );
@@ -172,6 +175,28 @@ void main() {
       expect(timers.single.isActive, isFalse);
       expect(reads, readsSoFar);
       expect(stuck, 0);
+    });
+
+    test('says once that it stopped because the video goes on the screen '
+        '(app BUG-274)', () async {
+      unstick.arm();
+      await tickAfter(const Duration(milliseconds: 500), standing);
+      expect(wentOnScreen, 0);
+
+      await tickAfter(const Duration(milliseconds: 500), going);
+      await tickAfter(const Duration(milliseconds: 500), going);
+
+      expect(wentOnScreen, 1);
+    });
+
+    test('an unstick is not the video going on the screen', () async {
+      unstick.arm();
+      for (var i = 0; i < 6; i++) {
+        await tickAfter(const Duration(milliseconds: 500), standing);
+      }
+
+      expect(stuck, 1);
+      expect(wentOnScreen, 0);
     });
 
     test('armed twice, it reads once', () async {
