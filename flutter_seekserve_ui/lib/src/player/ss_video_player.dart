@@ -39,6 +39,10 @@ class SsVideoPlayer extends StatefulWidget {
   /// Requests SeekServe to prioritize downloading a file.
   final void Function(int fileIndex)? onFileSelectRequested;
 
+  /// The subtitle files of [torrentFiles] that are not on the device yet:
+  /// the menu says they are arriving, and one chosen opens when it is there.
+  final Set<int> pendingSubtitleFiles;
+
   /// Called after a seek. Receives the target position.
   final void Function(Duration position)? onSeek;
 
@@ -135,6 +139,7 @@ class SsVideoPlayer extends StatefulWidget {
     this.torrentFiles = const [],
     this.streamUrlBuilder,
     this.onFileSelectRequested,
+    this.pendingSubtitleFiles = const {},
     this.onSeek,
     this.onPlayPause,
     this.title,
@@ -186,6 +191,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
   SsPlayerWatch? _watch;
   SsPlayerUnstick? _unstick;
   SsSubtitleHostController? _subtitleHost;
+  final _awaitedSubtitle = SsAwaitedSubtitle();
   StreamSubscription<Tracks>? _tracks;
   String _error = '';
   bool _noVideoFrames = false;
@@ -220,8 +226,22 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
   void didUpdateWidget(SsVideoPlayer old) {
     super.didUpdateWidget(old);
     if (old.streamUrl != widget.streamUrl) {
+      _awaitedSubtitle.clear();
       _probeAndPlay();
+      return;
     }
+    final arrived = _awaitedSubtitle.update(widget.pendingSubtitleFiles);
+    if (arrived != null) _openSubtitleFile(arrived);
+  }
+
+  /// Shows subtitle file [fileIndex] of the torrent, read from where
+  /// [SsVideoPlayer.streamUrlBuilder] says.
+  void _openSubtitleFile(int fileIndex) {
+    final player = _player;
+    final url = widget.streamUrlBuilder?.call(fileIndex);
+    final file = widget.torrentFiles.where((f) => f.index == fileIndex).firstOrNull;
+    if (player == null || url == null || file == null) return;
+    player.setSubtitleTrack(SubtitleTrack.uri(url, title: file.name));
   }
 
   Future<void> _probeAndPlay() async {
@@ -480,6 +500,8 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
       torrentFiles: widget.torrentFiles,
       streamUrlBuilder: widget.streamUrlBuilder,
       onFileSelectRequested: widget.onFileSelectRequested,
+      pendingSubtitleFiles: widget.pendingSubtitleFiles,
+      awaitedSubtitle: _awaitedSubtitle,
       onSeek: widget.onSeek,
       onPlayPause: widget.onPlayPause,
       title: widget.title,
@@ -575,6 +597,8 @@ class _PlayerOverlay extends StatefulWidget {
   final List<FileInfo> torrentFiles;
   final String Function(int fileIndex)? streamUrlBuilder;
   final void Function(int fileIndex)? onFileSelectRequested;
+  final Set<int> pendingSubtitleFiles;
+  final SsAwaitedSubtitle? awaitedSubtitle;
   final void Function(Duration position)? onSeek;
   final void Function({required bool isPlaying})? onPlayPause;
   final String? title;
@@ -601,6 +625,8 @@ class _PlayerOverlay extends StatefulWidget {
     this.torrentFiles = const [],
     this.streamUrlBuilder,
     this.onFileSelectRequested,
+    this.pendingSubtitleFiles = const {},
+    this.awaitedSubtitle,
     this.onSeek,
     this.onPlayPause,
     this.title,
@@ -728,6 +754,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
       embedded: ssSubtitleTrackInfos(embeddedTracks),
       externalFiles: _subtitleFiles,
       extras: widget.extraSubtitles,
+      pending: widget.pendingSubtitleFiles,
     );
 
     // Determine current selection ID. External tracks have no stable
@@ -751,6 +778,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
 
     if (selected == null || !mounted) return;
 
+    if (!selected.startsWith('external:')) widget.awaitedSubtitle?.clear();
     if (selected.startsWith('extra:')) {
       final host = widget.subtitleHost;
       if (host != null) {
@@ -773,6 +801,12 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
       final fileIndex = int.parse(selected.replaceFirst('external:', ''));
       // Prioritize download of the subtitle file
       widget.onFileSelectRequested?.call(fileIndex);
+      // Not on the device yet: it opens when it gets there.
+      final awaited = widget.awaitedSubtitle;
+      if (awaited != null && !awaited.choose(fileIndex, widget.pendingSubtitleFiles)) {
+        _onInteraction();
+        return;
+      }
       final url = widget.streamUrlBuilder!(fileIndex);
       final file = _subtitleFiles.firstWhere((f) => f.index == fileIndex);
       widget.player.setSubtitleTrack(
