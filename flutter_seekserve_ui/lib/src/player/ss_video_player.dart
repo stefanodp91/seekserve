@@ -13,6 +13,7 @@ import '../utils/format.dart';
 import 'ss_extra_subtitles.dart';
 import 'ss_buffering_overlay.dart';
 import 'ss_player_diagnostics.dart';
+import 'ss_player_recovery.dart';
 import 'ss_player_unstick.dart';
 import 'ss_player_status_bar.dart';
 import 'ss_position_reporter.dart';
@@ -194,6 +195,10 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
   StreamSubscription<Tracks>? _tracks;
   String _error = '';
   bool _noVideoFrames = false;
+
+  /// Takes away an error of the current [_player] that the video got over
+  /// (app BUG-279).
+  SsPlayerRecovery _recovery = SsPlayerRecovery();
   Timer? _formatRetryTimer;
 
   /// Tells the app where the current [_player] is; null without
@@ -265,6 +270,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
   void _startPlayer(String url) {
     _disposePlayer();
     _noVideoFrames = false;
+    _recovery = SsPlayerRecovery();
 
     final diagnostics = widget.diagnostics;
     _player = diagnostics == null
@@ -294,7 +300,14 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
                 widget.onPosition?.call(position, duration),
           );
     _positions = positions;
-    _player!.stream.position.listen((p) => positions?.update(position: p));
+    _player!.stream.position.listen((p) {
+      positions?.update(position: p);
+      // The video moved on after an error: the error was not the end of
+      // it, such as a hardware decoder that did not open (app BUG-279).
+      if (_recovery.moved(p) && mounted && _error.isNotEmpty) {
+        setState(() => _error = '');
+      }
+    });
     _player!.stream.duration.listen((d) => positions?.update(duration: d));
     _player!.stream.completed.listen((completed) {
       if (completed && mounted) widget.onCompleted?.call();
@@ -312,6 +325,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
         });
         return;
       }
+      _recovery.failed();
       _fail(widget.strings.playerError(err));
     });
     _player!.stream.buffering.listen((buffering) {

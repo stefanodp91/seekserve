@@ -38,6 +38,7 @@ export 'src/player/ss_player_diagnostics.dart';
 export 'src/player/ss_player_life.dart';
 export 'src/player/ss_player_log.dart';
 export 'src/player/ss_player_probe.dart';
+export 'src/player/ss_player_recovery.dart';
 export 'src/player/ss_player_status_bar.dart';
 export 'src/player/ss_player_unstick.dart';
 export 'src/player/ss_position_reporter.dart';
