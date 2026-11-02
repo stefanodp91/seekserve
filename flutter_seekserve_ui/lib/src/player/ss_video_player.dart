@@ -18,6 +18,7 @@ import 'ss_player_unstick.dart';
 import 'ss_player_status_bar.dart';
 import 'ss_position_reporter.dart';
 import 'ss_strings.dart';
+import 'ss_subtitle_choice.dart';
 import 'ss_track_selector.dart';
 
 /// Complete video player widget with overlay controls, seek bar,
@@ -121,6 +122,14 @@ class SsVideoPlayer extends StatefulWidget {
   /// The subtitle tracks inside the video, when the player knows them.
   final void Function(List<SsSubtitleTrackInfo> tracks)? onSubtitleTracks;
 
+  /// Called with each subtitle chosen in the menu (app DEC-818).
+  final void Function(SsSubtitleChoice choice)? onSubtitleChosen;
+
+  /// The subtitle put back each time a player opens the stream, once it
+  /// knows the file's tracks; a track or file no longer there leaves the
+  /// file's default. A host choice is selected as if tapped.
+  final SsSubtitleChoice? initialSubtitle;
+
   /// What the app wants to know of the player, for its debug log, and its
   /// choice of decoder; null, the default, for a player as before (app
   /// BUG-238, BUG-239, DEC-662).
@@ -160,6 +169,8 @@ class SsVideoPlayer extends StatefulWidget {
     this.onExtraSubtitleSelected,
     this.onExtraSubtitleCleared,
     this.onSubtitleTracks,
+    this.onSubtitleChosen,
+    this.initialSubtitle,
     this.diagnostics,
     this.unstickAfter,
   });
@@ -286,6 +297,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
     _tracks = _player!.stream.tracks.listen(
       (tracks) => widget.onSubtitleTracks?.call(ssSubtitleTrackInfos(tracks.subtitle)),
     );
+    unawaited(_putBackSubtitle(_player!));
     final watch = _watch;
     _unstick = _unstickFor(url, _player!, _videoController!, watch);
 
@@ -451,6 +463,64 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
     await _restoreTracks(player, audio, subtitle);
   }
 
+  /// How long a player waits for the file's tracks before keeping its
+  /// default ones.
+  static const _tracksTimeout = Duration(seconds: 15);
+
+  /// Puts back [SsVideoPlayer.initialSubtitle] once [player] knows the
+  /// file's tracks.
+  Future<void> _putBackSubtitle(Player player) async {
+    final choice = widget.initialSubtitle;
+    if (choice == null) return;
+    try {
+      final tracks = await player.stream.tracks.firstWhere(ssTracksLoaded).timeout(_tracksTimeout);
+      if (!mounted || !identical(player, _player)) return;
+      final files = [for (final f in widget.torrentFiles) if (f.isSubtitle) f.index];
+      final restored = ssSubtitleToRestore(choice, ssSubtitleTrackInfos(tracks.subtitle), files);
+      if (restored != null) await _applySubtitle(restored);
+    } on TimeoutException {
+      // The file did not load in time: its default subtitle stays.
+    } on StateError {
+      // The player was disposed while waiting.
+    }
+  }
+
+  /// A subtitle chosen in the menu: on screen, then told to the host.
+  Future<void> _chooseSubtitle(SsSubtitleChoice choice) async {
+    await _applySubtitle(choice);
+    widget.onSubtitleChosen?.call(choice);
+  }
+
+  Future<void> _applySubtitle(SsSubtitleChoice choice) async {
+    final player = _player;
+    final host = _subtitleHost;
+    if (player == null || host == null) return;
+    if (choice is SsSubtitleExtra) {
+      widget.onExtraSubtitleSelected?.call(choice.id, host);
+      return;
+    }
+    if (widget.selectedExtraSubtitleId != null) {
+      host.clear();
+      widget.onExtraSubtitleCleared?.call();
+    }
+    switch (choice) {
+      case SsSubtitleNone():
+        await player.setSubtitleTrack(SubtitleTrack.no());
+      case SsSubtitleEmbedded(:final id):
+        final track = player.state.tracks.subtitle.where((t) => t.id == id).firstOrNull;
+        if (track != null) await player.setSubtitleTrack(track);
+      case SsSubtitleFile(:final fileIndex):
+        final urlOf = widget.streamUrlBuilder;
+        final file = widget.torrentFiles.where((f) => f.index == fileIndex).firstOrNull;
+        if (urlOf == null || file == null) return;
+        // Prioritize download of the subtitle file
+        widget.onFileSelectRequested?.call(fileIndex);
+        await player.setSubtitleTrack(SubtitleTrack.uri(urlOf(fileIndex), title: file.name));
+      case SsSubtitleExtra():
+        break;
+    }
+  }
+
   Future<void> _restoreTracks(
     Player player,
     AudioTrack audio,
@@ -473,7 +543,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
                 (!embeddedSubtitle ||
                     t.subtitle.any((s) => s.id == subtitle.id)),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(_tracksTimeout);
       if (!mounted || !identical(player, _player)) return;
       if (keepAudio) {
         await player.setAudioTrack(
@@ -513,8 +583,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
       extraSubtitles: widget.extraSubtitles,
       selectedExtraSubtitleId: widget.selectedExtraSubtitleId,
       subtitleHost: _subtitleHost,
-      onExtraSubtitleSelected: widget.onExtraSubtitleSelected,
-      onExtraSubtitleCleared: widget.onExtraSubtitleCleared,
+      onSubtitleChosen: _chooseSubtitle,
     );
   }
 
@@ -613,8 +682,9 @@ class _PlayerOverlay extends StatefulWidget {
   final List<SsExtraSubtitle> extraSubtitles;
   final String? selectedExtraSubtitleId;
   final SsSubtitleHostController? subtitleHost;
-  final void Function(String id, SsSubtitleHost host)? onExtraSubtitleSelected;
-  final VoidCallback? onExtraSubtitleCleared;
+
+  /// Puts on screen a subtitle chosen in the menu and tells the host.
+  final Future<void> Function(SsSubtitleChoice choice) onSubtitleChosen;
 
   const _PlayerOverlay({
     required this.player,
@@ -636,8 +706,7 @@ class _PlayerOverlay extends StatefulWidget {
     this.extraSubtitles = const [],
     this.selectedExtraSubtitleId,
     this.subtitleHost,
-    this.onExtraSubtitleSelected,
-    this.onExtraSubtitleCleared,
+    required this.onSubtitleChosen,
   });
 
   @override
@@ -777,34 +846,8 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
 
     if (selected == null || !mounted) return;
 
-    if (selected.startsWith('extra:')) {
-      final host = widget.subtitleHost;
-      if (host != null) {
-        widget.onExtraSubtitleSelected?.call(selected.substring('extra:'.length), host);
-      }
-      _onInteraction();
-      return;
-    }
-    if (extra != null) {
-      widget.subtitleHost?.clear();
-      widget.onExtraSubtitleCleared?.call();
-    }
-    if (selected == 'off') {
-      widget.player.setSubtitleTrack(SubtitleTrack.no());
-    } else if (selected.startsWith('embedded:')) {
-      final id = selected.replaceFirst('embedded:', '');
-      final track = embeddedTracks.firstWhere((t) => t.id == id);
-      widget.player.setSubtitleTrack(track);
-    } else if (selected.startsWith('external:')) {
-      final fileIndex = int.parse(selected.replaceFirst('external:', ''));
-      // Prioritize download of the subtitle file
-      widget.onFileSelectRequested?.call(fileIndex);
-      final url = widget.streamUrlBuilder!(fileIndex);
-      final file = _subtitleFiles.firstWhere((f) => f.index == fileIndex);
-      widget.player.setSubtitleTrack(
-        SubtitleTrack.uri(url, title: file.name),
-      );
-    }
+    final choice = ssSubtitleChoiceOfMenuId(selected, ssSubtitleTrackInfos(embeddedTracks));
+    if (choice != null) unawaited(widget.onSubtitleChosen(choice));
     _onInteraction();
   }
 
