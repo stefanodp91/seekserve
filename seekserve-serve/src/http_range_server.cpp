@@ -467,7 +467,9 @@ void HttpRangeServer::do_accept() {
                 auto peer = socket.remote_endpoint(peer_ec);
                 auto allowed = net::ip::make_address(config_.allowed_peer, allowed_ec);
                 if (peer_ec || allowed_ec || peer.address() != allowed) {
-                    spdlog::debug("HttpRangeServer: closing a connection from another address");
+                    // A warning: a connection closed with no answer, which the
+                    // system log shows (app BUG-266, DEC-766).
+                    spdlog::warn("HttpRangeServer: closing a connection from another address");
                     boost::system::error_code close_ec;
                     socket.close(close_ec);
                     do_accept();
@@ -581,7 +583,15 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
 
     http::read(stream, buffer, req, ec);
     if (ec) {
-        spdlog::debug("HttpRangeServer: read error: {}", ec.message());
+        // Closed before a whole request arrived: with nothing of it, the
+        // client finds its connection shut with no answer, so it is a warning
+        // with the reason, which the system log shows (app BUG-266, DEC-766).
+        if (buffer.size() == 0) {
+            spdlog::warn("HttpRangeServer: closed before a request: {} (running {}, active {})",
+                         ec.message(), running_.load(), active_connections());
+        } else {
+            spdlog::debug("HttpRangeServer: read error: {}", ec.message());
+        }
         return;
     }
     spdlog::debug("HttpRangeServer: {} {} range={}",

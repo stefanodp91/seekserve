@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Changed — The closes with no answer say why
+
+#### `seekserve-serve`
+
+- **Warnings** (app BUG-266, DEC-766): a connection closed before a whole request arrived, with nothing of it read, is a
+  warning with the reason, whether the server was running and how many connections were active
+  ("closed before a request: …"); a connection from an address other than the one a share serves is a warning too.
+  Before, both were debug lines, which the app's system log does not show, while the client found its connection shut
+  with no answer ("Broken pipe" in the app's first-data check).
+
 ### Changed — A subtitle not on the phone yet says so
 
 #### `flutter_seekserve_ui`
