@@ -61,16 +61,19 @@ class SsSubtitleExtra extends SsSubtitleChoice {
 }
 
 /// The choice to put back in a player with [tracks] and the subtitle files
-/// [fileIndexes]; null when its track or file is not there any more, and the
-/// file's default stays.
+/// [fileIndexes]; null when its track or file is not there any more, or the
+/// file is not on the phone yet ([pending], which the menu does not open
+/// either), and the file's default stays.
 SsSubtitleChoice? ssSubtitleToRestore(
   SsSubtitleChoice choice,
   List<SsSubtitleTrackInfo> tracks,
-  List<int> fileIndexes,
-) =>
+  List<int> fileIndexes, {
+  Set<int> pending = const {},
+}) =>
     switch (choice) {
       SsSubtitleEmbedded(:final id) => tracks.any((t) => t.id == id) ? choice : null,
-      SsSubtitleFile(:final fileIndex) => fileIndexes.contains(fileIndex) ? choice : null,
+      SsSubtitleFile(:final fileIndex) =>
+        fileIndexes.contains(fileIndex) && !pending.contains(fileIndex) ? choice : null,
       SsSubtitleNone() || SsSubtitleExtra() => choice,
     };
 

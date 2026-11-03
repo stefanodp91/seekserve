@@ -28,6 +28,14 @@ void main() {
       expect(ssSubtitleToRestore(const SsSubtitleFile(fileIndex: 5), tracks, files), isNull);
     });
 
+    test('a file choice not on the phone yet keeps the default, as in the menu (app BUG-278)', () {
+      expect(ssSubtitleToRestore(const SsSubtitleFile(fileIndex: 7), tracks, files, pending: {7}), isNull);
+      expect(
+        ssSubtitleToRestore(const SsSubtitleFile(fileIndex: 7), tracks, files, pending: {4}),
+        const SsSubtitleFile(fileIndex: 7),
+      );
+    });
+
     test('none selects none', () {
       expect(ssSubtitleToRestore(const SsSubtitleNone(), const [], const []), const SsSubtitleNone());
     });

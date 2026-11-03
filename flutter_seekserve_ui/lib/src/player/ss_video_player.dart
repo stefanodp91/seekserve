@@ -476,7 +476,12 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
       final tracks = await player.stream.tracks.firstWhere(ssTracksLoaded).timeout(_tracksTimeout);
       if (!mounted || !identical(player, _player)) return;
       final files = [for (final f in widget.torrentFiles) if (f.isSubtitle) f.index];
-      final restored = ssSubtitleToRestore(choice, ssSubtitleTrackInfos(tracks.subtitle), files);
+      final restored = ssSubtitleToRestore(
+        choice,
+        ssSubtitleTrackInfos(tracks.subtitle),
+        files,
+        pending: widget.pendingSubtitleFiles,
+      );
       if (restored != null) await _applySubtitle(restored);
     } on TimeoutException {
       // The file did not load in time: its default subtitle stays.
