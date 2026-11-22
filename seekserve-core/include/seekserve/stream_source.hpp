@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <optional>
@@ -33,6 +34,13 @@ public:
     virtual void cancel() = 0;
     // Valid once prepare() has succeeded.
     virtual std::int64_t file_size() const = 0;
+    // How many of the `len` bytes from `offset` a read would return now,
+    // in a row, without waiting for a download: what a passenger read gets
+    // (app WORK-47). A whole file on disk has all of them up to its end.
+    virtual std::int64_t ready_bytes(std::int64_t offset, std::int64_t len) const {
+        if (offset < 0 || len <= 0) return 0;
+        return std::max<std::int64_t>(0, std::min(len, file_size() - offset));
+    }
 
     // A source that has to read part of its file before it knows its size
     // and where each of its bytes comes from (a rebuilt file): waits at most

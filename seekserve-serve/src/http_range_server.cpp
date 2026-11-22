@@ -159,11 +159,16 @@ static std::string mime_type(const std::string& path) {
     return "application/octet-stream";
 }
 
-// Parse URL target: /stream/{torrentId}/{fileIndex}?token=XXX
+// A passenger reads only what is here and never leads the download
+// (role=listener, app WORK-47): a subtitle listener beside the player.
+static constexpr std::string_view kPassengerRole = "role=listener";
+
+// Parse URL target: /stream/{torrentId}/{fileIndex}?token=XXX[&role=listener]
 struct ParsedTarget {
     std::string torrent_id;
     int file_index;
     std::string token;
+    bool passenger = false;
 };
 
 static std::optional<ParsedTarget> parse_target(const std::string& target) {
@@ -195,6 +200,12 @@ static std::optional<ParsedTarget> parse_target(const std::string& target) {
         auto val_start = tpos + 6;
         auto amp = query.find('&', val_start);
         pt.token = query.substr(val_start, amp == std::string::npos ? amp : amp - val_start);
+    }
+    for (std::size_t from = 0; from <= query.size();) {
+        auto amp = query.find('&', from);
+        auto to = amp == std::string::npos ? query.size() : amp;
+        if (std::string_view(query).substr(from, to - from) == kPassengerRole) pt.passenger = true;
+        from = to + 1;
     }
 
     return pt;
@@ -623,6 +634,7 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
 
     // Streaming body write: sends headers via Beast, then body chunks via Asio.
     // This ensures VLC gets data immediately instead of waiting for full buffering.
+    // A `reader` of 0 is a passenger: it neither owns nor moves the position.
     auto stream_body = [&](http::status status, const std::string& ct,
                            std::int64_t cl, const std::string& cr,
                            std::shared_ptr<StreamSource>& src,
@@ -635,8 +647,9 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
             std::uint64_t reader;
             ~ReaderGuard() { server.release_reader(key, reader); }
         } reader_guard{*this, key, reader};
-        reading.emplace(key, reader);
-        {
+        const bool leads = reader != 0;
+        if (leads) {
+            reading.emplace(key, reader);
             std::lock_guard lock(connections_->mu);
             connections_->readers[socket.native_handle()] = ReaderTag{key, reader};
         }
@@ -676,8 +689,10 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
             auto current_piece = src->piece_at(offset);
             if (current_piece >= 0 && current_piece != piece) {
                 piece = current_piece;
-                report_if_owner(key, reader, in_file(*src, ByteRange{offset, last_offset}),
-                                torrent_id, file_index);
+                if (leads) {
+                    report_if_owner(key, reader, in_file(*src, ByteRange{offset, last_offset}),
+                                    torrent_id, file_index);
+                }
             }
 
             // The headers promised the whole range, and a body that ends
@@ -701,7 +716,7 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
                 }
                 // The scheduler may have been moved by another request since
                 // (a HEAD, a finished reader): the waiting owner re-anchors it.
-                if (++slices % kReportEverySlices == 0) {
+                if (leads && ++slices % kReportEverySlices == 0) {
                     report_if_owner(key, reader, in_file(*src, ByteRange{offset, last_offset}),
                                     torrent_id, file_index);
                 }
@@ -788,13 +803,26 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
             : mime_type(it->second.file_path);
     }
 
+    // A passenger asked for bytes that are not here yet: it asks again later.
+    auto send_not_yet = [&]() {
+        http::response<http::empty_body> res{http::status::service_unavailable, req.version()};
+        send_head(res, 0);
+    };
+
     // A rebuilt file knows its size only once it has read its head and its
     // Cues (app WORK-37 step 7): wait for it as for a piece, for as long as
-    // the client stays, telling the scheduler which bytes it waits for.
+    // the client stays, telling the scheduler which bytes it waits for. A
+    // passenger does not wait.
     std::optional<Clock::time_point> preparing_since;
     for (int slices = 0;; ++slices) {
-        auto prepared = source->prepare(kWaitSlice);
+        auto prepared = source->prepare(parsed->passenger ? std::chrono::milliseconds{0}
+                                                          : kWaitSlice);
         if (prepared) break;
+        if (parsed->passenger &&
+            prepared.error() == make_error_code(errc::timeout_waiting_for_piece)) {
+            send_not_yet();
+            return;
+        }
         if (prepared.error() != make_error_code(errc::timeout_waiting_for_piece)) {
             spdlog::error("HttpRangeServer: cannot prepare the stream: {}", prepared.error().message());
             send_error(http::status::internal_server_error, "Stream not ready");
@@ -821,6 +849,35 @@ void HttpRangeServer::handle_connection(tcp::socket& socket) {
 
     // Check for Range header
     auto range_it = req.find(http::field::range);
+    // A passenger's GET gets the bytes already here from where it asks, in
+    // a row, or at once a 503 to ask again later; it never waits for a
+    // download nor tells the scheduler anything.
+    if (parsed->passenger && req.method() == http::verb::get) {
+        auto asked = parse_range_header(
+            range_it == req.end() ? std::string("bytes=0-") : std::string(range_it->value()),
+            file_size);
+        if (!asked) {
+            http::response<http::string_body> res{http::status::range_not_satisfiable,
+                                                  req.version()};
+            res.set(http::field::content_type, "text/plain");
+            res.set(http::field::content_range, "bytes */" + std::to_string(file_size));
+            res.body() = "Range Not Satisfiable";
+            send_small_response(res);
+            return;
+        }
+        auto ready = source->ready_bytes(asked->start, asked->end - asked->start + 1);
+        if (ready <= 0) {
+            send_not_yet();
+            return;
+        }
+        auto last = asked->start + ready - 1;
+        stream_body(http::status::partial_content, content_type, ready,
+                    "bytes " + std::to_string(asked->start) + "-" + std::to_string(last) + "/" +
+                        std::to_string(file_size),
+                    source, asked->start, ready, key, parsed->torrent_id, parsed->file_index,
+                    /*reader=*/0);
+        return;
+    }
 
     // Only a GET reads the file, so only a GET moves the scheduler, and it
     // becomes the stream's newest reader before its first report.

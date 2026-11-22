@@ -37,6 +37,7 @@ public:
     // Cancels `inner` too: the source it wraps is the share's.
     void cancel() override;
     std::int64_t file_size() const override;
+    std::int64_t ready_bytes(std::int64_t offset, std::int64_t len) const override;
     Result<void> prepare(std::chrono::milliseconds wait) override;
     std::optional<ByteRange> preparing_range() const override;
     std::int64_t file_offset(std::int64_t offset) const override;

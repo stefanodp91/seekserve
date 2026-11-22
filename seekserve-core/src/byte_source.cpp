@@ -193,6 +193,15 @@ bool ByteSource::is_available(std::int64_t offset, std::int64_t len) const {
     return avail_.is_span_complete(span);
 }
 
+std::int64_t ByteSource::ready_bytes(std::int64_t offset, std::int64_t len) const {
+    std::lock_guard lock(mu_);
+    if (cancelled_.load(std::memory_order_acquire)) return 0;
+    len = std::min(len, mapper_.file_size() - offset);
+    if (offset < 0 || len <= 0) return 0;
+    auto span = mapper_.map(ByteRange{offset, offset + len - 1});
+    return std::min(len, avail_.contiguous_bytes_from(span.first, span.first_offset));
+}
+
 PieceIndex ByteSource::piece_at(std::int64_t offset) const {
     std::lock_guard lock(mu_);
     if (cancelled_.load(std::memory_order_acquire)) return -1;

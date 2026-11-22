@@ -41,6 +41,12 @@ public:
         }
         return Bytes(data_.begin() + offset, data_.begin() + end);
     }
+    std::int64_t ready_bytes(std::int64_t offset, std::int64_t len) const override {
+        auto end = std::min<std::int64_t>(offset + len, static_cast<std::int64_t>(data_.size()));
+        auto at = offset;
+        while (at < end && !missing_.count(at / kPiece)) at = std::min(end, (at / kPiece + 1) * kPiece);
+        return std::max<std::int64_t>(0, at - offset);
+    }
     PieceIndex piece_at(std::int64_t offset) const override { return static_cast<PieceIndex>(offset / kPiece); }
     std::int64_t bytes_to_piece_end(std::int64_t offset) const override { return kPiece - offset % kPiece; }
     void cancel() override { cancelled = true; }
@@ -127,6 +133,31 @@ TEST(MkvSubtitleSource, AMissingPieceInTheMiddleSendsWhatIsThereFirst) {
     EXPECT_GE(got.size(), static_cast<std::size_t>(2 * kPiece)) << "what is there goes out";
     EXPECT_LT(got.size(), static_cast<std::size_t>(4 * kPiece));
     EXPECT_TRUE(std::equal(got.begin(), got.end(), whole.begin()));
+}
+
+// A passenger read (app WORK-47) gets the rebuilt bytes up to the first
+// piece of the original file that is still missing.
+TEST(MkvSubtitleSource, ItSaysHowManyBytesAreReadyInARow) {
+    auto file = fixture();
+    auto inner = std::make_shared<PieceSource>(file);
+    MkvSubtitleSource source(inner, some_lines());
+    ASSERT_TRUE(source.prepare(0ms));
+    auto whole = expected(file, *some_lines());
+    auto size = static_cast<std::int64_t>(whole.size());
+
+    inner->lose(3 * kPiece, 3 * kPiece);
+    auto ready = source.ready_bytes(0, size);
+    EXPECT_GE(ready, 2 * kPiece);
+    EXPECT_LT(ready, 4 * kPiece);
+    auto got = source.read(0, ready, 0ms);
+    ASSERT_TRUE(got) << "the bytes it says are ready read without waiting";
+    EXPECT_TRUE(std::equal(got.value().begin(), got.value().end(), whole.begin()));
+    EXPECT_FALSE(source.read(0, ready + 1, 0ms) && source.read(ready, 1, 0ms))
+        << "the byte after them is not";
+
+    inner->arrive();
+    EXPECT_EQ(source.ready_bytes(0, size), size);
+    EXPECT_EQ(source.ready_bytes(size, 10), 0);
 }
 
 TEST(MkvSubtitleSource, NewBytesCountAsTheOriginalByteAfterThemForTheScheduler) {

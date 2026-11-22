@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added — A passenger read that never leads the download
+
+#### `seekserve-core`, `seekserve-serve`
+
+- **`role=listener`** (app WORK-47, DEC-925): a GET of a stream with `&role=listener` gets only the bytes already here
+  from where it asks (`206`, cut short where the first missing piece starts), or a `503` at once when the first byte is
+  missing; it never waits for a download, never owns the stream's position and never reports to the scheduler, so a
+  subtitle listener minutes ahead of the player does not pull the download away from it. `StreamSource::ready_bytes`
+  says how many bytes in a row a read would return now (`ByteSource` from the pieces it has, `MkvSubtitleSource` through
+  the file it rebuilds, a whole file up to its end). Tests: `HttpRangeServerPassengerTest` (5),
+  `MkvSubtitleSource.ItSaysHowManyBytesAreReadyInARow`.
+
 ### Changed — The closes with no answer say why
 
 #### `seekserve-serve`

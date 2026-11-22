@@ -122,6 +122,26 @@ Result<std::vector<std::uint8_t>> MkvSubtitleSource::read(std::int64_t offset, s
     return out;
 }
 
+std::int64_t MkvSubtitleSource::ready_bytes(std::int64_t offset, std::int64_t len) const {
+    if (cancelled_.load()) return 0;
+    const auto* l = layout();
+    if (!l || offset < 0 || len <= 0) return 0;
+    const auto end = std::min(offset + len, l->size());
+    std::int64_t ready = 0;
+    for (auto at = offset; at < end;) {
+        auto p = l->piece_at(at);
+        if (!p) break;
+        auto from = at - p->at;
+        auto n = std::min(p->length - from, end - at);
+        // New bytes are in memory; the others are the inner file's.
+        auto got = p->file_offset < 0 ? n : inner_->ready_bytes(p->file_offset + from, n);
+        ready += got;
+        if (got < n) break;
+        at += n;
+    }
+    return ready;
+}
+
 std::int64_t MkvSubtitleSource::file_offset(std::int64_t offset) const {
     const auto* l = layout();
     if (!l) return offset;

@@ -46,6 +46,7 @@ public:
     Result<std::vector<std::uint8_t>> read(std::int64_t offset, std::int64_t len,
                                            std::chrono::milliseconds wait) override;
     bool is_available(std::int64_t offset, std::int64_t len) const;
+    std::int64_t ready_bytes(std::int64_t offset, std::int64_t len) const override;
     // Piece holding the byte at `offset`, or -1 once cancelled.
     PieceIndex piece_at(std::int64_t offset) const override;
     // Bytes from `offset` to the end of its piece, or -1 once cancelled.

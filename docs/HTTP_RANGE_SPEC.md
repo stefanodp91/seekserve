@@ -87,6 +87,23 @@ Content-Length and Content-Range are relative to the **selected file**, not the 
     pieces (default 0 = no limit). A TV leaves its old connection open without reading it
     when it seeks.
 
+## Passenger Reads
+
+`GET /stream/{torrentId}/{fileIndex}?token={authToken}&role=listener` is a passenger read
+(app WORK-47): something beside the player, like a subtitle listener, reads the stream
+and must never take the download away from it.
+
+- It never owns the stream's position and never tells the scheduler anything: the
+  download keeps following the player, however far ahead the passenger reads.
+- `206` with only the bytes already here, in a row, from the start asked for:
+  `Content-Range: bytes a-c/<size>` where `c` is at most the end asked for; the client
+  asks again for the rest.
+- `503 Service Unavailable` at once, with no body, when the byte asked for first is not
+  here yet (or a rebuilt file is not ready): the client asks again later.
+- `416` as for the player; the token is checked as for the player (`403` without it).
+- Without a `Range` header it reads from the start; `HEAD` answers as for the player.
+- It takes a connection as any other request (Connection Limits).
+
 ## Connection Limits
 
 - Max concurrent connections: `ServerConfig::max_concurrent_streams` (default: 4)
