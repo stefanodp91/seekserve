@@ -20,6 +20,18 @@ class SsExtraSubtitle {
   final bool enabled;
 }
 
+/// What the video waits for while the host holds it (app WORK-47): a
+/// [message], the [progress] from 0 to 1 (null: not measured) and the time
+/// [remaining], once the host can tell.
+@immutable
+class SsHold {
+  const SsHold({required this.message, this.progress, this.remaining});
+
+  final String message;
+  final double? progress;
+  final Duration? remaining;
+}
+
 /// A subtitle track the player knows: its player id, language and title.
 class SsSubtitleTrackInfo {
   const SsSubtitleTrackInfo({required this.id, this.language, this.title});
@@ -36,6 +48,15 @@ abstract interface class SsSubtitleHost {
 
   /// The subtitle tracks inside the video.
   List<SsSubtitleTrackInfo> get embeddedTracks;
+
+  /// Whether the video is playing now.
+  bool get playing;
+
+  /// Stops the video with [hold]'s message and bar until the host says
+  /// otherwise; a new hold only updates them. Null ends it, and the video
+  /// goes on only if it was playing when the hold began. A ▶ of the user
+  /// during a hold ends it too (app DEC-945).
+  void hold(SsHold? hold);
 
   /// Draws [text] over the video (`<i>…</i>` in italics, `\n` between rows);
   /// null removes it.
@@ -55,6 +76,10 @@ abstract interface class SsSubtitleHost {
 /// What the host controller needs from a player.
 abstract interface class SsSubtitlePort {
   Stream<Duration> get position;
+  bool get playing;
+  Stream<bool> get playingChanges;
+  Future<void> play();
+  Future<void> pause();
   Stream<List<String>> get subtitleLines;
   List<SsSubtitleTrackInfo> get tracks;
   Future<void> selectTrack(String id);
@@ -64,13 +89,52 @@ abstract interface class SsSubtitlePort {
 
 /// The [SsSubtitleHost] the player gives its host, over an [SsSubtitlePort].
 class SsSubtitleHostController implements SsSubtitleHost {
-  SsSubtitleHostController(this._port);
+  SsSubtitleHostController(this._port) {
+    _playing = _port.playingChanges.listen(_onPlaying);
+  }
 
   final SsSubtitlePort _port;
 
   /// The line drawn over the video.
   final ValueNotifier<String?> line = ValueNotifier(null);
+
+  /// The hold on screen, null when the video is not held.
+  final ValueNotifier<SsHold?> held = ValueNotifier(null);
+
+  /// Told when the user lets the video go during a hold.
+  VoidCallback? onHoldOverridden;
+
   StreamSubscription<List<String>>? _listening;
+  late final StreamSubscription<bool> _playing;
+  bool _resumeAfterHold = false;
+
+  @override
+  bool get playing => _port.playing;
+
+  @override
+  void hold(SsHold? hold) {
+    if (hold == null) return _release(resume: true);
+    if (held.value == null) {
+      _resumeAfterHold = _port.playing;
+      if (_resumeAfterHold) unawaited(_port.pause());
+    }
+    held.value = hold;
+  }
+
+  // The video started during a hold: the user's ▶, never the hold's own pause.
+  void _onPlaying(bool playing) {
+    if (!playing || held.value == null) return;
+    held.value = null;
+    _resumeAfterHold = false;
+    onHoldOverridden?.call();
+  }
+
+  void _release({required bool resume}) {
+    if (held.value == null) return;
+    held.value = null;
+    if (resume && _resumeAfterHold) unawaited(_port.play());
+    _resumeAfterHold = false;
+  }
 
   @override
   Stream<Duration> get position => _port.position;
@@ -100,9 +164,10 @@ class SsSubtitleHostController implements SsSubtitleHost {
     await _port.selectTrack(trackId);
   }
 
-  /// Removes the drawn line and stops passing track lines.
+  /// Removes the drawn line, ends a hold and stops passing track lines.
   void clear() {
     line.value = null;
+    _release(resume: true);
     unawaited(_stopListening());
   }
 
@@ -113,8 +178,12 @@ class SsSubtitleHostController implements SsSubtitleHost {
   }
 
   void dispose() {
-    clear();
+    _release(resume: false);
+    line.value = null;
+    unawaited(_stopListening());
+    unawaited(_playing.cancel());
     line.dispose();
+    held.dispose();
   }
 }
 

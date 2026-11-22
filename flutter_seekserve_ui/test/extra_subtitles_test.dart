@@ -15,6 +15,18 @@ class _FakePort implements SsSubtitlePort {
   Stream<Duration> get position => positions.stream;
 
   @override
+  bool get playing => false;
+
+  @override
+  Stream<bool> get playingChanges => const Stream.empty();
+
+  @override
+  Future<void> play() async {}
+
+  @override
+  Future<void> pause() async {}
+
+  @override
   Stream<List<String>> get subtitleLines => lines.stream;
 
   @override

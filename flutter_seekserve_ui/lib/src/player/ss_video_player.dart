@@ -11,6 +11,7 @@ import '../atoms/ss_slider.dart';
 import '../theme/ss_theme.dart';
 import '../utils/format.dart';
 import 'ss_extra_subtitles.dart';
+import 'ss_hold_overlay.dart';
 import 'ss_buffering_overlay.dart';
 import 'ss_player_diagnostics.dart';
 import 'ss_player_recovery.dart';
@@ -119,6 +120,10 @@ class SsVideoPlayer extends StatefulWidget {
   /// Called when another subtitle, or none, replaces a host choice.
   final VoidCallback? onExtraSubtitleCleared;
 
+  /// Called when the user lets the video go during a hold of the host
+  /// ([SsSubtitleHost.hold]; app DEC-945).
+  final VoidCallback? onHoldOverridden;
+
   /// The subtitle tracks inside the video, when the player knows them.
   final void Function(List<SsSubtitleTrackInfo> tracks)? onSubtitleTracks;
 
@@ -168,6 +173,7 @@ class SsVideoPlayer extends StatefulWidget {
     this.selectedExtraSubtitleId,
     this.onExtraSubtitleSelected,
     this.onExtraSubtitleCleared,
+    this.onHoldOverridden,
     this.onSubtitleTracks,
     this.onSubtitleChosen,
     this.initialSubtitle,
@@ -293,7 +299,8 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
     _watch = diagnostics == null
         ? null
         : SsPlayerWatch(diagnostics, _player!, _videoController!);
-    _subtitleHost = SsSubtitleHostController(_PlayerSubtitlePort(_player!));
+    _subtitleHost = SsSubtitleHostController(_PlayerSubtitlePort(_player!))
+      ..onHoldOverridden = () => widget.onHoldOverridden?.call();
     _tracks = _player!.stream.tracks.listen(
       (tracks) => widget.onSubtitleTracks?.call(ssSubtitleTrackInfos(tracks.subtitle)),
     );
@@ -895,6 +902,9 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
         // The host's subtitle line, under the controls.
         if (widget.subtitleHost != null)
           IgnorePointer(child: SsSubtitleLine(text: widget.subtitleHost!.line)),
+        // The host's hold: the message and the bar while the video waits.
+        if (widget.subtitleHost != null)
+          SsHoldOverlay(hold: widget.subtitleHost!.held, strings: widget.strings),
         // Controls overlay (shown/hidden with fade)
         IgnorePointer(
           ignoring: !_visible,
@@ -1197,6 +1207,18 @@ class _PlayerSubtitlePort implements SsSubtitlePort {
 
   @override
   Stream<Duration> get position => _player.stream.position;
+
+  @override
+  bool get playing => _player.state.playing;
+
+  @override
+  Stream<bool> get playingChanges => _player.stream.playing;
+
+  @override
+  Future<void> play() => _player.play();
+
+  @override
+  Future<void> pause() => _player.pause();
 
   @override
   Stream<List<String>> get subtitleLines => _player.stream.subtitle;

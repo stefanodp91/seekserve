@@ -18,6 +18,7 @@ class SsStrings {
         'Video rendering not available on iOS Simulator.\n'
         'Audio and seek work — test on a real device.',
     this.serverErrorBuilder,
+    this.holdRemainingBuilder,
     this.cannotReachBuilder,
     this.playerErrorBuilder,
     this.trackBuilder,
@@ -49,6 +50,12 @@ class SsStrings {
   final String noVideoFrames;
 
   final String Function(int statusCode)? serverErrorBuilder;
+
+  /// The time left of a hold of the host, in the user's language.
+  final String Function(Duration remaining)? holdRemainingBuilder;
+
+  String holdRemaining(Duration remaining) =>
+      holdRemainingBuilder?.call(remaining) ?? 'About ${remaining.inSeconds} seconds';
   final String Function(Object error)? cannotReachBuilder;
   final String Function(String message)? playerErrorBuilder;
   final String Function(String id)? trackBuilder;
