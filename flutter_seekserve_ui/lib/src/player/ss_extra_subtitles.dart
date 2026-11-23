@@ -202,9 +202,10 @@ bool ssHasSubtitleChoices(
 }) =>
     tracks.any((t) => t.id != 'auto' && t.id != 'no') || hasExternalFiles || extras.isNotEmpty;
 
-/// The subtitle menu: off, the tracks inside the video, the files of the
-/// torrent, then the host's choices (ids `off`, `embedded:<id>`,
-/// `external:<index>`, `extra:<id>`). A file of the torrent not on the
+/// The subtitle menu: off, the host's choices, then the tracks inside the
+/// video and the files of the torrent (ids `off`, `extra:<id>`,
+/// `embedded:<id>`, `external:<index>`); the host's come first, or a
+/// Blu-ray's forty tracks hid them (app DEC-968). A file of the torrent not on the
 /// phone yet ([pending]) shows dimmed with [SsStrings.subtitlePending]: it
 /// opens nothing until it arrives (app BUG-278).
 List<SsTrackOption> ssSubtitleMenuOptions({
@@ -216,13 +217,13 @@ List<SsTrackOption> ssSubtitleMenuOptions({
 }) =>
     [
       SsTrackOption(id: 'off', label: strings.subtitlesOff),
+      for (final e in extras) SsTrackOption(id: 'extra:${e.id}', label: e.label, subtitle: e.note, enabled: e.enabled),
       for (final t in embedded)
         SsTrackOption(id: 'embedded:${t.id}', label: t.title ?? t.language ?? strings.track(t.id), subtitle: t.language),
       for (final f in externalFiles)
         pending.contains(f.index)
             ? SsTrackOption(id: 'external:${f.index}', label: f.name, subtitle: strings.subtitlePending, enabled: false)
             : SsTrackOption(id: 'external:${f.index}', label: f.name),
-      for (final e in extras) SsTrackOption(id: 'extra:${e.id}', label: e.label, subtitle: e.note, enabled: e.enabled),
     ];
 
 /// The host's line over the video, styled like the player's own subtitles.

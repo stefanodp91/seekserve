@@ -44,7 +44,8 @@ class _FakePort implements SsSubtitlePort {
 
 void main() {
   group('menu', () {
-    test('puts the host choices after the tracks and the files, with their note', () {
+    test('puts the host choices right after off, before the tracks and the files, with their note '
+        '(app DEC-968: a Blu-ray lists forty tracks)', () {
       final options = ssSubtitleMenuOptions(
         strings: const SsStrings(),
         embedded: const [SsSubtitleTrackInfo(id: '2', language: 'eng', title: 'English')],
@@ -54,11 +55,11 @@ void main() {
           SsExtraSubtitle(id: 'later', label: 'Spenta', enabled: false),
         ],
       );
-      expect(options.map((o) => o.id), ['off', 'embedded:2', 'external:4', 'extra:it-translated', 'extra:later']);
-      expect(options[3].label, 'Italiano (tradotto)');
-      expect(options[3].subtitle, 'Preparo la traduzione… 40%');
-      expect(options[3].enabled, isTrue);
-      expect(options[4].enabled, isFalse);
+      expect(options.map((o) => o.id), ['off', 'extra:it-translated', 'extra:later', 'embedded:2', 'external:4']);
+      expect(options[1].label, 'Italiano (tradotto)');
+      expect(options[1].subtitle, 'Preparo la traduzione… 40%');
+      expect(options[1].enabled, isTrue);
+      expect(options[2].enabled, isFalse);
     });
 
     test('a subtitle file not on the phone yet shows dimmed, saying so '
