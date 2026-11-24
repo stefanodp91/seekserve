@@ -22,14 +22,17 @@ class SsExtraSubtitle {
 
 /// What the video waits for while the host holds it (app WORK-47): a
 /// [message], the [progress] from 0 to 1 (null: not measured) and the time
-/// [remaining], once the host can tell.
+/// [remaining], once the host can tell. Not [visible]: the video stays held
+/// and the player draws nothing, while the host shows its own card in its
+/// place (app BUG-336).
 @immutable
 class SsHold {
-  const SsHold({required this.message, this.progress, this.remaining});
+  const SsHold({required this.message, this.progress, this.remaining, this.visible = true});
 
   final String message;
   final double? progress;
   final Duration? remaining;
+  final bool visible;
 }
 
 /// A subtitle track the player knows: its player id, language and title.

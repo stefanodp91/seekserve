@@ -5,8 +5,9 @@ import 'ss_extra_subtitles.dart';
 import 'ss_strings.dart';
 
 /// The host's hold over the video (app WORK-47): the message, the bar and,
-/// once known, the time left; nothing without a hold. It never takes a tap:
-/// the player's ▶ stays reachable (app DEC-945).
+/// once known, the time left; nothing without a hold, or with a hold that is
+/// not visible (app BUG-336). It never takes a tap: the player's ▶ stays
+/// reachable (app DEC-945).
 class SsHoldOverlay extends StatelessWidget {
   const SsHoldOverlay({super.key, required this.hold, required this.strings});
 
@@ -20,7 +21,7 @@ class SsHoldOverlay extends StatelessWidget {
   Widget build(BuildContext context) => ValueListenableBuilder<SsHold?>(
         valueListenable: hold,
         builder: (context, value, _) {
-          if (value == null) return const SizedBox.shrink();
+          if (value == null || !value.visible) return const SizedBox.shrink();
           final remaining = value.remaining;
           return IgnorePointer(
             child: Center(

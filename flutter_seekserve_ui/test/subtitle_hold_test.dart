@@ -142,4 +142,33 @@ void main() {
     await tester.pump();
     expect(find.byType(LinearProgressIndicator), findsNothing);
   });
+
+  testWidgets('a hidden hold keeps the video held and draws nothing (app BUG-336)', (tester) async {
+    final held = ValueNotifier<SsHold?>(const SsHold(message: 'Carico… 26 persone collegate', visible: false));
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: SsHoldOverlay(hold: held, strings: SsStrings())),
+    ));
+    expect(find.text('Carico… 26 persone collegate'), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+
+    held.value = const SsHold(message: 'Carico… 26 persone collegate');
+    await tester.pump();
+    expect(find.text('Carico… 26 persone collegate'), findsOneWidget);
+  });
+
+  test('a hidden hold still holds the video (app BUG-336)', () async {
+    final port = _PlayingPort();
+    final host = SsSubtitleHostController(port);
+    host.hold(const SsHold(message: 'm', visible: false));
+    await pumpEventQueue();
+    expect(port.pauses, 1);
+    host.hold(const SsHold(message: 'm'));
+    await pumpEventQueue();
+    expect(port.pauses, 1, reason: 'shown again, still the same hold');
+    expect(port.plays, 0);
+  });
+
+  test('a hold is visible unless the host says otherwise', () {
+    expect(const SsHold(message: 'm').visible, isTrue);
+  });
 }
