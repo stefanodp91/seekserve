@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <libtorrent/add_torrent_params.hpp>
@@ -83,6 +84,7 @@ protected:
         config.session.proxy.hostname = "127.0.0.1";
         config.session.proxy.port = proxy_port;
         config.session.share_when_finished = share_when_finished;
+        config.session.peer_share_interval = std::chrono::seconds(1);
         config.cache.db_path = (dir_ / "cache.db").string();
         return config;
     }
@@ -176,6 +178,48 @@ TEST_F(UploadTap, WithSharingWhenFinishedTheTapStaysOpen) {
 
     std::this_thread::sleep_for(std::chrono::seconds(3));
     EXPECT_EQ(status(engine, id)["upload_tap_closed"], false);
+}
+
+// What each kind of peer gave and got adds up to the torrent's own counts
+// (app BUG-792): the seeder's connection closes when the first file is whole
+// (close_redundant_connections) and opens again for the second, whose stream
+// replaces the first. Nothing a connection gave between two readings is lost,
+// and a new stream does not start the sum again.
+TEST_F(UploadTap, WhatEachKindOfPeerGaveAddsUpToTheTorrentsCounts) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    auto seeder = start_seeder();
+    SeekServeEngine engine(engine_config(proxy.port(), /*share_when_finished=*/false));
+    ASSERT_TRUE(engine.start_server());
+
+    auto added = engine.add_torrent(magnet(*seeder));
+    ASSERT_TRUE(added);
+    const std::string id = added.value();
+    ASSERT_TRUE(wait_for([&] { return static_cast<bool>(engine.select_file(id, 0)); }));
+    ASSERT_TRUE(wait_for([&] { return file_complete(engine, id, 0); }));
+    ASSERT_TRUE(engine.select_file(id, 1));
+    ASSERT_TRUE(wait_for([&] { return file_complete(engine, id, 1); }));
+
+    auto sums = [&] {
+        const auto s = status(engine, id);
+        std::int64_t received = 0;
+        std::int64_t sent = 0;
+        if (s.contains("peer_share")) {
+            for (const auto& [group, share] : s["peer_share"].items()) {
+                received += share["received"].get<std::int64_t>();
+                sent += share["sent"].get<std::int64_t>();
+            }
+        }
+        return std::tuple{received, sent, s["all_time_download"].get<std::int64_t>(),
+                          s["all_time_upload"].get<std::int64_t>()};
+    };
+    EXPECT_TRUE(wait_for(
+        [&] {
+            auto [received, sent, downloaded, uploaded] = sums();
+            return downloaded >= 2 * kFileSize && received == downloaded && sent == uploaded;
+        },
+        std::chrono::seconds(10)))
+        << engine.get_status_json(id);
 }
 
 }  // namespace

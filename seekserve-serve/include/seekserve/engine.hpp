@@ -184,10 +184,6 @@ private:
         int wait_kicks = 0;
         // Since when the piece a reader waits for got no block (DEC-661).
         WaitPieceWatch wait_watch;
-        // Who the stream's peers gave and got bytes of pieces from, by
-        // kind, read every peer_share_interval (app DEC-995, DEC-996).
-        PeerShareTally peer_share;
-        bool peer_share_read = false;
         FileIndex selected_file{-1};  // the reader's file
     };
 
@@ -207,9 +203,10 @@ private:
     // The first piece missing from the reader's position on, while a reader
     // of `state` waits for a download; -1 otherwise. Called with mu_ held.
     static PieceIndex awaited_piece(const TorrentState& state);
-    // Reads the stream's peers into its tally of who gave and got bytes of
-    // pieces (app DEC-995, DEC-996). Called with mu_ held; asks libtorrent.
-    static void read_peer_share(TorrentState& state, const lt::torrent_handle& handle);
+    // Gives the book of `id` (who gave and got bytes of pieces, app DEC-995,
+    // DEC-996, BUG-792) the pieces the torrent wants. Called without mu_: it
+    // asks libtorrent.
+    void give_wanted_pieces(const TorrentId& id);
     // Who has `piece` and where its blocks are (app BUG-238, BUG-228,
     // DEC-661); nothing when the torrent went. Called without mu_: it asks
     // libtorrent.

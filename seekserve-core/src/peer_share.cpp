@@ -1,6 +1,7 @@
 #include "seekserve/peer_share.hpp"
 
 #include <algorithm>
+#include <utility>
 
 namespace seekserve {
 
@@ -15,30 +16,53 @@ PeerGroup peer_group(const lt::peer_info& peer, const std::vector<PieceIndex>& w
     return PeerGroup::idle;
 }
 
-void PeerShareTally::read(const std::vector<lt::peer_info>& peers, const std::vector<PieceIndex>& wanted) {
-    std::map<lt::tcp::endpoint, std::pair<std::int64_t, std::int64_t>> now;
-    for (auto& share : shares_) share.peers = 0;
-    for (const auto& peer : peers) {
-        const auto key = peer.remote_endpoint();
-        std::int64_t received = peer.total_download;
-        std::int64_t sent = peer.total_upload;
-        if (auto it = last_.find(key); it != last_.end()) {
-            // Lower than before: the peer connected again and its totals
-            // started from zero; all of them are new.
-            if (received >= it->second.first) received -= it->second.first;
-            if (sent >= it->second.second) sent -= it->second.second;
-        }
-        auto& share = shares_[static_cast<std::size_t>(peer_group(peer, wanted))];
-        ++share.peers;
-        share.received += received;
-        share.sent += sent;
-        now[key] = {peer.total_download, peer.total_upload};
-    }
-    last_ = std::move(now);
+void PeerShareBook::set_wanted(std::vector<PieceIndex> wanted) {
+    std::lock_guard lock(mu_);
+    wanted_ = std::move(wanted);
+    wanted_known_ = true;
 }
 
-const PeerGroupShare& PeerShareTally::share(PeerGroup group) const {
-    return shares_[static_cast<std::size_t>(group)];
+void PeerShareBook::read(ConnectionShare& conn, const lt::peer_info& peer) {
+    std::lock_guard lock(mu_);
+    if (conn.closed) return;
+    count(conn, peer);
+}
+
+void PeerShareBook::close(ConnectionShare& conn, const lt::peer_info* last) {
+    std::lock_guard lock(mu_);
+    if (conn.closed) return;
+    if (last) count(conn, *last);
+    if (conn.group) --shares_[static_cast<std::size_t>(*conn.group)].peers;
+    conn.group.reset();
+    conn.closed = true;
+}
+
+PeerShares PeerShareBook::shares() const {
+    std::lock_guard lock(mu_);
+    return shares_;
+}
+
+PeerGroup PeerShareBook::group_of(const lt::peer_info& peer) const {
+    if (wanted_known_) return peer_group(peer, wanted_);
+    if (peer.flags & lt::peer_info::seed) return PeerGroup::whole;
+    if (peer.flags & lt::peer_info::remote_interested) return PeerGroup::wanting;
+    return PeerGroup::idle;
+}
+
+// Called with mu_ held. A connection's totals only grow; one lower than
+// before would be libtorrent's, and adds nothing.
+void PeerShareBook::count(ConnectionShare& conn, const lt::peer_info& peer) {
+    const auto group = group_of(peer);
+    auto& share = shares_[static_cast<std::size_t>(group)];
+    share.received += std::max<std::int64_t>(0, peer.total_download - conn.received);
+    share.sent += std::max<std::int64_t>(0, peer.total_upload - conn.sent);
+    conn.received = std::max(conn.received, peer.total_download);
+    conn.sent = std::max(conn.sent, peer.total_upload);
+    if (conn.group != group) {
+        if (conn.group) --shares_[static_cast<std::size_t>(*conn.group)].peers;
+        ++share.peers;
+        conn.group = group;
+    }
 }
 
 }  // namespace seekserve

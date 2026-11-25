@@ -14,6 +14,7 @@
 #include "seekserve/types.hpp"
 #include "seekserve/error.hpp"
 #include "seekserve/config.hpp"
+#include "seekserve/peer_share_plugin.hpp"
 #include "seekserve/upload_tap.hpp"
 #include "seekserve/alert_dispatcher.hpp"
 
@@ -50,6 +51,10 @@ public:
     // hash with its metadata, app BUG-71).
     std::optional<TorrentId> id_of(const lt::torrent_handle& h) const;
     bool has_torrent(const TorrentId& id) const;
+    // What each kind of peer of `id` gave and got since it was added (app
+    // DEC-995, DEC-996, BUG-792); nothing with peer_share_interval 0, or for
+    // a torrent no longer in the session.
+    std::shared_ptr<PeerShareBook> peer_share(const TorrentId& id) const;
     std::vector<TorrentId> list_torrents() const;
 
     void set_proxy(const ProxyConfig& proxy);
@@ -72,6 +77,8 @@ private:
     // points to its entry, also after its removal (late alerts). Declared
     // before session_ so that it outlives the torrents.
     std::unordered_map<TorrentId, TorrentId> ids_;
+    // The torrents' books of who gave and got, kept by the session's plugin.
+    std::shared_ptr<PeerShareBooks> peer_shares_ = std::make_shared<PeerShareBooks>();
     std::unique_ptr<lt::session> session_;
     AlertDispatcher dispatcher_;
     std::unordered_map<TorrentId, lt::torrent_handle> handles_;

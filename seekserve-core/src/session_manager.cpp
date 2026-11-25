@@ -17,8 +17,13 @@ namespace seekserve {
 TorrentSessionManager::TorrentSessionManager(const SessionConfig& config)
     : config_(config)
 {
-    auto sp = make_settings(config);
-    session_ = std::make_unique<lt::session>(lt::session_params{sp});
+    lt::session_params params{make_settings(config)};
+    // Who gave and got bytes of pieces, counted by each connection (app
+    // DEC-995, DEC-996, BUG-792).
+    if (config_.peer_share_interval.count() > 0) {
+        params.extensions.push_back(make_peer_share_plugin(peer_shares_, config_.peer_share_interval));
+    }
+    session_ = std::make_unique<lt::session>(std::move(params));
     if (!config_.ca_cert_file.empty()) {
         load_tracker_cas(config_.ca_cert_file);
     }
@@ -290,6 +295,10 @@ Result<void> TorrentSessionManager::remove_torrent(const TorrentId& id, bool del
     handles_.erase(it);
     spdlog::info("TorrentSessionManager: removed torrent {}", id);
     return Result<void>{};
+}
+
+std::shared_ptr<PeerShareBook> TorrentSessionManager::peer_share(const TorrentId& id) const {
+    return peer_shares_->find(id);
 }
 
 lt::torrent_handle TorrentSessionManager::get_handle(const TorrentId& id) const {

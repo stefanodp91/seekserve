@@ -18,6 +18,6 @@ void put_stream_reads(nlohmann::json& status, const ByteSourceStats& stats);
 void put_wait_piece(nlohmann::json& status, const WaitPieceStats& stats);
 // What each kind of peer gave and got, bytes of pieces only (app DEC-995,
 // DEC-996): counts, never a peer.
-void put_peer_share(nlohmann::json& status, const PeerShareTally& tally);
+void put_peer_share(nlohmann::json& status, const PeerShares& shares);
 
 }  // namespace seekserve

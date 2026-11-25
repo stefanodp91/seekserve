@@ -34,9 +34,9 @@ void put_wait_piece(nlohmann::json& status, const WaitPieceStats& stats) {
     status["wait_piece_still_ms"] = stats.still_ms;
 }
 
-void put_peer_share(nlohmann::json& status, const PeerShareTally& tally) {
+void put_peer_share(nlohmann::json& status, const PeerShares& shares) {
     auto group = [&](PeerGroup g) {
-        const auto& share = tally.share(g);
+        const auto& share = shares[static_cast<std::size_t>(g)];
         return nlohmann::json{{"peers", share.peers}, {"received", share.received}, {"sent", share.sent}};
     };
     status["peer_share"] = {

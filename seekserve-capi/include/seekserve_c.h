@@ -37,10 +37,11 @@ typedef void (*ss_event_callback_t)(const char* event_json, void* user_data);
 //     of a pack starts at once (app BUG-198).
 //   "min_reconnect_time" (int, seconds, default 60): how long a peer that
 //     was let go waits before it is taken back.
-//   "peer_share_interval" (int, seconds, default 0 = never): how often the
-//     peers of each stream are read, for the bytes of pieces each kind of
-//     peer gave and got ("peer_share" in the status; app DEC-995). Read
-//     with the two keys above.
+//   "peer_share_interval" (int, seconds, default 0 = never): how often each
+//     connection of a torrent is read, besides when it closes, for the bytes
+//     of pieces each kind of peer gave and got since the torrent was added
+//     ("peer_share" in the status; app DEC-995, BUG-792). Read with the two
+//     keys above.
 //   "share_when_finished" (bool, default true): false closes the tap of a
 //     torrent with every wanted piece to a byte a second, opened again before
 //     it asks for pieces ("upload_tap_closed" in the status; app DEC-996).

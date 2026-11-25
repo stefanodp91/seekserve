@@ -49,68 +49,122 @@ TEST(PeerShareTest, TheGroupOfAPeer) {
     EXPECT_EQ(peer_group(unknown, kWanted), PeerGroup::idle);
 }
 
-TEST(PeerShareTest, TheFirstReadingCountsWhatEachPeerGaveSinceItConnected) {
-    PeerShareTally tally;
-    tally.read({peer(1, {}, lt::peer_info::seed, 1000, 0),
-                peer(2, {2}, lt::peer_info::remote_interested, 300, 700)},
-               kWanted);
+TEST(PeerShareTest, TheFirstReadingCountsWhatAConnectionGaveSinceItOpened) {
+    PeerShareBook book;
+    book.set_wanted(kWanted);
+    ConnectionShare seed;
+    ConnectionShare wanting;
+    book.read(seed, peer(1, {}, lt::peer_info::seed, 1000, 0));
+    book.read(wanting, peer(2, {2}, lt::peer_info::remote_interested, 300, 700));
 
-    EXPECT_EQ(tally.share(PeerGroup::whole).peers, 1);
-    EXPECT_EQ(tally.share(PeerGroup::whole).received, 1000);
-    EXPECT_EQ(tally.share(PeerGroup::wanting).received, 300);
-    EXPECT_EQ(tally.share(PeerGroup::wanting).sent, 700);
-    EXPECT_EQ(tally.share(PeerGroup::idle).peers, 0);
+    const auto shares = book.shares();
+    EXPECT_EQ(shares[static_cast<int>(PeerGroup::whole)].peers, 1);
+    EXPECT_EQ(shares[static_cast<int>(PeerGroup::whole)].received, 1000);
+    EXPECT_EQ(shares[static_cast<int>(PeerGroup::wanting)].received, 300);
+    EXPECT_EQ(shares[static_cast<int>(PeerGroup::wanting)].sent, 700);
+    EXPECT_EQ(shares[static_cast<int>(PeerGroup::idle)].peers, 0);
 }
 
 TEST(PeerShareTest, ALaterReadingCountsOnlyTheIncrements) {
-    PeerShareTally tally;
-    tally.read({peer(1, {}, lt::peer_info::seed, 1000, 0)}, kWanted);
-    tally.read({peer(1, {}, lt::peer_info::seed, 1500, 0)}, kWanted);
+    PeerShareBook book;
+    ConnectionShare conn;
+    book.read(conn, peer(1, {}, lt::peer_info::seed, 1000, 0));
+    book.read(conn, peer(1, {}, lt::peer_info::seed, 1500, 0));
 
-    EXPECT_EQ(tally.share(PeerGroup::whole).received, 1500);
+    EXPECT_EQ(book.shares()[static_cast<int>(PeerGroup::whole)].received, 1500);
+    EXPECT_EQ(book.shares()[static_cast<int>(PeerGroup::whole)].peers, 1);
 }
 
-TEST(PeerShareTest, APeerConnectedAgainCountsItsNewTotals) {
-    PeerShareTally tally;
-    tally.read({peer(1, {2}, {}, 1000, 500)}, kWanted);
-    tally.read({peer(1, {2}, {}, 200, 50)}, kWanted);
+// App BUG-792: through the SOCKS5 proxy with proxy_hostnames, libtorrent gives
+// every web seed the address 0.0.0.0 and the port of its URL, so two web seeds
+// on the same port share one remote address. Each connection counts once: the
+// one that grows is never taken for the other at a reading.
+TEST(PeerShareTest, TwoConnectionsWithTheSameRemoteAddressCountOnce) {
+    const lt::tcp::endpoint seeds(lt::address_v4{}, 443);
+    auto web_seed = [&](std::int64_t gave) {
+        lt::peer_info p = peer(0, {}, lt::peer_info::seed, gave, 0);
+        p.set_endpoints(lt::tcp::endpoint{}, seeds);
+        return p;
+    };
+    PeerShareBook book;
+    ConnectionShare giving;
+    ConnectionShare connecting;
+    // One web seed gives, the other is still connecting through the proxy.
+    for (std::int64_t gave : {1000, 1500, 2000}) {
+        book.read(giving, web_seed(gave));
+        book.read(connecting, web_seed(0));
+    }
 
-    EXPECT_EQ(tally.share(PeerGroup::idle).received, 1200);
-    EXPECT_EQ(tally.share(PeerGroup::idle).sent, 550);
+    EXPECT_EQ(book.shares()[static_cast<int>(PeerGroup::whole)].received, 2000);
+    EXPECT_EQ(book.shares()[static_cast<int>(PeerGroup::whole)].peers, 2);
 }
 
-TEST(PeerShareTest, APeerGoneIsForgottenButWhatItGaveStays) {
-    PeerShareTally tally;
-    tally.read({peer(1, {2}, {}, 1000, 0), peer(2, {}, lt::peer_info::seed, 400, 0)}, kWanted);
-    tally.read({peer(2, {}, lt::peer_info::seed, 600, 0)}, kWanted);
+// App BUG-792: what a connection gave after its last reading counts when it
+// closes; libtorrent closes the seeds when the torrent has what it wants.
+TEST(PeerShareTest, WhatAConnectionGaveBeforeClosingCounts) {
+    PeerShareBook book;
+    ConnectionShare conn;
+    book.read(conn, peer(1, {}, lt::peer_info::seed, 1000, 10));
+    const auto last = peer(1, {}, lt::peer_info::seed, 1600, 30);
+    book.close(conn, &last);
 
-    EXPECT_EQ(tally.remembered(), 1u);
-    EXPECT_EQ(tally.share(PeerGroup::idle).peers, 0);
-    EXPECT_EQ(tally.share(PeerGroup::idle).received, 1000);
-    EXPECT_EQ(tally.share(PeerGroup::whole).peers, 1);
-    EXPECT_EQ(tally.share(PeerGroup::whole).received, 600);
+    const auto whole = book.shares()[static_cast<int>(PeerGroup::whole)];
+    EXPECT_EQ(whole.received, 1600);
+    EXPECT_EQ(whole.sent, 30);
+    EXPECT_EQ(whole.peers, 0);
+}
+
+TEST(PeerShareTest, AConnectionClosedWithoutALastReadingKeepsWhatItGave) {
+    PeerShareBook book;
+    ConnectionShare conn;
+    book.read(conn, peer(1, {2}, {}, 1000, 0));
+    book.close(conn, nullptr);
+    // A reading after it closed adds nothing.
+    book.read(conn, peer(1, {2}, {}, 5000, 0));
+
+    EXPECT_EQ(book.shares()[static_cast<int>(PeerGroup::idle)].received, 1000);
+    EXPECT_EQ(book.shares()[static_cast<int>(PeerGroup::idle)].peers, 0);
 }
 
 TEST(PeerShareTest, BytesGoToThePeersGroupAtTheReading) {
-    PeerShareTally tally;
+    PeerShareBook book;
+    book.set_wanted(kWanted);
+    ConnectionShare conn;
     // Interested in pieces of ours at first, then whole: what came later
     // counts as from a peer with everything.
-    tally.read({peer(1, {2}, lt::peer_info::remote_interested, 100, 100)}, kWanted);
-    tally.read({peer(1, {2, 3, 4}, {}, 400, 100)}, kWanted);
+    book.read(conn, peer(1, {2}, lt::peer_info::remote_interested, 100, 100));
+    book.read(conn, peer(1, {2, 3, 4}, {}, 400, 100));
 
-    EXPECT_EQ(tally.share(PeerGroup::wanting).received, 100);
-    EXPECT_EQ(tally.share(PeerGroup::wanting).sent, 100);
-    EXPECT_EQ(tally.share(PeerGroup::whole).received, 300);
-    EXPECT_EQ(tally.share(PeerGroup::wanting).peers, 0);
+    const auto shares = book.shares();
+    EXPECT_EQ(shares[static_cast<int>(PeerGroup::wanting)].received, 100);
+    EXPECT_EQ(shares[static_cast<int>(PeerGroup::wanting)].sent, 100);
+    EXPECT_EQ(shares[static_cast<int>(PeerGroup::whole)].received, 300);
+    EXPECT_EQ(shares[static_cast<int>(PeerGroup::wanting)].peers, 0);
+    EXPECT_EQ(shares[static_cast<int>(PeerGroup::whole)].peers, 1);
+}
+
+// Before the engine says which pieces the torrent wants, only a seed is
+// whole: with no wanted piece every peer would have all of them.
+TEST(PeerShareTest, BeforeTheWantedPiecesOnlyASeedIsWhole) {
+    PeerShareBook book;
+    ConnectionShare seed;
+    ConnectionShare partial;
+    book.read(seed, peer(1, {}, lt::peer_info::seed, 100, 0));
+    book.read(partial, peer(2, {2, 3, 4}, {}, 50, 0));
+
+    EXPECT_EQ(book.shares()[static_cast<int>(PeerGroup::whole)].received, 100);
+    EXPECT_EQ(book.shares()[static_cast<int>(PeerGroup::idle)].received, 50);
 }
 
 TEST(PeerShareTest, TheStatusSaysEachGroupsCountsAndNoPeer) {
-    PeerShareTally tally;
-    tally.read({peer(1, {}, lt::peer_info::seed, 1000, 0),
-                peer(2, {2}, lt::peer_info::remote_interested, 300, 700)},
-               kWanted);
+    PeerShareBook book;
+    book.set_wanted(kWanted);
+    ConnectionShare seed;
+    ConnectionShare wanting;
+    book.read(seed, peer(1, {}, lt::peer_info::seed, 1000, 0));
+    book.read(wanting, peer(2, {2}, lt::peer_info::remote_interested, 300, 700));
     nlohmann::json status;
-    put_peer_share(status, tally);
+    put_peer_share(status, book.shares());
 
     ASSERT_TRUE(status.contains("peer_share"));
     const auto& share = status["peer_share"];

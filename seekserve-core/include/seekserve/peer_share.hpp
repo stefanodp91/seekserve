@@ -2,12 +2,11 @@
 
 #include <array>
 #include <cstdint>
-#include <map>
-#include <utility>
+#include <mutex>
+#include <optional>
 #include <vector>
 
 #include <libtorrent/peer_info.hpp>
-#include <libtorrent/socket.hpp>
 
 #include "seekserve/types.hpp"
 
@@ -29,30 +28,57 @@ inline constexpr int kPeerGroups = 3;
 PeerGroup peer_group(const lt::peer_info& peer, const std::vector<PieceIndex>& wanted);
 
 // What each group gave us and got from us: the pieces only, no protocol
-// chatter, and how many of its peers were connected at the last reading.
+// chatter, and how many of its peers are connected.
 struct PeerGroupShare {
     int peers = 0;
     std::int64_t received = 0;
     std::int64_t sent = 0;
 };
 
-// The bytes of pieces each group gave and got since the first reading,
-// counted by the increments of each peer's totals between readings: a peer's
-// totals start again from zero when it connects again. The peers' addresses
-// only tell one reading's peer from the next here; none goes out, nor is
-// kept once the peer is gone.
-class PeerShareTally {
+using PeerShares = std::array<PeerGroupShare, kPeerGroups>;
+
+// One connection as its book last read it: its totals then and its group.
+// Each connection has its own, so two peers are never taken for one, even
+// with the same address (app BUG-792: the web seeds behind the SOCKS5 proxy
+// all have 0.0.0.0 and the port of their URL).
+struct ConnectionShare {
+    std::int64_t received = 0;
+    std::int64_t sent = 0;
+    // Its group at the last reading; none before the first and once closed.
+    std::optional<PeerGroup> group;
+    bool closed = false;
+};
+
+// The bytes of pieces each group gave and got over the connections of one
+// torrent since it was added (app DEC-995, DEC-996, BUG-792). Each
+// connection reports its own increments, the last ones when it closes, so
+// the sum is what libtorrent counts for the torrent (all_time_download and
+// all_time_upload since the add). The bytes between two readings go to the
+// group of the second. Thread-safe: the connections report from libtorrent's
+// network thread, the engine asks from its own. No address is kept.
+class PeerShareBook {
 public:
-    void read(const std::vector<lt::peer_info>& peers, const std::vector<PieceIndex>& wanted);
+    // The pieces the torrent wants, from the engine. Until the first call a
+    // peer is whole only when libtorrent knows it for a seed.
+    void set_wanted(std::vector<PieceIndex> wanted);
 
-    const PeerGroupShare& share(PeerGroup group) const;
+    // A reading of `conn`, connected, from `peer`: what it gave and got since
+    // its last reading goes to its group now.
+    void read(ConnectionShare& conn, const lt::peer_info& peer);
+    // `conn` closed: with `last`, its last reading, what it gave and got
+    // since the one before still counts. Then it is no longer connected.
+    void close(ConnectionShare& conn, const lt::peer_info* last);
 
-    // How many peers the tally remembers: those of the last reading.
-    std::size_t remembered() const { return last_.size(); }
+    PeerShares shares() const;
 
 private:
-    std::map<lt::tcp::endpoint, std::pair<std::int64_t, std::int64_t>> last_;
-    std::array<PeerGroupShare, kPeerGroups> shares_{};
+    PeerGroup group_of(const lt::peer_info& peer) const;
+    void count(ConnectionShare& conn, const lt::peer_info& peer);
+
+    mutable std::mutex mu_;
+    std::vector<PieceIndex> wanted_;
+    bool wanted_known_ = false;
+    PeerShares shares_{};
 };
 
 }  // namespace seekserve

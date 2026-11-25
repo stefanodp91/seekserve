@@ -851,7 +851,6 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
             awaited = awaited_piece(*state);
         }
         if (state && state->pieces) put_piece_reads(status_json, state->pieces->stats());
-        if (state && state->peer_share_read) put_peer_share(status_json, state->peer_share);
         if (state && http_server_) {
             status_json["range_requests"] = http_server_->requests(id, state->selected_file);
         }
@@ -872,6 +871,10 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
         status_json["ends_ahead_left"] = left;
         status_json["ends_ahead_urgent"] = ahead->urgent;
     }
+
+    // What each kind of peer gave and got since the torrent was added (app
+    // DEC-995, DEC-996, BUG-792).
+    if (auto book = sessions_->peer_share(id)) put_peer_share(status_json, book->shares());
 
     status_json["alerts_dropped"] = alerts_dropped_.load();
     if (awaited >= 0) {
@@ -1360,15 +1363,12 @@ void SeekServeEngine::on_tick(const boost::system::error_code& ec) {
     // What each torrent shares, as its state asks (app DEC-995, DEC-996).
     taps_->tick(*sessions_);
 
-    // Who the peers of each stream gave and got bytes of pieces from, every
-    // peer_share_interval (app DEC-995, DEC-996).
+    // The pieces each torrent wants, for its book of who gave and got bytes
+    // of pieces, every peer_share_interval (app DEC-995, DEC-996, BUG-792).
     auto share_every = config_.session.peer_share_interval.count();
     if (share_every > 0 && ++ticks_since_peer_share_ >= share_every) {
         ticks_since_peer_share_ = 0;
-        std::lock_guard lock(mu_);
-        for (auto& [id, state] : states_) {
-            if (state->scheduler) read_peer_share(*state, sessions_->get_handle(id));
-        }
+        for (const auto& id : sessions_->list_torrents()) give_wanted_pieces(id);
     }
 
     tick_timer_->expires_after(std::chrono::seconds(1));
@@ -1377,21 +1377,20 @@ void SeekServeEngine::on_tick(const boost::system::error_code& ec) {
     });
 }
 
-void SeekServeEngine::read_peer_share(TorrentState& state, const lt::torrent_handle& handle) {
-    if (!handle.is_valid()) return;
+void SeekServeEngine::give_wanted_pieces(const TorrentId& id) {
+    auto book = sessions_->peer_share(id);
+    auto handle = sessions_->get_handle(id);
+    if (!book || !handle.is_valid()) return;
     // libtorrent throws on a handle whose torrent went in between.
     try {
-        std::vector<lt::peer_info> peers;
-        handle.get_peer_info(peers);
         const auto priorities = handle.get_piece_priorities();
         std::vector<PieceIndex> wanted;
         for (std::size_t p = 0; p < priorities.size(); ++p) {
             if (priorities[p] != lt::dont_download) wanted.push_back(static_cast<PieceIndex>(p));
         }
-        state.peer_share.read(peers, wanted);
-        state.peer_share_read = true;
+        book->set_wanted(std::move(wanted));
     } catch (const std::exception& e) {
-        spdlog::debug("Engine: no peer share: {}", e.what());
+        spdlog::debug("Engine: no wanted pieces for the peer share: {}", e.what());
     }
 }
 
