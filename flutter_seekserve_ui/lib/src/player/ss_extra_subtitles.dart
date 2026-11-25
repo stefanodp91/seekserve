@@ -190,6 +190,25 @@ class SsSubtitleHostController implements SsSubtitleHost {
   }
 }
 
+/// An audio track of the video: its player id, language and title, and
+/// whether the file marks it as the default one.
+class SsAudioTrackInfo {
+  const SsAudioTrackInfo({required this.id, this.language, this.title, this.isDefault = false});
+
+  final String id;
+  final String? language;
+  final String? title;
+  final bool isDefault;
+}
+
+/// The player's audio tracks as [SsAudioTrackInfo], without `auto` and `no`
+/// (app DEC-1007: the host learns the language it would hear).
+List<SsAudioTrackInfo> ssAudioTrackInfos(List<AudioTrack> tracks) => [
+      for (final t in tracks)
+        if (t.id != 'auto' && t.id != 'no')
+          SsAudioTrackInfo(id: t.id, language: t.language, title: t.title, isDefault: t.isDefault ?? false),
+    ];
+
 /// The player's tracks as [SsSubtitleTrackInfo], without `auto` and `no`.
 List<SsSubtitleTrackInfo> ssSubtitleTrackInfos(List<SubtitleTrack> tracks) => [
       for (final t in tracks)

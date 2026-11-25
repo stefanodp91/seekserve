@@ -127,6 +127,10 @@ class SsVideoPlayer extends StatefulWidget {
   /// The subtitle tracks inside the video, when the player knows them.
   final void Function(List<SsSubtitleTrackInfo> tracks)? onSubtitleTracks;
 
+  /// The audio tracks inside the video, once the file is loaded (app
+  /// DEC-1007).
+  final void Function(List<SsAudioTrackInfo> tracks)? onAudioTracks;
+
   /// Called with each subtitle chosen in the menu (app DEC-818).
   final void Function(SsSubtitleChoice choice)? onSubtitleChosen;
 
@@ -175,6 +179,7 @@ class SsVideoPlayer extends StatefulWidget {
     this.onExtraSubtitleCleared,
     this.onHoldOverridden,
     this.onSubtitleTracks,
+    this.onAudioTracks,
     this.onSubtitleChosen,
     this.initialSubtitle,
     this.diagnostics,
@@ -301,9 +306,10 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
         : SsPlayerWatch(diagnostics, _player!, _videoController!);
     _subtitleHost = SsSubtitleHostController(_PlayerSubtitlePort(_player!))
       ..onHoldOverridden = () => widget.onHoldOverridden?.call();
-    _tracks = _player!.stream.tracks.listen(
-      (tracks) => widget.onSubtitleTracks?.call(ssSubtitleTrackInfos(tracks.subtitle)),
-    );
+    _tracks = _player!.stream.tracks.listen((tracks) {
+      widget.onSubtitleTracks?.call(ssSubtitleTrackInfos(tracks.subtitle));
+      if (ssTracksLoaded(tracks)) widget.onAudioTracks?.call(ssAudioTrackInfos(tracks.audio));
+    });
     unawaited(_putBackSubtitle(_player!));
     final watch = _watch;
     _unstick = _unstickFor(url, _player!, _videoController!, watch);

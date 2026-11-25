@@ -91,6 +91,17 @@ void main() {
       expect(ssHasSubtitleChoices(const [], hasExternalFiles: false, extras: extra), isTrue);
     });
 
+    test('lists the audio tracks without auto and no, with the default one', () {
+      final infos = ssAudioTrackInfos([
+        AudioTrack.auto(),
+        AudioTrack.no(),
+        const AudioTrack('1', 'Español', 'spa', isDefault: true),
+        const AudioTrack('2', 'Inglés [V.O.]', 'eng'),
+      ]);
+      expect(infos.map((t) => (t.id, t.language, t.title, t.isDefault)),
+          [('1', 'spa', 'Español', true), ('2', 'eng', 'Inglés [V.O.]', false)]);
+    });
+
     test('lists the player tracks without auto and no', () {
       final infos = ssSubtitleTrackInfos([
         SubtitleTrack.auto(),
