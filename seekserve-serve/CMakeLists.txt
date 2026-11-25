@@ -5,6 +5,7 @@ add_library(seekserve-serve STATIC
     src/token_auth.cpp
     src/engine.cpp
     src/read_numbers.cpp
+    src/upload_tap_watch.cpp
 )
 
 target_include_directories(seekserve-serve

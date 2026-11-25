@@ -83,6 +83,33 @@ TEST(ResumeDataTest, ReadsBackWhatItWrote) {
     EXPECT_TRUE(out->peers.empty());
 }
 
+// The tap closed on a finished torrent (app DEC-996) is not written: a
+// restart that wanted the torrent again would find it still closed, and a
+// closed tap holds back the requests for pieces too.
+TEST(ResumeDataTest, HasNoShareLimits) {
+    auto in = params_with_peers();
+    in.upload_limit = 1;
+    in.max_uploads = 2;
+
+    auto out = decode(encode_resume_data(in));
+
+    // libtorrent writes both keys anyway, with its -1 for "none".
+    EXPECT_EQ(out.upload_limit, -1);
+    EXPECT_EQ(out.max_uploads, -1);
+}
+
+// Resume data written before, with a limit in it, comes back without.
+TEST(ResumeDataTest, ARestartDropsShareLimitsWrittenBefore) {
+    auto p = params_with_peers();
+    p.upload_limit = 1;
+    p.max_uploads = 2;
+
+    drop_share_limits(p);
+
+    EXPECT_EQ(p.upload_limit, -1);
+    EXPECT_EQ(p.max_uploads, -1);
+}
+
 // Whatever is in the database, the engine must start: bytes that are not
 // resume data are nothing, and the torrent is restored another way.
 TEST(ResumeDataTest, UnreadableBytesAreNothing) {

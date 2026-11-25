@@ -16,6 +16,8 @@ std::vector<char> encode_resume_data(lt::add_torrent_params params) {
     // libtorrent would write the peers it knows, to reconnect faster.
     params.peers.clear();
     params.banned_peers.clear();
+    // Nor the limits on what it shares: libtorrent writes its -1, "none".
+    drop_share_limits(params);
     return lt::write_resume_data_buf(params);
 }
 
@@ -46,6 +48,11 @@ void drop_reader_priorities(lt::add_torrent_params& params) {
         params.file_priorities[i] =
             is_subtitle_file(path) ? lt::default_priority : lt::dont_download;
     }
+}
+
+void drop_share_limits(lt::add_torrent_params& params) {
+    params.upload_limit = -1;
+    params.max_uploads = -1;
 }
 
 } // namespace seekserve

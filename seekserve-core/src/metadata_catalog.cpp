@@ -145,6 +145,7 @@ Result<void> MetadataCatalog::set_wanted_files(const TorrentId& id, FileIndex re
     }
     if (background == reader) background = -1;
 
+    if (before_wanting_) before_wanting_(id, handle);
     handle.prioritize_files(wanted_file_priorities(entry.files, reader, background));
     entry.wanted = WantedFiles{reader, background};
 

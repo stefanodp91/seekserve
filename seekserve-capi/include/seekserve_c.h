@@ -41,6 +41,13 @@ typedef void (*ss_event_callback_t)(const char* event_json, void* user_data);
 //     peers of each stream are read, for the bytes of pieces each kind of
 //     peer gave and got ("peer_share" in the status; app DEC-995). Read
 //     with the two keys above.
+//   "share_when_finished" (bool, default true): false closes the tap of a
+//     torrent with every wanted piece to a byte a second, opened again before
+//     it asks for pieces ("upload_tap_closed" in the status; app DEC-996).
+//   "tap_reopen_grace_ticks" (int, default 2): seconds a tap just opened
+//     stays open before a finished state can close it again.
+//   "reduced_upload_slots" (int, default 2): the peers served in the reduced
+//     gear of ss_set_upload_gear.
 // Both are read after every other key: a value of the wrong type cannot
 // cost the proxy or the resume settings.
 // config_json keys for the stream servers (all optional, in seconds; read
@@ -204,6 +211,16 @@ ss_error_t ss_stop_server(SeekServeEngine* engine);
 
 __attribute__((visibility("default")))
 ss_error_t ss_set_proxy(SeekServeEngine* engine, const char* proxy_json);
+
+// How much the engine shares while it downloads (app DEC-996): as libtorrent
+// would, to fewer peers, or to none, for a device that heats or slows down.
+// Our own requests for pieces never wait. Any other value is
+// SS_ERR_INVALID_ARG and changes nothing.
+#define SS_UPLOAD_GEAR_NORMAL  0
+#define SS_UPLOAD_GEAR_REDUCED 1
+#define SS_UPLOAD_GEAR_OFF     2
+__attribute__((visibility("default")))
+ss_error_t ss_set_upload_gear(SeekServeEngine* engine, int gear);
 
 /* Opens a share (app WORK-37): the file a player reads (selected with
  * ss_select_file or ss_set_wanted_files), served to one other device, a TV,

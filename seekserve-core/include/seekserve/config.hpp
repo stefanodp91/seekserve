@@ -40,6 +40,16 @@ struct SessionConfig {
     // many bytes of pieces (app DEC-995, DEC-996; PeerShareTally). 0 = never,
     // as before.
     std::chrono::seconds peer_share_interval{0};
+    // Whether a torrent with every wanted piece shares, as libtorrent would.
+    // Off = its tap closed to a byte a second, no new connection made only to
+    // give, and libtorrent's limits counting no IP overhead (app DEC-995,
+    // DEC-996; UploadTapWatch). On = as before.
+    bool share_when_finished = true;
+    // How many ticks a tap just opened stays open, while libtorrent takes in
+    // the new priorities, before a finished state can close it again.
+    int tap_reopen_grace_ticks = 2;
+    // How many peers get pieces from us in the reduced gear (UploadGear).
+    int reduced_upload_slots = 2;
     // Keeps each torrent's resume data (its metadata, the pieces it has, its
     // file priorities) in the cache database, without peer addresses, and
     // restores torrents from it: a restart then needs neither the metadata

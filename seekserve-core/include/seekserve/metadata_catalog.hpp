@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 #include <optional>
+#include <functional>
 #include <mutex>
 
 #include <libtorrent/torrent_info.hpp>
@@ -50,6 +51,13 @@ public:
     Result<void> set_wanted_files(const TorrentId& id, FileIndex reader,
                                   FileIndex background, lt::torrent_handle& handle);
 
+    // Called with the torrent's handle right before its file priorities
+    // change, whoever changes them: what holds back the requests for pieces
+    // goes first (app DEC-996). Set once, before any use; it must not call
+    // the catalog.
+    using BeforeWanting = std::function<void(const TorrentId&, lt::torrent_handle&)>;
+    void before_wanting(BeforeWanting hook) { before_wanting_ = std::move(hook); }
+
     // The reader's file, or the one that downloads when no player reads.
     std::optional<FileIndex> selected_file(const TorrentId& id) const;
     // The file a player reads and the one behind it, -1 where there is none.
@@ -65,6 +73,7 @@ private:
     };
 
     std::unordered_map<TorrentId, TorrentEntry> catalog_;
+    BeforeWanting before_wanting_;
     mutable std::mutex mu_;
 };
 

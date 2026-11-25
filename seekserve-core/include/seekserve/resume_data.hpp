@@ -21,4 +21,9 @@ std::optional<lt::add_torrent_params> decode_resume_data(const std::vector<char>
 /// the piece priorities its deadlines left. A file wanted alone stays.
 void drop_reader_priorities(lt::add_torrent_params& params);
 
+/// No limit on what the torrent shares when it comes back (app DEC-996): the
+/// tap closed on a finished torrent is the engine's to decide each time,
+/// never a limit a restart keeps on a torrent that downloads again.
+void drop_share_limits(lt::add_torrent_params& params);
+
 } // namespace seekserve

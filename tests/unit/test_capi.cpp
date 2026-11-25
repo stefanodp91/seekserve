@@ -1137,3 +1137,27 @@ TEST_F(CApiTest, AFileShareWithSubtitlesSaysWhereTheyAre) {
     ss_engine_destroy(engine);
 }
 
+
+// How much the engine shares while it downloads (app DEC-996): the three
+// gears, and nothing else.
+TEST_F(CApiTest, UploadGearTakesOnlyTheThreeGears) {
+    EXPECT_EQ(ss_set_upload_gear(nullptr, SS_UPLOAD_GEAR_OFF), SS_ERR_INVALID_ARG);
+
+    auto config = make_config(R"("share_when_finished":false,"reduced_upload_slots":2)");
+    auto* engine = ss_engine_create(config.c_str());
+    ASSERT_NE(engine, nullptr);
+    char id[128] = {};
+    ASSERT_EQ(ss_add_torrent(engine, torrent_path().c_str(), id, sizeof(id)), SS_OK);
+
+    EXPECT_EQ(ss_set_upload_gear(engine, SS_UPLOAD_GEAR_REDUCED), SS_OK);
+    EXPECT_EQ(nlohmann::json::parse(status(engine, id))["upload_gear"], SS_UPLOAD_GEAR_REDUCED);
+    EXPECT_EQ(ss_set_upload_gear(engine, SS_UPLOAD_GEAR_OFF), SS_OK);
+    EXPECT_EQ(ss_set_upload_gear(engine, 3), SS_ERR_INVALID_ARG);
+    EXPECT_EQ(ss_set_upload_gear(engine, -1), SS_ERR_INVALID_ARG);
+    // A wrong gear changes nothing.
+    EXPECT_EQ(nlohmann::json::parse(status(engine, id))["upload_gear"], SS_UPLOAD_GEAR_OFF);
+    // Nothing downloaded yet: the tap is open.
+    EXPECT_EQ(nlohmann::json::parse(status(engine, id))["upload_tap_closed"], false);
+
+    ss_engine_destroy(engine);
+}

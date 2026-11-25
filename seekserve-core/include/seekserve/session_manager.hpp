@@ -14,6 +14,7 @@
 #include "seekserve/types.hpp"
 #include "seekserve/error.hpp"
 #include "seekserve/config.hpp"
+#include "seekserve/upload_tap.hpp"
 #include "seekserve/alert_dispatcher.hpp"
 
 namespace seekserve {
@@ -52,6 +53,9 @@ public:
     std::vector<TorrentId> list_torrents() const;
 
     void set_proxy(const ProxyConfig& proxy);
+    // How much the session shares while it downloads (app DEC-996), as a
+    // partial pack: nothing else changes.
+    void set_upload_gear(UploadGear gear);
 
     lt::session& session() { return *session_; }
     AlertDispatcher& alert_dispatcher() { return dispatcher_; }

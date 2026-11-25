@@ -21,6 +21,7 @@ add_executable(seekserve-unit-tests
     unit/test_wait_piece.cpp
     unit/test_wait_focus.cpp
     unit/test_peer_share.cpp
+    unit/test_upload_tap.cpp
     unit/test_range_parser.cpp
     unit/test_offline_cache.cpp
     unit/test_resume_data.cpp
@@ -57,6 +58,7 @@ add_executable(seekserve-integration-tests
     integration/test_hybrid_torrent.cpp
     integration/test_engine_resume_data.cpp
     integration/test_multi_file_torrent.cpp
+    integration/test_upload_tap.cpp
 )
 
 target_link_libraries(seekserve-integration-tests

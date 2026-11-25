@@ -25,6 +25,8 @@
 #include "seekserve/byte_range_mapper.hpp"
 #include "seekserve/wait_piece.hpp"
 #include "seekserve/peer_share.hpp"
+#include "seekserve/upload_tap.hpp"
+#include "seekserve/upload_tap_watch.hpp"
 #include "seekserve/startup_focus.hpp"
 #include "seekserve/ends_ahead.hpp"
 #include "seekserve/wait_focus.hpp"
@@ -150,6 +152,10 @@ public:
 
     // Proxy configuration (runtime update via apply_settings)
     void set_proxy(const ProxyConfig& proxy);
+
+    // How much the engine shares while it downloads (app DEC-996), as the
+    // app asks when the device heats or slows down.
+    void set_upload_gear(UploadGear gear);
 
     // Event callbacks (fired from alert thread or timer thread)
     using EventCallback = std::function<void(const std::string& event_json)>;
@@ -322,6 +328,9 @@ private:
     // Timer ticks (seconds) since the last periodic save.
     std::int64_t ticks_since_resume_save_ = 0;
     std::int64_t ticks_since_peer_share_ = 0;
+    // The tap of each torrent (app DEC-995, DEC-996) and the gear asked.
+    std::unique_ptr<UploadTapWatch> taps_;
+    std::atomic<int> upload_gear_{static_cast<int>(UploadGear::normal)};
 };
 
 } // namespace seekserve

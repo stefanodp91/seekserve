@@ -91,6 +91,13 @@ lt::settings_pack TorrentSessionManager::make_settings(const SessionConfig& conf
         config.close_redundant_connections);
     sp.set_int(lt::settings_pack::min_reconnect_time,
         static_cast<int>(config.min_reconnect_time.count()));
+    // A finished torrent with its tap closed makes no connection only to give
+    // (app DEC-996), and a limit counts the pieces and the protocol only,
+    // never an estimate of the acknowledgements of what comes in.
+    if (!config.share_when_finished) {
+        sp.set_bool(lt::settings_pack::seeding_outgoing_connections, false);
+        sp.set_bool(lt::settings_pack::rate_limit_ip_overhead, false);
+    }
     sp.set_bool(lt::settings_pack::strict_end_game_mode, false);
     sp.set_bool(lt::settings_pack::announce_to_all_tiers, true);
     sp.set_bool(lt::settings_pack::announce_to_all_trackers, true);
@@ -166,6 +173,10 @@ void TorrentSessionManager::set_proxy(const ProxyConfig& proxy) {
     lt::settings_pack sp;
     apply_proxy_settings(sp, proxy);
     session_->apply_settings(std::move(sp));
+}
+
+void TorrentSessionManager::set_upload_gear(UploadGear gear) {
+    session_->apply_settings(upload_gear_settings(gear, config_.reduced_upload_slots));
 }
 
 Result<TorrentId> TorrentSessionManager::add_torrent(const AddTorrentParams& params) {

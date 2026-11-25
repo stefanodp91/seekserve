@@ -144,6 +144,12 @@ SeekServeEngine::SeekServeEngine(const Config& config)
 {
     sessions_ = std::make_unique<TorrentSessionManager>(config_.session);
     cache_ = std::make_unique<OfflineCacheManager>(config_.cache);
+    taps_ = std::make_unique<UploadTapWatch>(config_.session.share_when_finished,
+                                             config_.session.tap_reopen_grace_ticks);
+    // A torrent that wants pieces again has its tap open before it asks.
+    catalog_.before_wanting([this](const TorrentId& id, lt::torrent_handle& handle) {
+        taps_->open(id, handle);
+    });
     wire_alerts();
 
     // Auto-restore persisted torrents
@@ -159,6 +165,7 @@ SeekServeEngine::SeekServeEngine(const Config& config)
                 auto params = decode_resume_data(data);
                 // Whoever was reading a file of it is gone.
                 if (params) drop_reader_priorities(*params);
+                if (params) drop_share_limits(*params);
                 if (params && sessions_->restore_torrent(id, std::move(*params))) {
                     ++from_resume_data;
                     continue;
@@ -560,6 +567,7 @@ void SeekServeEngine::apply_ends_ahead(const TorrentId& id, lt::torrent_handle& 
         auto wanted = with_pieces_first(
             handle.get_piece_priorities(), ahead->second.pieces,
             [&handle](PieceIndex p) { return handle.have_piece(lt::piece_index_t{p}); });
+        taps_->open(id, handle);
         handle.prioritize_pieces(wanted);
     } catch (const std::exception& e) {
         spdlog::debug("Engine: no ends ahead for {}: {}", id, e.what());
@@ -777,6 +785,9 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
     // pauses (app DEC-995): what it gave and got, without the protocol.
     status_json["all_time_download"] = st.all_time_download;
     status_json["all_time_upload"] = st.all_time_upload;
+    // What the torrent shares (app DEC-995, DEC-996).
+    status_json["upload_tap_closed"] = taps_->closed(id);
+    status_json["upload_gear"] = upload_gear_.load();
     status_json["state"] = static_cast<int>(st.state);
     status_json["paused"] = !!(st.flags & lt::torrent_flags::paused);
     // libtorrent's own error, which keeps the torrent paused until it is
@@ -1254,6 +1265,12 @@ void SeekServeEngine::stop_server() {
     spdlog::info("Engine: servers stopped");
 }
 
+void SeekServeEngine::set_upload_gear(UploadGear gear) {
+    sessions_->set_upload_gear(gear);
+    upload_gear_ = static_cast<int>(gear);
+    spdlog::info("Engine: upload gear {}", static_cast<int>(gear));
+}
+
 void SeekServeEngine::set_proxy(const ProxyConfig& proxy) {
     sessions_->set_proxy(proxy);
     config_.session.proxy = proxy;
@@ -1339,6 +1356,9 @@ void SeekServeEngine::on_tick(const boost::system::error_code& ec) {
         ticks_since_resume_save_ = 0;
         request_all_resume_data();
     }
+
+    // What each torrent shares, as its state asks (app DEC-995, DEC-996).
+    taps_->tick(*sessions_);
 
     // Who the peers of each stream gave and got bytes of pieces from, every
     // peer_share_interval (app DEC-995, DEC-996).

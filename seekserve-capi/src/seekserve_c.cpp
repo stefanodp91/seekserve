@@ -147,6 +147,12 @@ static seekserve::SeekServeEngine::Config parse_config(const char* config_json) 
         if (j.contains("peer_share_interval"))
             config.session.peer_share_interval =
                 std::chrono::seconds(j["peer_share_interval"].get<int>());
+        if (j.contains("share_when_finished"))
+            config.session.share_when_finished = j["share_when_finished"].get<bool>();
+        if (j.contains("tap_reopen_grace_ticks"))
+            config.session.tap_reopen_grace_ticks = j["tap_reopen_grace_ticks"].get<int>();
+        if (j.contains("reduced_upload_slots"))
+            config.session.reduced_upload_slots = j["reduced_upload_slots"].get<int>();
         // After every other key too (app BUG-88, WORK-37).
         if (j.contains("read_timeout"))
             config.server.read_timeout = std::chrono::seconds(j["read_timeout"].get<int>());
@@ -555,6 +561,16 @@ ss_error_t ss_set_proxy(SeekServeEngine* engine, const char* proxy_json) {
 
     return guarded("ss_set_proxy", [&]() -> ss_error_t {
         engine->set_proxy(proxy);
+        return SS_OK;
+    });
+}
+
+ss_error_t ss_set_upload_gear(SeekServeEngine* engine, int gear) {
+    if (!engine) return SS_ERR_INVALID_ARG;
+    const auto chosen = seekserve::upload_gear_from(gear);
+    if (!chosen) return SS_ERR_INVALID_ARG;
+    return guarded("ss_set_upload_gear", [&]() -> ss_error_t {
+        engine->set_upload_gear(*chosen);
         return SS_OK;
     });
 }
