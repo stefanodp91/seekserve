@@ -11,6 +11,7 @@ add_library(seekserve-core STATIC
     src/piece_reader.cpp
     src/wait_piece.cpp
     src/wait_focus.cpp
+    src/peer_share.cpp
     src/piece_cache.cpp
     src/byte_source.cpp
     src/file_source.cpp

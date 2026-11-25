@@ -24,6 +24,7 @@
 #include "seekserve/piece_availability.hpp"
 #include "seekserve/byte_range_mapper.hpp"
 #include "seekserve/wait_piece.hpp"
+#include "seekserve/peer_share.hpp"
 #include "seekserve/startup_focus.hpp"
 #include "seekserve/ends_ahead.hpp"
 #include "seekserve/wait_focus.hpp"
@@ -177,6 +178,10 @@ private:
         int wait_kicks = 0;
         // Since when the piece a reader waits for got no block (DEC-661).
         WaitPieceWatch wait_watch;
+        // Who the stream's peers gave and got bytes of pieces from, by
+        // kind, read every peer_share_interval (app DEC-995, DEC-996).
+        PeerShareTally peer_share;
+        bool peer_share_read = false;
         FileIndex selected_file{-1};  // the reader's file
     };
 
@@ -196,6 +201,9 @@ private:
     // The first piece missing from the reader's position on, while a reader
     // of `state` waits for a download; -1 otherwise. Called with mu_ held.
     static PieceIndex awaited_piece(const TorrentState& state);
+    // Reads the stream's peers into its tally of who gave and got bytes of
+    // pieces (app DEC-995, DEC-996). Called with mu_ held; asks libtorrent.
+    static void read_peer_share(TorrentState& state, const lt::torrent_handle& handle);
     // Who has `piece` and where its blocks are (app BUG-238, BUG-228,
     // DEC-661); nothing when the torrent went. Called without mu_: it asks
     // libtorrent.
@@ -313,6 +321,7 @@ private:
     std::condition_variable resume_cv_;
     // Timer ticks (seconds) since the last periodic save.
     std::int64_t ticks_since_resume_save_ = 0;
+    std::int64_t ticks_since_peer_share_ = 0;
 };
 
 } // namespace seekserve

@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include "seekserve/byte_source.hpp"
+#include "seekserve/peer_share.hpp"
 #include "seekserve/piece_reader.hpp"
 #include "seekserve/wait_piece.hpp"
 
@@ -15,5 +16,8 @@ void put_piece_reads(nlohmann::json& status, const PieceReadStats& stats);
 void put_stream_reads(nlohmann::json& status, const ByteSourceStats& stats);
 // The piece a reader waits for (app BUG-238, BUG-228, DEC-661).
 void put_wait_piece(nlohmann::json& status, const WaitPieceStats& stats);
+// What each kind of peer gave and got, bytes of pieces only (app DEC-995,
+// DEC-996): counts, never a peer.
+void put_peer_share(nlohmann::json& status, const PeerShareTally& tally);
 
 }  // namespace seekserve

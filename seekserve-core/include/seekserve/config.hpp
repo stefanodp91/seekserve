@@ -36,6 +36,10 @@ struct SessionConfig {
     // libtorrent's min_reconnect_time: how long a peer that was let go waits
     // before it is taken back (multiplied by its failure count).
     std::chrono::seconds min_reconnect_time{60};
+    // How often the peers of each stream are read for who gave and got how
+    // many bytes of pieces (app DEC-995, DEC-996; PeerShareTally). 0 = never,
+    // as before.
+    std::chrono::seconds peer_share_interval{0};
     // Keeps each torrent's resume data (its metadata, the pieces it has, its
     // file priorities) in the cache database, without peer addresses, and
     // restores torrents from it: a restart then needs neither the metadata

@@ -37,6 +37,10 @@ typedef void (*ss_event_callback_t)(const char* event_json, void* user_data);
 //     of a pack starts at once (app BUG-198).
 //   "min_reconnect_time" (int, seconds, default 60): how long a peer that
 //     was let go waits before it is taken back.
+//   "peer_share_interval" (int, seconds, default 0 = never): how often the
+//     peers of each stream are read, for the bytes of pieces each kind of
+//     peer gave and got ("peer_share" in the status; app DEC-995). Read
+//     with the two keys above.
 // Both are read after every other key: a value of the wrong type cannot
 // cost the proxy or the resume settings.
 // config_json keys for the stream servers (all optional, in seconds; read

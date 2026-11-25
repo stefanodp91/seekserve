@@ -773,6 +773,10 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
     status_json["num_seeds"] = st.num_seeds;
     status_json["total_download"] = st.total_download;
     status_json["total_upload"] = st.total_upload;
+    // The bytes of pieces only, since the torrent was added, through its
+    // pauses (app DEC-995): what it gave and got, without the protocol.
+    status_json["all_time_download"] = st.all_time_download;
+    status_json["all_time_upload"] = st.all_time_upload;
     status_json["state"] = static_cast<int>(st.state);
     status_json["paused"] = !!(st.flags & lt::torrent_flags::paused);
     // libtorrent's own error, which keeps the torrent paused until it is
@@ -836,6 +840,7 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
             awaited = awaited_piece(*state);
         }
         if (state && state->pieces) put_piece_reads(status_json, state->pieces->stats());
+        if (state && state->peer_share_read) put_peer_share(status_json, state->peer_share);
         if (state && http_server_) {
             status_json["range_requests"] = http_server_->requests(id, state->selected_file);
         }
@@ -1335,10 +1340,39 @@ void SeekServeEngine::on_tick(const boost::system::error_code& ec) {
         request_all_resume_data();
     }
 
+    // Who the peers of each stream gave and got bytes of pieces from, every
+    // peer_share_interval (app DEC-995, DEC-996).
+    auto share_every = config_.session.peer_share_interval.count();
+    if (share_every > 0 && ++ticks_since_peer_share_ >= share_every) {
+        ticks_since_peer_share_ = 0;
+        std::lock_guard lock(mu_);
+        for (auto& [id, state] : states_) {
+            if (state->scheduler) read_peer_share(*state, sessions_->get_handle(id));
+        }
+    }
+
     tick_timer_->expires_after(std::chrono::seconds(1));
     tick_timer_->async_wait([this](const boost::system::error_code& ec2) {
         on_tick(ec2);
     });
+}
+
+void SeekServeEngine::read_peer_share(TorrentState& state, const lt::torrent_handle& handle) {
+    if (!handle.is_valid()) return;
+    // libtorrent throws on a handle whose torrent went in between.
+    try {
+        std::vector<lt::peer_info> peers;
+        handle.get_peer_info(peers);
+        const auto priorities = handle.get_piece_priorities();
+        std::vector<PieceIndex> wanted;
+        for (std::size_t p = 0; p < priorities.size(); ++p) {
+            if (priorities[p] != lt::dont_download) wanted.push_back(static_cast<PieceIndex>(p));
+        }
+        state.peer_share.read(peers, wanted);
+        state.peer_share_read = true;
+    } catch (const std::exception& e) {
+        spdlog::debug("Engine: no peer share: {}", e.what());
+    }
 }
 
 void SeekServeEngine::request_resume_data(const TorrentId& id, bool flush_to_disk) {

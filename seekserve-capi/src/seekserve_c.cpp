@@ -144,6 +144,9 @@ static seekserve::SeekServeEngine::Config parse_config(const char* config_json) 
         if (j.contains("min_reconnect_time"))
             config.session.min_reconnect_time =
                 std::chrono::seconds(j["min_reconnect_time"].get<int>());
+        if (j.contains("peer_share_interval"))
+            config.session.peer_share_interval =
+                std::chrono::seconds(j["peer_share_interval"].get<int>());
         // After every other key too (app BUG-88, WORK-37).
         if (j.contains("read_timeout"))
             config.server.read_timeout = std::chrono::seconds(j["read_timeout"].get<int>());

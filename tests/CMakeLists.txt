@@ -20,6 +20,7 @@ add_executable(seekserve-unit-tests
     unit/test_piece_reader.cpp
     unit/test_wait_piece.cpp
     unit/test_wait_focus.cpp
+    unit/test_peer_share.cpp
     unit/test_range_parser.cpp
     unit/test_offline_cache.cpp
     unit/test_resume_data.cpp
