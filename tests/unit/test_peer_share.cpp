@@ -174,3 +174,43 @@ TEST(PeerShareTest, TheStatusSaysEachGroupsCountsAndNoPeer) {
     EXPECT_EQ(share["idle"]["peers"], 0);
     EXPECT_EQ(status.dump().find("10.0.0."), std::string::npos);
 }
+
+// App BUG-792, diagnosis: what the book saw of the connections and of the
+// torrent's pauses, to tell a connection read by two readers from a torrent
+// whose own count lost bytes. Identities only, never an address.
+TEST(PeerShareTest, TheDiagnosisCountsReadersAndASecondReaderOfOneConnection) {
+    PeerShareBook book;
+    int first = 0;
+    int second = 0;
+    ConnectionShare a;
+    ConnectionShare b;
+    ConnectionShare again;
+    book.open(a, &first);
+    book.open(b, &second);
+    book.open(again, &first);
+    book.close(a, nullptr);
+    book.paused();
+    book.resumed();
+
+    const auto diag = book.diag();
+    EXPECT_EQ(diag.readers_opened, 3);
+    EXPECT_EQ(diag.readers_closed, 1);
+    EXPECT_EQ(diag.readers_twice, 1);
+    EXPECT_EQ(diag.pauses, 1);
+    EXPECT_EQ(diag.resumes, 1);
+}
+
+TEST(PeerShareTest, TheStatusCarriesTheDiagnosisNextToTheGroups) {
+    PeerShareBook book;
+    int connection = 0;
+    ConnectionShare conn;
+    book.open(conn, &connection);
+    PeerShareDiag diag = book.diag();
+    diag.total_payload_download = 1234;
+    nlohmann::json status;
+    put_peer_share(status, book.shares(), &diag);
+
+    EXPECT_EQ(status["peer_share"]["diag"]["readers_opened"], 1);
+    EXPECT_EQ(status["peer_share"]["diag"]["total_payload_download"], 1234);
+    EXPECT_TRUE(status["peer_share"].contains("whole"));
+}

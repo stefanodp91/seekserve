@@ -206,6 +206,7 @@ TEST_F(UploadTap, WhatEachKindOfPeerGaveAddsUpToTheTorrentsCounts) {
         std::int64_t sent = 0;
         if (s.contains("peer_share")) {
             for (const auto& [group, share] : s["peer_share"].items()) {
+                if (group == "diag") continue;
                 received += share["received"].get<std::int64_t>();
                 sent += share["sent"].get<std::int64_t>();
             }
@@ -220,6 +221,12 @@ TEST_F(UploadTap, WhatEachKindOfPeerGaveAddsUpToTheTorrentsCounts) {
         },
         std::chrono::seconds(10)))
         << engine.get_status_json(id);
+    // Diagnosis (app BUG-792): one reader for each connection, every one closed
+    // or open, and libtorrent's count since the start next to the groups.
+    const auto diag = status(engine, id)["peer_share"]["diag"];
+    EXPECT_EQ(diag["readers_twice"], 0) << diag.dump();
+    EXPECT_GE(diag["readers_opened"].get<int>(), 1) << diag.dump();
+    EXPECT_GE(diag["total_payload_download"].get<std::int64_t>(), 2 * kFileSize) << diag.dump();
 }
 
 }  // namespace

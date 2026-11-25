@@ -37,7 +37,9 @@ class PeerShareReader final : public lt::peer_plugin {
 public:
     PeerShareReader(lt::peer_connection_handle handle, std::shared_ptr<PeerShareBook> book,
                     std::int64_t every)
-        : handle_(std::move(handle)), book_(std::move(book)), every_(every) {}
+        : handle_(std::move(handle)), book_(std::move(book)), every_(every) {
+        book_->open(conn_, handle_.native_handle().get());
+    }
 
     ~PeerShareReader() override { book_->close(conn_, nullptr); }
 
@@ -83,6 +85,16 @@ public:
         : id_(std::move(id)), books_(std::move(books)), book_(books_->open(id_)), every_(every) {}
 
     ~PeerShareTorrent() override { books_->close(id_, book_); }
+
+    // Counted only: libtorrent pauses and resumes as before (diagnosis).
+    bool on_pause() override {
+        book_->paused();
+        return false;
+    }
+    bool on_resume() override {
+        book_->resumed();
+        return false;
+    }
 
     std::shared_ptr<lt::peer_plugin> new_connection(lt::peer_connection_handle const& handle) override {
         try {

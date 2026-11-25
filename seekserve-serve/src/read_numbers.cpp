@@ -34,7 +34,7 @@ void put_wait_piece(nlohmann::json& status, const WaitPieceStats& stats) {
     status["wait_piece_still_ms"] = stats.still_ms;
 }
 
-void put_peer_share(nlohmann::json& status, const PeerShares& shares) {
+void put_peer_share(nlohmann::json& status, const PeerShares& shares, const PeerShareDiag* diag) {
     auto group = [&](PeerGroup g) {
         const auto& share = shares[static_cast<std::size_t>(g)];
         return nlohmann::json{{"peers", share.peers}, {"received", share.received}, {"sent", share.sent}};
@@ -44,6 +44,17 @@ void put_peer_share(nlohmann::json& status, const PeerShares& shares) {
         {"idle", group(PeerGroup::idle)},
         {"wanting", group(PeerGroup::wanting)},
     };
+    if (diag) {
+        status["peer_share"]["diag"] = {
+            {"readers_opened", diag->readers_opened},
+            {"readers_closed", diag->readers_closed},
+            {"readers_twice", diag->readers_twice},
+            {"pauses", diag->pauses},
+            {"resumes", diag->resumes},
+            {"total_payload_download", diag->total_payload_download},
+            {"total_payload_upload", diag->total_payload_upload},
+        };
+    }
 }
 
 }  // namespace seekserve
