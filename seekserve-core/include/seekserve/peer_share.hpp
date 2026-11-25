@@ -39,6 +39,7 @@ struct PeerGroupShare {
 using PeerShares = std::array<PeerGroupShare, kPeerGroups>;
 
 // One connection as its book last read it: its totals then and its group.
+// The totals count from where they stood when it was established.
 // Each connection has its own, so two peers are never taken for one, even
 // with the same address (app BUG-792: the web seeds behind the SOCKS5 proxy
 // all have 0.0.0.0 and the port of their URL).
@@ -47,6 +48,7 @@ struct ConnectionShare {
     std::int64_t sent = 0;
     // Its group at the last reading; none before the first and once closed.
     std::optional<PeerGroup> group;
+    bool started = false;
     bool closed = false;
     // The connection it reads, as an identity only (app BUG-792 diagnosis).
     const void* connection = nullptr;
@@ -60,6 +62,7 @@ struct PeerShareDiag {
     std::int64_t readers_opened = 0;
     std::int64_t readers_closed = 0;
     std::int64_t readers_twice = 0;
+    std::int64_t readers_started = 0;
     std::int64_t pauses = 0;
     std::int64_t resumes = 0;
     std::int64_t total_payload_download = 0;
@@ -79,6 +82,10 @@ public:
     // peer is whole only when libtorrent knows it for a seed.
     void set_wanted(std::vector<PieceIndex> wanted);
 
+    // `conn` established, as `peer` stood then: libtorrent starts a
+    // connection to a peer it knew at the totals of the earlier ones (app
+    // BUG-792), counted already. Only what comes after counts; once.
+    void start(ConnectionShare& conn, const lt::peer_info& peer);
     // A reader for `conn`, of the connection `connection` (an identity).
     void open(ConnectionShare& conn, const void* connection);
     // The torrent paused or resumed (diagnosis).
@@ -86,10 +93,11 @@ public:
     void resumed();
 
     // A reading of `conn`, connected, from `peer`: what it gave and got since
-    // its last reading goes to its group now.
+    // its last reading goes to its group now. Nothing before it started.
     void read(ConnectionShare& conn, const lt::peer_info& peer);
     // `conn` closed: with `last`, its last reading, what it gave and got
-    // since the one before still counts. Then it is no longer connected.
+    // since the one before still counts, if it ever started. Then it is no
+    // longer connected.
     void close(ConnectionShare& conn, const lt::peer_info* last);
 
     PeerShares shares() const;

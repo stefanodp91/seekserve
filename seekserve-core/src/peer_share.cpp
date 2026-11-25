@@ -29,6 +29,15 @@ void PeerShareBook::open(ConnectionShare& conn, const void* connection) {
     if (connection && !open_connections_.insert(connection).second) ++diag_.readers_twice;
 }
 
+void PeerShareBook::start(ConnectionShare& conn, const lt::peer_info& peer) {
+    std::lock_guard lock(mu_);
+    if (conn.started || conn.closed) return;
+    conn.started = true;
+    conn.received = peer.total_download;
+    conn.sent = peer.total_upload;
+    ++diag_.readers_started;
+}
+
 void PeerShareBook::paused() {
     std::lock_guard lock(mu_);
     ++diag_.pauses;
@@ -46,14 +55,14 @@ PeerShareDiag PeerShareBook::diag() const {
 
 void PeerShareBook::read(ConnectionShare& conn, const lt::peer_info& peer) {
     std::lock_guard lock(mu_);
-    if (conn.closed) return;
+    if (conn.closed || !conn.started) return;
     count(conn, peer);
 }
 
 void PeerShareBook::close(ConnectionShare& conn, const lt::peer_info* last) {
     std::lock_guard lock(mu_);
     if (conn.closed) return;
-    if (last) count(conn, *last);
+    if (last && conn.started) count(conn, *last);
     if (conn.group) --shares_[static_cast<std::size_t>(*conn.group)].peers;
     conn.group.reset();
     conn.closed = true;

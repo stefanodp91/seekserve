@@ -43,6 +43,15 @@ public:
 
     ~PeerShareReader() override { book_->close(conn_, nullptr); }
 
+    // Established, before any piece: where its totals stand is what libtorrent
+    // carried from the earlier connections to the peer (app BUG-792). An
+    // outgoing connection says so here; one that came in, at the first of
+    // the messages a peer opens with. They let libtorrent go on: false.
+    void on_connected() override { start(); }
+    bool on_bitfield(lt::bitfield const&) override { return start(); }
+    bool on_have_all() override { return start(); }
+    bool on_have_none() override { return start(); }
+
     // Once a second, from the connection's own tick.
     void tick() override {
         if (++ticks_ < every_) return;
@@ -58,6 +67,14 @@ public:
     }
 
 private:
+    bool start() {
+        if (started_) return false;
+        started_ = true;
+        lt::peer_info peer;
+        if (read(peer)) book_->start(conn_, peer);
+        return false;
+    }
+
     // The connection's totals and flags, while its torrent is there: without
     // the torrent libtorrent cannot describe the connection, and its book is
     // going anyway.
@@ -75,6 +92,7 @@ private:
     std::shared_ptr<PeerShareBook> book_;
     std::int64_t every_;
     std::int64_t ticks_ = 0;
+    bool started_ = false;
     ConnectionShare conn_;
 };
 

@@ -34,6 +34,13 @@ lt::peer_info peer(int n, std::vector<PieceIndex> has, lt::peer_flags_t flags = 
     return p;
 }
 
+// A connection just established, with nothing carried from earlier ones.
+ConnectionShare started(PeerShareBook& book) {
+    ConnectionShare conn;
+    book.start(conn, peer(0, {}, {}, 0, 0));
+    return conn;
+}
+
 }  // namespace
 
 TEST(PeerShareTest, TheGroupOfAPeer) {
@@ -52,8 +59,8 @@ TEST(PeerShareTest, TheGroupOfAPeer) {
 TEST(PeerShareTest, TheFirstReadingCountsWhatAConnectionGaveSinceItOpened) {
     PeerShareBook book;
     book.set_wanted(kWanted);
-    ConnectionShare seed;
-    ConnectionShare wanting;
+    ConnectionShare seed = started(book);
+    ConnectionShare wanting = started(book);
     book.read(seed, peer(1, {}, lt::peer_info::seed, 1000, 0));
     book.read(wanting, peer(2, {2}, lt::peer_info::remote_interested, 300, 700));
 
@@ -67,7 +74,7 @@ TEST(PeerShareTest, TheFirstReadingCountsWhatAConnectionGaveSinceItOpened) {
 
 TEST(PeerShareTest, ALaterReadingCountsOnlyTheIncrements) {
     PeerShareBook book;
-    ConnectionShare conn;
+    ConnectionShare conn = started(book);
     book.read(conn, peer(1, {}, lt::peer_info::seed, 1000, 0));
     book.read(conn, peer(1, {}, lt::peer_info::seed, 1500, 0));
 
@@ -87,8 +94,8 @@ TEST(PeerShareTest, TwoConnectionsWithTheSameRemoteAddressCountOnce) {
         return p;
     };
     PeerShareBook book;
-    ConnectionShare giving;
-    ConnectionShare connecting;
+    ConnectionShare giving = started(book);
+    ConnectionShare connecting = started(book);
     // One web seed gives, the other is still connecting through the proxy.
     for (std::int64_t gave : {1000, 1500, 2000}) {
         book.read(giving, web_seed(gave));
@@ -103,7 +110,7 @@ TEST(PeerShareTest, TwoConnectionsWithTheSameRemoteAddressCountOnce) {
 // closes; libtorrent closes the seeds when the torrent has what it wants.
 TEST(PeerShareTest, WhatAConnectionGaveBeforeClosingCounts) {
     PeerShareBook book;
-    ConnectionShare conn;
+    ConnectionShare conn = started(book);
     book.read(conn, peer(1, {}, lt::peer_info::seed, 1000, 10));
     const auto last = peer(1, {}, lt::peer_info::seed, 1600, 30);
     book.close(conn, &last);
@@ -116,7 +123,7 @@ TEST(PeerShareTest, WhatAConnectionGaveBeforeClosingCounts) {
 
 TEST(PeerShareTest, AConnectionClosedWithoutALastReadingKeepsWhatItGave) {
     PeerShareBook book;
-    ConnectionShare conn;
+    ConnectionShare conn = started(book);
     book.read(conn, peer(1, {2}, {}, 1000, 0));
     book.close(conn, nullptr);
     // A reading after it closed adds nothing.
@@ -129,7 +136,7 @@ TEST(PeerShareTest, AConnectionClosedWithoutALastReadingKeepsWhatItGave) {
 TEST(PeerShareTest, BytesGoToThePeersGroupAtTheReading) {
     PeerShareBook book;
     book.set_wanted(kWanted);
-    ConnectionShare conn;
+    ConnectionShare conn = started(book);
     // Interested in pieces of ours at first, then whole: what came later
     // counts as from a peer with everything.
     book.read(conn, peer(1, {2}, lt::peer_info::remote_interested, 100, 100));
@@ -147,8 +154,8 @@ TEST(PeerShareTest, BytesGoToThePeersGroupAtTheReading) {
 // whole: with no wanted piece every peer would have all of them.
 TEST(PeerShareTest, BeforeTheWantedPiecesOnlyASeedIsWhole) {
     PeerShareBook book;
-    ConnectionShare seed;
-    ConnectionShare partial;
+    ConnectionShare seed = started(book);
+    ConnectionShare partial = started(book);
     book.read(seed, peer(1, {}, lt::peer_info::seed, 100, 0));
     book.read(partial, peer(2, {2, 3, 4}, {}, 50, 0));
 
@@ -159,8 +166,8 @@ TEST(PeerShareTest, BeforeTheWantedPiecesOnlyASeedIsWhole) {
 TEST(PeerShareTest, TheStatusSaysEachGroupsCountsAndNoPeer) {
     PeerShareBook book;
     book.set_wanted(kWanted);
-    ConnectionShare seed;
-    ConnectionShare wanting;
+    ConnectionShare seed = started(book);
+    ConnectionShare wanting = started(book);
     book.read(seed, peer(1, {}, lt::peer_info::seed, 1000, 0));
     book.read(wanting, peer(2, {2}, lt::peer_info::remote_interested, 300, 700));
     nlohmann::json status;
@@ -182,9 +189,9 @@ TEST(PeerShareTest, TheDiagnosisCountsReadersAndASecondReaderOfOneConnection) {
     PeerShareBook book;
     int first = 0;
     int second = 0;
-    ConnectionShare a;
-    ConnectionShare b;
-    ConnectionShare again;
+    ConnectionShare a = started(book);
+    ConnectionShare b = started(book);
+    ConnectionShare again = started(book);
     book.open(a, &first);
     book.open(b, &second);
     book.open(again, &first);
@@ -203,7 +210,7 @@ TEST(PeerShareTest, TheDiagnosisCountsReadersAndASecondReaderOfOneConnection) {
 TEST(PeerShareTest, TheStatusCarriesTheDiagnosisNextToTheGroups) {
     PeerShareBook book;
     int connection = 0;
-    ConnectionShare conn;
+    ConnectionShare conn = started(book);
     book.open(conn, &connection);
     PeerShareDiag diag = book.diag();
     diag.total_payload_download = 1234;
@@ -213,4 +220,44 @@ TEST(PeerShareTest, TheStatusCarriesTheDiagnosisNextToTheGroups) {
     EXPECT_EQ(status["peer_share"]["diag"]["readers_opened"], 1);
     EXPECT_EQ(status["peer_share"]["diag"]["total_payload_download"], 1234);
     EXPECT_TRUE(status["peer_share"].contains("whole"));
+}
+
+// App BUG-792: libtorrent starts a connection to a peer it was connected to
+// before at that peer's earlier totals (torrent_peer::prev_amount_download).
+// What it carries was counted with the earlier connections: a connection
+// counts from where it stood when it was established.
+TEST(PeerShareTest, AConnectionCountsFromWhereItStarted) {
+    PeerShareBook book;
+    ConnectionShare conn;
+    book.start(conn, peer(1, {}, lt::peer_info::seed, 5000, 300));
+    book.read(conn, peer(1, {}, lt::peer_info::seed, 5600, 300));
+    const auto last = peer(1, {}, lt::peer_info::seed, 6000, 350);
+    book.close(conn, &last);
+
+    const auto whole = book.shares()[static_cast<int>(PeerGroup::whole)];
+    EXPECT_EQ(whole.received, 1000);
+    EXPECT_EQ(whole.sent, 50);
+}
+
+// A connection never established (a failed attempt) got nothing: what its
+// totals carry from earlier connections does not count.
+TEST(PeerShareTest, AConnectionNeverEstablishedCountsNothing) {
+    PeerShareBook book;
+    ConnectionShare conn;
+    book.read(conn, peer(1, {}, lt::peer_info::seed, 5000, 0));
+    const auto last = peer(1, {}, lt::peer_info::seed, 5000, 0);
+    book.close(conn, &last);
+
+    EXPECT_EQ(book.shares()[static_cast<int>(PeerGroup::whole)].received, 0);
+    EXPECT_EQ(book.shares()[static_cast<int>(PeerGroup::whole)].peers, 0);
+}
+
+TEST(PeerShareTest, AConnectionStartsOnce) {
+    PeerShareBook book;
+    ConnectionShare conn;
+    book.start(conn, peer(1, {}, lt::peer_info::seed, 1000, 0));
+    book.start(conn, peer(1, {}, lt::peer_info::seed, 1800, 0));
+    book.read(conn, peer(1, {}, lt::peer_info::seed, 2000, 0));
+
+    EXPECT_EQ(book.shares()[static_cast<int>(PeerGroup::whole)].received, 1000);
 }

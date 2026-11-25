@@ -49,6 +49,7 @@ void put_peer_share(nlohmann::json& status, const PeerShares& shares, const Peer
             {"readers_opened", diag->readers_opened},
             {"readers_closed", diag->readers_closed},
             {"readers_twice", diag->readers_twice},
+            {"readers_started", diag->readers_started},
             {"pauses", diag->pauses},
             {"resumes", diag->resumes},
             {"total_payload_download", diag->total_payload_download},

@@ -7,6 +7,7 @@
 #include <string>
 #include <thread>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <libtorrent/add_torrent_params.hpp>
@@ -23,6 +24,7 @@
 #include <nlohmann/json.hpp>
 
 #include "seekserve/engine.hpp"
+#include "seekserve/session_manager.hpp"
 
 #include "loopback_socks5.hpp"
 
@@ -96,6 +98,9 @@ protected:
         sp.set_bool(lt::settings_pack::enable_lsd, false);
         sp.set_bool(lt::settings_pack::enable_upnp, false);
         sp.set_bool(lt::settings_pack::enable_natpmp, false);
+        // Every connection of the engine comes from 127.0.0.1 through the
+        // proxy: one closing is not a duplicate of the next.
+        sp.set_bool(lt::settings_pack::allow_multiple_connections_per_ip, true);
         auto seeder = std::make_unique<lt::session>(lt::session_params{sp});
         lt::add_torrent_params atp;
         atp.ti = ti_;
@@ -227,6 +232,59 @@ TEST_F(UploadTap, WhatEachKindOfPeerGaveAddsUpToTheTorrentsCounts) {
     EXPECT_EQ(diag["readers_twice"], 0) << diag.dump();
     EXPECT_GE(diag["readers_opened"].get<int>(), 1) << diag.dump();
     EXPECT_GE(diag["total_payload_download"].get<std::int64_t>(), 2 * kFileSize) << diag.dump();
+}
+
+// libtorrent starts a connection to a peer it was connected to before at that
+// peer's earlier totals (torrent_peer::prev_amount_download, app BUG-792): the
+// session lets go of the seeder after it gave bytes, then connects to it
+// again. What the seeder gave counts once. On the session manager, where the
+// books are, with the seeder given back by hand: no tracker here gives it.
+TEST_F(UploadTap, APeerConnectedAgainCountsWhatItGaveOnce) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    // Slow enough that the second file still comes after the pause.
+    proxy.limit_download(32 * 1024);
+    auto seeder = start_seeder();
+    SessionConfig config;
+    config.save_path = (dir_ / "engine").string();
+    config.enable_webtorrent = false;
+    config.proxy.enabled = true;
+    config.proxy.port = proxy.port();
+    config.peer_share_interval = std::chrono::seconds(1);
+    // The seeder let go is taken back at once.
+    config.min_reconnect_time = std::chrono::seconds(1);
+    TorrentSessionManager sessions(config);
+
+    // The first file only, from the start (the magnet's select-only).
+    auto added = sessions.add_torrent({magnet(*seeder) + "&so=0"});
+    ASSERT_TRUE(added);
+    const std::string id = added.value();
+    auto handle = sessions.get_handle(id);
+    ASSERT_TRUE(wait_for([&] { return handle.status().is_finished; }));
+    // Both files wanted, then the seeder let go while the second comes and
+    // given back.
+    handle.prioritize_files({lt::default_priority, lt::default_priority});
+    ASSERT_TRUE(wait_for([&] { return !handle.status().is_finished; }));
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    handle.pause();
+    ASSERT_TRUE(wait_for([&] { return handle.status().num_peers == 0; }));
+    handle.resume();
+    ASSERT_TRUE(wait_for([&] { return !(handle.flags() & lt::torrent_flags::paused); }));
+    handle.connect_peer(lt::tcp::endpoint(lt::make_address_v4("127.0.0.1"), seeder->listen_port()));
+    ASSERT_TRUE(wait_for([&] { return handle.status().is_seeding; }))
+        << "peers " << handle.status().num_peers << ", progress " << handle.status().progress;
+    ASSERT_TRUE(wait_for([&] { return sessions.peer_share(id)->diag().readers_opened >= 2; }));
+
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    const auto shares = sessions.peer_share(id)->shares();
+    std::int64_t received = 0;
+    for (const auto& share : shares) received += share.received;
+    // libtorrent drops from its own count what comes in the second of a
+    // pause: at most a second of the proxy's 32 KB/s.
+    const auto downloaded = handle.status().all_time_download;
+    EXPECT_GE(received, downloaded);
+    EXPECT_LE(received, downloaded + 32 * 1024)
+        << "readers " << sessions.peer_share(id)->diag().readers_opened;
 }
 
 }  // namespace
