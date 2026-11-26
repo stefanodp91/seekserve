@@ -20,19 +20,43 @@ class SsExtraSubtitle {
   final bool enabled;
 }
 
-/// What the video waits for while the host holds it (app WORK-47): a
-/// [message], the [progress] from 0 to 1 (null: not measured) and the time
-/// [remaining], once the host can tell. Not [visible]: the video stays held
-/// and the player draws nothing, while the host shows its own card in its
-/// place (app BUG-336).
+/// What the video waits for while the host holds it (app WORK-47, DEC-988):
+/// a [message], what to expect in [detail] («the film goes on by itself
+/// when…»), the [progress] from 0 to 1 (null: not measured), the time
+/// [remaining] once the host can tell, and the host's ways out ([actions]).
+/// Without [panel] the player shows only its waiting button, as in the first
+/// moments of a wait (app DEC-1012). Not [visible]: the video stays held and
+/// the player draws nothing, while the host shows its own card in its place
+/// (app BUG-336).
 @immutable
 class SsHold {
-  const SsHold({required this.message, this.progress, this.remaining, this.visible = true});
+  const SsHold({
+    required this.message,
+    this.detail,
+    this.progress,
+    this.remaining,
+    this.visible = true,
+    this.panel = true,
+    this.actions = const [],
+  });
 
   final String message;
+  final String? detail;
   final double? progress;
   final Duration? remaining;
   final bool visible;
+  final bool panel;
+  final List<SsHoldAction> actions;
+}
+
+/// A way out of a hold, chosen by the host: «Guarda senza sottotitoli»,
+/// «Riprova». [emphasized] for the one the host suggests.
+class SsHoldAction {
+  const SsHoldAction({required this.label, required this.onPressed, this.emphasized = false});
+
+  final String label;
+  final VoidCallback onPressed;
+  final bool emphasized;
 }
 
 /// A subtitle track the player knows: its player id, language and title.
@@ -55,11 +79,16 @@ abstract interface class SsSubtitleHost {
   /// Whether the video is playing now.
   bool get playing;
 
-  /// Stops the video with [hold]'s message and bar until the host says
-  /// otherwise; a new hold only updates them. Null ends it, and the video
-  /// goes on only if it was playing when the hold began. A ▶ of the user
-  /// during a hold ends it too (app DEC-945).
+  /// Stops the video with [hold]'s panel until the host says otherwise; a
+  /// new hold only updates it. Null ends it, and the video goes on unless
+  /// the person paused it ([holdPaused]). The video never goes on during a
+  /// hold: with the subtitles on it never runs without its lines (app
+  /// DEC-988, DEC-1012).
   void hold(SsHold? hold);
+
+  /// Whether the person paused the video during the hold, or before it: at
+  /// its end the video then stays paused.
+  ValueListenable<bool> get holdPaused;
 
   /// Draws [text] over the video (`<i>…</i>` in italics, `\n` between rows);
   /// null removes it.
@@ -104,12 +133,18 @@ class SsSubtitleHostController implements SsSubtitleHost {
   /// The hold on screen, null when the video is not held.
   final ValueNotifier<SsHold?> held = ValueNotifier(null);
 
-  /// Told when the user lets the video go during a hold.
-  VoidCallback? onHoldOverridden;
+  @override
+  final ValueNotifier<bool> holdPaused = ValueNotifier(false);
+
+  /// The person's ⏸ or ▶ during a hold: a real pause, or back to waiting.
+  /// The video stays held either way.
+  void toggleHoldPause() {
+    if (held.value == null) return;
+    holdPaused.value = !holdPaused.value;
+  }
 
   StreamSubscription<List<String>>? _listening;
   late final StreamSubscription<bool> _playing;
-  bool _resumeAfterHold = false;
 
   @override
   bool get playing => _port.playing;
@@ -118,25 +153,29 @@ class SsSubtitleHostController implements SsSubtitleHost {
   void hold(SsHold? hold) {
     if (hold == null) return _release(resume: true);
     if (held.value == null) {
-      _resumeAfterHold = _port.playing;
-      if (_resumeAfterHold) unawaited(_port.pause());
+      holdPaused.value = !_port.playing;
+      if (_port.playing) unawaited(_port.pause());
     }
     held.value = hold;
   }
 
-  // The video started during a hold: the user's ▶, never the hold's own pause.
+  // The video started during a hold from elsewhere (the system's media
+  // keys, the player itself): the hold wins, and a play is a wish to go on
+  // once the lines are there. Paused after the event that told it.
   void _onPlaying(bool playing) {
     if (!playing || held.value == null) return;
-    held.value = null;
-    _resumeAfterHold = false;
-    onHoldOverridden?.call();
+    holdPaused.value = false;
+    scheduleMicrotask(() {
+      if (held.value != null) unawaited(_port.pause());
+    });
   }
 
   void _release({required bool resume}) {
     if (held.value == null) return;
     held.value = null;
-    if (resume && _resumeAfterHold) unawaited(_port.play());
-    _resumeAfterHold = false;
+    final goOn = resume && !holdPaused.value;
+    holdPaused.value = false;
+    if (goOn) unawaited(_port.play());
   }
 
   @override
@@ -187,6 +226,7 @@ class SsSubtitleHostController implements SsSubtitleHost {
     unawaited(_playing.cancel());
     line.dispose();
     held.dispose();
+    holdPaused.dispose();
   }
 }
 

@@ -120,10 +120,6 @@ class SsVideoPlayer extends StatefulWidget {
   /// Called when another subtitle, or none, replaces a host choice.
   final VoidCallback? onExtraSubtitleCleared;
 
-  /// Called when the user lets the video go during a hold of the host
-  /// ([SsSubtitleHost.hold]; app DEC-945).
-  final VoidCallback? onHoldOverridden;
-
   /// The subtitle tracks inside the video, when the player knows them.
   final void Function(List<SsSubtitleTrackInfo> tracks)? onSubtitleTracks;
 
@@ -177,7 +173,6 @@ class SsVideoPlayer extends StatefulWidget {
     this.selectedExtraSubtitleId,
     this.onExtraSubtitleSelected,
     this.onExtraSubtitleCleared,
-    this.onHoldOverridden,
     this.onSubtitleTracks,
     this.onAudioTracks,
     this.onSubtitleChosen,
@@ -304,8 +299,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
     _watch = diagnostics == null
         ? null
         : SsPlayerWatch(diagnostics, _player!, _videoController!);
-    _subtitleHost = SsSubtitleHostController(_PlayerSubtitlePort(_player!))
-      ..onHoldOverridden = () => widget.onHoldOverridden?.call();
+    _subtitleHost = SsSubtitleHostController(_PlayerSubtitlePort(_player!));
     _tracks = _player!.stream.tracks.listen((tracks) {
       widget.onSubtitleTracks?.call(ssSubtitleTrackInfos(tracks.subtitle));
       if (ssTracksLoaded(tracks)) widget.onAudioTracks?.call(ssAudioTrackInfos(tracks.audio));
@@ -910,7 +904,12 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
           IgnorePointer(child: SsSubtitleLine(text: widget.subtitleHost!.line)),
         // The host's hold: the message and the bar while the video waits.
         if (widget.subtitleHost != null)
-          SsHoldOverlay(hold: widget.subtitleHost!.held, strings: widget.strings),
+          SsHoldOverlay(
+            hold: widget.subtitleHost!.held,
+            paused: widget.subtitleHost!.holdPaused,
+            onTogglePause: widget.subtitleHost!.toggleHoldPause,
+            strings: widget.strings,
+          ),
         // Controls overlay (shown/hidden with fade)
         IgnorePointer(
           ignoring: !_visible,
@@ -923,6 +922,48 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
       ],
     );
   }
+
+  // ▶/⏸ of the controls. During a hold of the host it is the hold's button
+  // (app DEC-988, DEC-1012): a real pause or back to waiting, never the
+  // video let go; in the [center] it gives way to the hold's own button.
+  Widget _playButton(double size, {bool center = false}) => StreamBuilder<bool>(
+        stream: widget.player.stream.playing,
+        initialData: widget.player.state.playing,
+        builder: (ctx, snap) {
+          final playing = snap.data ?? false;
+          final plain = SsIconButton(
+            icon: playing ? _pause : _playArrow,
+            size: size,
+            color: const Color(0xFFFFFFFF),
+            onPressed: () {
+              widget.player.playOrPause();
+              widget.onPlayPause?.call(isPlaying: !playing);
+              _onInteraction();
+            },
+          );
+          final host = widget.subtitleHost;
+          if (host == null) return plain;
+          return ValueListenableBuilder<SsHold?>(
+            valueListenable: host.held,
+            builder: (ctx, hold, _) {
+              if (hold == null) return plain;
+              if (center && hold.visible) return SizedBox.square(dimension: size);
+              return ValueListenableBuilder<bool>(
+                valueListenable: host.holdPaused,
+                builder: (ctx, paused, _) => SsIconButton(
+                  icon: paused ? _playArrow : _pause,
+                  size: size,
+                  color: const Color(0xFFFFFFFF),
+                  onPressed: () {
+                    host.toggleHoldPause();
+                    _onInteraction();
+                  },
+                ),
+              );
+            },
+          );
+        },
+      );
 
   Widget _buildControlsPanel() {
     final theme = SsTheme.of(context);
@@ -1021,23 +1062,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
 
         // -- Center: play/pause --
         const Spacer(),
-        StreamBuilder<bool>(
-          stream: widget.player.stream.playing,
-          initialData: widget.player.state.playing,
-          builder: (ctx, snap) {
-            final playing = snap.data ?? false;
-            return SsIconButton(
-              icon: playing ? _pause : _playArrow,
-              size: 52,
-              color: const Color(0xFFFFFFFF),
-              onPressed: () {
-                widget.player.playOrPause();
-                widget.onPlayPause?.call(isPlaying: !playing);
-                _onInteraction();
-              },
-            );
-          },
-        ),
+        _playButton(52, center: true),
         const Spacer(),
 
         // -- Bottom gradient: seek + transport + status --
@@ -1154,7 +1179,6 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
       stream: widget.player.stream.playing,
       initialData: widget.player.state.playing,
       builder: (ctx, snap) {
-        final playing = snap.data ?? false;
         return StreamBuilder<Duration>(
           stream: widget.player.stream.position,
           initialData: widget.player.state.position,
@@ -1176,16 +1200,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
                         _seekTo(t < Duration.zero ? Duration.zero : t);
                       },
                     ),
-                    SsIconButton(
-                      icon: playing ? _pause : _playArrow,
-                      size: 32,
-                      color: const Color(0xFFFFFFFF),
-                      onPressed: () {
-                        widget.player.playOrPause();
-                        widget.onPlayPause?.call(isPlaying: !playing);
-                        _onInteraction();
-                      },
-                    ),
+                    _playButton(32),
                     SsIconButton(
                       icon: _forward10,
                       color: const Color(0xFFFFFFFF),

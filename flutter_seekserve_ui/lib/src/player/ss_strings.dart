@@ -19,6 +19,8 @@ class SsStrings {
         'Audio and seek work — test on a real device.',
     this.serverErrorBuilder,
     this.holdRemainingBuilder,
+    this.holdWaitingLabel = 'Waiting, tap to pause',
+    this.holdPausedLabel = 'Paused, tap to wait again',
     this.cannotReachBuilder,
     this.playerErrorBuilder,
     this.trackBuilder,
@@ -50,6 +52,13 @@ class SsStrings {
   final String noVideoFrames;
 
   final String Function(int statusCode)? serverErrorBuilder;
+
+  /// For the screen reader, on the player's button while the host holds the
+  /// video and the video waits (app DEC-1012).
+  final String holdWaitingLabel;
+
+  /// For the screen reader, on the same button once the person paused.
+  final String holdPausedLabel;
 
   /// The time left of a hold of the host, in the user's language.
   final String Function(Duration remaining)? holdRemainingBuilder;
