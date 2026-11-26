@@ -130,6 +130,19 @@ abstract interface class SsSubtitlePort {
   Future<void> selectNone();
 }
 
+/// The host of a new player (app DEC-1018 step 2b.2), told at once to
+/// [onHost], so that the app can go on with a choice of its own before any
+/// tap; its turn off is told to [onTurnedOff] alone, never as a choice.
+SsSubtitleHostController ssNewSubtitleHost(
+  SsSubtitlePort port, {
+  VoidCallback? onTurnedOff,
+  void Function(SsSubtitleHost host)? onHost,
+}) {
+  final host = SsSubtitleHostController(port, onTurnedOff: onTurnedOff);
+  onHost?.call(host);
+  return host;
+}
+
 /// The [SsSubtitleHost] the player gives its host, over an [SsSubtitlePort].
 class SsSubtitleHostController implements SsSubtitleHost {
   SsSubtitleHostController(this._port, {this.onTurnedOff}) {

@@ -122,6 +122,11 @@ class SsVideoPlayer extends StatefulWidget {
   /// Called when another subtitle, or none, replaces a host choice.
   final VoidCallback? onExtraSubtitleCleared;
 
+  /// Called with the host of each new player as soon as it exists, before
+  /// any tap (app DEC-1018 step 2b.2): the app's remembered choice and a
+  /// choice waiting for the file go on with it. A new player has a new host.
+  final void Function(SsSubtitleHost host)? onSubtitleHost;
+
   /// The app's own wait over the video (app DEC-1016): the video that loads,
   /// Tor away. Drawn as a hold of the host, but the video is not paused for
   /// it. Without it, or while it is null, the player shows its own circle
@@ -186,6 +191,7 @@ class SsVideoPlayer extends StatefulWidget {
     this.onAudioTracks,
     this.onSubtitleChosen,
     this.initialSubtitle,
+    this.onSubtitleHost,
     this.diagnostics,
     this.unstickAfter,
   });
@@ -309,9 +315,10 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
         ? null
         : SsPlayerWatch(diagnostics, _player!, _videoController!);
     // Turned off by the host as «None», not as the person's choice (app DEC-1015).
-    _subtitleHost = SsSubtitleHostController(
+    _subtitleHost = ssNewSubtitleHost(
       _PlayerSubtitlePort(_player!),
       onTurnedOff: () => widget.onExtraSubtitleCleared?.call(),
+      onHost: widget.onSubtitleHost,
     );
     _tracks = _player!.stream.tracks.listen((tracks) {
       widget.onSubtitleTracks?.call(ssSubtitleTrackInfos(tracks.subtitle));

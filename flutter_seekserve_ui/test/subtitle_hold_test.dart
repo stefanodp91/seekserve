@@ -299,6 +299,19 @@ void main() {
     expect(host.line.value, isNull);
   });
 
+  // App DEC-1018 step 2b.2: the app has the host of every new player at once,
+  // before any tap, and «Guarda senza sottotitoli» is never told as a choice.
+  test('a new player tells its host at once, and its turn off only as a host choice cleared', () async {
+    final port = _PlayingPort();
+    final told = <SsSubtitleHost>[];
+    var cleared = 0;
+    final host = ssNewSubtitleHost(port, onTurnedOff: () => cleared++, onHost: told.add);
+    expect(told, [host]);
+    await host.turnOff();
+    expect(cleared, 1);
+    expect(port.calls, ['track off']);
+  });
+
   testWidgets('a stopped hold has no ring and no bar, and the button says so', (tester) async {
     final held = ValueNotifier<SsHold?>(
       const SsHold(message: 'I sottotitoli si sono fermati', progress: 0.4, remaining: Duration(seconds: 10), stopped: true),
