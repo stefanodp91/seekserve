@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_seekserve/seekserve.dart';
 import 'package:media_kit/media_kit.dart';
@@ -12,6 +13,7 @@ import '../theme/ss_theme.dart';
 import '../utils/format.dart';
 import 'ss_extra_subtitles.dart';
 import 'ss_hold_overlay.dart';
+import 'ss_app_wait.dart';
 import 'ss_buffering_overlay.dart';
 import 'ss_player_diagnostics.dart';
 import 'ss_player_recovery.dart';
@@ -120,6 +122,12 @@ class SsVideoPlayer extends StatefulWidget {
   /// Called when another subtitle, or none, replaces a host choice.
   final VoidCallback? onExtraSubtitleCleared;
 
+  /// The app's own wait over the video (app DEC-1016): the video that loads,
+  /// Tor away. Drawn as a hold of the host, but the video is not paused for
+  /// it. Without it, or while it is null, the player shows its own circle
+  /// when it loads.
+  final ValueListenable<SsHold?>? appWait;
+
   /// The subtitle tracks inside the video, when the player knows them.
   final void Function(List<SsSubtitleTrackInfo> tracks)? onSubtitleTracks;
 
@@ -173,6 +181,7 @@ class SsVideoPlayer extends StatefulWidget {
     this.selectedExtraSubtitleId,
     this.onExtraSubtitleSelected,
     this.onExtraSubtitleCleared,
+    this.appWait,
     this.onSubtitleTracks,
     this.onAudioTracks,
     this.onSubtitleChosen,
@@ -599,6 +608,7 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
       extraSubtitles: widget.extraSubtitles,
       selectedExtraSubtitleId: widget.selectedExtraSubtitleId,
       subtitleHost: _subtitleHost,
+      appWait: widget.appWait,
       onSubtitleChosen: _chooseSubtitle,
     );
   }
@@ -698,6 +708,7 @@ class _PlayerOverlay extends StatefulWidget {
   final List<SsExtraSubtitle> extraSubtitles;
   final String? selectedExtraSubtitleId;
   final SsSubtitleHostController? subtitleHost;
+  final ValueListenable<SsHold?>? appWait;
 
   /// Puts on screen a subtitle chosen in the menu and tells the host.
   final Future<void> Function(SsSubtitleChoice choice) onSubtitleChosen;
@@ -722,6 +733,7 @@ class _PlayerOverlay extends StatefulWidget {
     this.extraSubtitles = const [],
     this.selectedExtraSubtitleId,
     this.subtitleHost,
+    this.appWait,
     required this.onSubtitleChosen,
   });
 
@@ -748,9 +760,15 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
   static const _audiotrack = IconData(0xe0b6, fontFamily: 'MaterialIcons');
   static const _subtitles = IconData(0xe619, fontFamily: 'MaterialIcons');
 
+  /// Whether the video plays, for the waiting buttons.
+  late final ValueNotifier<bool> _playing = ValueNotifier(widget.player.state.playing);
+  late final StreamSubscription<bool> _playingChanges =
+      widget.player.stream.playing.listen((playing) => _playing.value = playing);
+
   @override
   void initState() {
     super.initState();
+    _playingChanges;
     _scheduleHide();
   }
 
@@ -758,6 +776,8 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
   void dispose() {
     _hideTimer?.cancel();
     _scrubTimer?.cancel();
+    unawaited(_playingChanges.cancel());
+    _playing.dispose();
     super.dispose();
   }
 
@@ -877,7 +897,7 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
           behavior: HitTestBehavior.opaque,
           onTap: _toggle,
         ),
-        // Buffering indicator (always visible when buffering)
+        // Buffering indicator, unless the app says the wait itself (app DEC-1016).
         StreamBuilder<bool>(
           stream: widget.player.stream.buffering,
           // The controls can be built again while the video plays (a new
@@ -885,22 +905,15 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
           initialData: widget.player.state.buffering,
           builder: (ctx, snap) {
             if (snap.data != true) return const SizedBox.shrink();
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SsSpinner(),
-                  const SizedBox(height: 8),
-                  Text(
-                    widget.strings.buffering,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: Color(0xCCFFFFFF),
-                    ),
-                  ),
-                ],
-              ),
-            );
+            final appWait = widget.appWait;
+            if (appWait != null) {
+              return ValueListenableBuilder<SsHold?>(
+                valueListenable: appWait,
+                builder: (ctx, wait, circle) => wait == null ? circle! : const SizedBox.shrink(),
+                child: _circle(),
+              );
+            }
+            return _circle();
           },
         ),
         // The host's subtitle line, under the controls.
@@ -913,6 +926,15 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
             paused: widget.subtitleHost!.holdPaused,
             onTogglePause: widget.subtitleHost!.toggleHoldPause,
             strings: widget.strings,
+          ),
+        // The app's own wait: the video that loads, Tor away (app DEC-1016).
+        if (widget.appWait != null)
+          SsAppWaitOverlay(
+            wait: widget.appWait!,
+            playing: _playing,
+            onPlayOrPause: _playOrPause,
+            strings: widget.strings,
+            host: widget.subtitleHost,
           ),
         // Controls overlay (shown/hidden with fade)
         IgnorePointer(
@@ -927,46 +949,50 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
     );
   }
 
-  // ▶/⏸ of the controls. During a hold of the host it is the hold's button
-  // (app DEC-988, DEC-1012): a real pause or back to waiting, never the
-  // video let go; in the [center] it gives way to the hold's own button.
-  Widget _playButton(double size, {bool center = false}) => StreamBuilder<bool>(
-        stream: widget.player.stream.playing,
-        initialData: widget.player.state.playing,
-        builder: (ctx, snap) {
-          final playing = snap.data ?? false;
-          final plain = SsIconButton(
+  // ▶/⏸ of the controls. During a hold of the host, or a wait of the app, it
+  // is the waiting button with its ring (app DEC-988, DEC-1012, DEC-1016): a
+  // real pause or back to waiting, never the video let go; in the [center]
+  // it gives way to the panel's own.
+  Widget _playButton(double size, {bool center = false}) => ValueListenableBuilder<bool>(
+        valueListenable: _playing,
+        builder: (ctx, playing, _) => SsWaitPlayButton(
+          plain: SsIconButton(
             icon: playing ? _pause : _playArrow,
             size: size,
             color: const Color(0xFFFFFFFF),
-            onPressed: () {
-              widget.player.playOrPause();
-              widget.onPlayPause?.call(isPlaying: !playing);
-              _onInteraction();
-            },
-          );
-          final host = widget.subtitleHost;
-          if (host == null) return plain;
-          return ValueListenableBuilder<SsHold?>(
-            valueListenable: host.held,
-            builder: (ctx, hold, _) {
-              if (hold == null) return plain;
-              if (center && hold.visible) return SizedBox.square(dimension: size);
-              return ValueListenableBuilder<bool>(
-                valueListenable: host.holdPaused,
-                builder: (ctx, paused, _) => SsIconButton(
-                  icon: paused ? _playArrow : _pause,
-                  size: size,
-                  color: const Color(0xFFFFFFFF),
-                  onPressed: () {
-                    host.toggleHoldPause();
-                    _onInteraction();
-                  },
-                ),
-              );
-            },
-          );
-        },
+            onPressed: _playOrPause,
+          ),
+          size: size,
+          center: center,
+          playing: _playing,
+          onPlayOrPause: _playOrPause,
+          strings: widget.strings,
+          host: widget.subtitleHost,
+          wait: widget.appWait,
+          onTap: _onInteraction,
+        ),
+      );
+
+  void _playOrPause() {
+    final playing = _playing.value;
+    widget.player.playOrPause();
+    widget.onPlayPause?.call(isPlaying: !playing);
+    _onInteraction();
+  }
+
+  // The player's own circle while it loads, with its words.
+  Widget _circle() => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SsSpinner(),
+            const SizedBox(height: 8),
+            Text(
+              widget.strings.buffering,
+              style: const TextStyle(fontSize: 13, color: Color(0xCCFFFFFF)),
+            ),
+          ],
+        ),
       );
 
   Widget _buildControlsPanel() {

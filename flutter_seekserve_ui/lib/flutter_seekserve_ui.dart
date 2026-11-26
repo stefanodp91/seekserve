@@ -35,6 +35,7 @@ export 'src/composites/ss_transfer_stats.dart';
 // Player
 export 'src/player/ss_buffering_overlay.dart';
 export 'src/player/ss_hold_button.dart';
+export 'src/player/ss_app_wait.dart';
 export 'src/player/ss_hold_overlay.dart';
 export 'src/player/ss_player_diagnostics.dart';
 export 'src/player/ss_player_life.dart';

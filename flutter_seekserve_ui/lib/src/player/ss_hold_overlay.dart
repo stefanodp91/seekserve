@@ -30,6 +30,9 @@ class SsHoldOverlay extends StatelessWidget {
   final VoidCallback onTogglePause;
   final SsStrings strings;
 
+  /// How much at most the text grows with the phone's big text.
+  static const maxTextScale = 1.3;
+
   static const _text = TextStyle(fontSize: 15, color: Color(0xFFFFFFFF));
   static const _small = TextStyle(fontSize: 13, color: Color(0xCCFFFFFF));
 
@@ -38,26 +41,33 @@ class SsHoldOverlay extends StatelessWidget {
         valueListenable: hold,
         builder: (context, value, _) {
           if (value == null || !value.visible) return const SizedBox.shrink();
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ValueListenableBuilder<bool>(
-                  valueListenable: paused,
-                  builder: (context, isPaused, _) => SsHoldButton(
-                    paused: isPaused,
-                    stopped: value.stopped,
-                    onPressed: onTogglePause,
-                    label: isPaused
-                        ? strings.holdPausedLabel
-                        : (value.stopped ? strings.holdStoppedLabel : strings.holdWaitingLabel),
-                  ),
+          // Big text grows at most 130 %, and the panel scrolls within the
+          // screen, in landscape with two ways out too (app DEC-1016).
+          return MediaQuery.withClampedTextScaling(
+            maxScaleFactor: maxTextScale,
+            child: Center(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ValueListenableBuilder<bool>(
+                      valueListenable: paused,
+                      builder: (context, isPaused, _) => SsHoldButton(
+                        paused: isPaused,
+                        stopped: value.stopped,
+                        onPressed: onTogglePause,
+                        label: isPaused
+                            ? strings.holdPausedLabel
+                            : (value.stopped ? strings.holdStoppedLabel : strings.holdWaitingLabel),
+                      ),
+                    ),
+                    if (value.panel) ...[
+                      const SizedBox(height: 12),
+                      _panel(value),
+                    ],
+                  ],
                 ),
-                if (value.panel) ...[
-                  const SizedBox(height: 12),
-                  _panel(value),
-                ],
-              ],
+              ),
             ),
           );
         },
