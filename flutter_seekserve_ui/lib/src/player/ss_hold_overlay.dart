@@ -7,7 +7,8 @@ import 'ss_strings.dart';
 
 /// The host's hold over the video (app WORK-47, DEC-988, DEC-1012): the
 /// waiting button and, with the panel, what the video waits for, what to
-/// expect, the bar, the time left once known and the host's ways out. Nothing
+/// expect, the bar, the time left once known and the host's ways out; a
+/// stopped hold without the ring, the bar and the time (app DEC-1015). Nothing
 /// without a hold, or with a hold that is not visible (app BUG-336). Only the
 /// button and the ways out take a tap: elsewhere a tap still reaches the
 /// player, which shows its controls.
@@ -45,8 +46,11 @@ class SsHoldOverlay extends StatelessWidget {
                   valueListenable: paused,
                   builder: (context, isPaused, _) => SsHoldButton(
                     paused: isPaused,
+                    stopped: value.stopped,
                     onPressed: onTogglePause,
-                    label: isPaused ? strings.holdPausedLabel : strings.holdWaitingLabel,
+                    label: isPaused
+                        ? strings.holdPausedLabel
+                        : (value.stopped ? strings.holdStoppedLabel : strings.holdWaitingLabel),
                   ),
                 ),
                 if (value.panel) ...[
@@ -82,9 +86,12 @@ class SsHoldOverlay extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(detail, style: _small, textAlign: TextAlign.center),
                 ],
-                const SizedBox(height: 12),
-                LinearProgressIndicator(value: value.progress),
-                if (remaining != null) ...[
+                // A stopped hold waits for no work: nothing moves (app DEC-1015).
+                if (!value.stopped) ...[
+                  const SizedBox(height: 12),
+                  LinearProgressIndicator(value: value.progress),
+                ],
+                if (remaining != null && !value.stopped) ...[
                   const SizedBox(height: 8),
                   Text(strings.holdRemaining(remaining), style: _small),
                 ],

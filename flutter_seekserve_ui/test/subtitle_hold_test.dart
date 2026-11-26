@@ -11,6 +11,7 @@ class _PlayingPort implements SsSubtitlePort {
   bool isPlaying;
   var pauses = 0;
   var plays = 0;
+  final calls = <String>[];
   final _playing = StreamController<bool>.broadcast(sync: true);
 
   /// The user pressed ▶ or ⏸ on the player.
@@ -35,6 +36,7 @@ class _PlayingPort implements SsSubtitlePort {
   @override
   Future<void> play() async {
     plays++;
+    calls.add('play');
     isPlaying = true;
     _playing.add(true);
   }
@@ -55,7 +57,7 @@ class _PlayingPort implements SsSubtitlePort {
   Future<void> selectUri(String uri, {String? title}) async {}
 
   @override
-  Future<void> selectNone() async {}
+  Future<void> selectNone() async => calls.add('track off');
 }
 
 void main() {
@@ -281,5 +283,40 @@ void main() {
   test('a hold has its panel unless the host says otherwise', () {
     expect(const SsHold(message: 'm').panel, isTrue);
     expect(const SsHold(message: 'm').actions, isEmpty);
+  });
+
+  // App DEC-1015: «Guarda senza sottotitoli» is «None» without the choice.
+  test('turning off from the host takes the track off first, then tells it, and the video goes on even paused', () async {
+    final port = _PlayingPort();
+    final host = SsSubtitleHostController(port, onTurnedOff: () => port.calls.add('told'));
+    host.hold(hold);
+    host.toggleHoldPause();
+    host.showLine('Ciao');
+    await host.turnOff();
+    expect(port.calls, ['track off', 'play', 'told']);
+    expect(host.held.value, isNull);
+    expect(host.holdPaused.value, isFalse);
+    expect(host.line.value, isNull);
+  });
+
+  testWidgets('a stopped hold has no ring and no bar, and the button says so', (tester) async {
+    final held = ValueNotifier<SsHold?>(
+      const SsHold(message: 'I sottotitoli si sono fermati', progress: 0.4, remaining: Duration(seconds: 10), stopped: true),
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SsHoldOverlay(
+          hold: held,
+          paused: ValueNotifier(false),
+          onTogglePause: () {},
+          strings: SsStrings(holdStoppedLabel: 'Fermo', holdRemainingBuilder: (left) => '${left.inSeconds} s'),
+        ),
+      ),
+    ));
+    expect(find.text('I sottotitoli si sono fermati'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(find.text('10 s'), findsNothing);
+    expect(find.bySemanticsLabel('Fermo'), findsOneWidget);
   });
 }

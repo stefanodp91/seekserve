@@ -299,7 +299,11 @@ class _SsVideoPlayerState extends State<SsVideoPlayer>
     _watch = diagnostics == null
         ? null
         : SsPlayerWatch(diagnostics, _player!, _videoController!);
-    _subtitleHost = SsSubtitleHostController(_PlayerSubtitlePort(_player!));
+    // Turned off by the host as «None», not as the person's choice (app DEC-1015).
+    _subtitleHost = SsSubtitleHostController(
+      _PlayerSubtitlePort(_player!),
+      onTurnedOff: () => widget.onExtraSubtitleCleared?.call(),
+    );
     _tracks = _player!.stream.tracks.listen((tracks) {
       widget.onSubtitleTracks?.call(ssSubtitleTrackInfos(tracks.subtitle));
       if (ssTracksLoaded(tracks)) widget.onAudioTracks?.call(ssAudioTrackInfos(tracks.audio));

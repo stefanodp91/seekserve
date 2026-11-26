@@ -21,6 +21,7 @@ class SsStrings {
     this.holdRemainingBuilder,
     this.holdWaitingLabel = 'Waiting, tap to pause',
     this.holdPausedLabel = 'Paused, tap to wait again',
+    this.holdStoppedLabel = 'Stopped, choose how to go on',
     this.cannotReachBuilder,
     this.playerErrorBuilder,
     this.trackBuilder,
@@ -59,6 +60,10 @@ class SsStrings {
 
   /// For the screen reader, on the same button once the person paused.
   final String holdPausedLabel;
+
+  /// The button's label for the screen reader while a stopped hold waits for
+  /// the person's choice (app DEC-1015).
+  final String holdStoppedLabel;
 
   /// The time left of a hold of the host, in the user's language.
   final String Function(Duration remaining)? holdRemainingBuilder;

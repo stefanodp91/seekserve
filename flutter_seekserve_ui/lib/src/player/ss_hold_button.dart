@@ -2,19 +2,22 @@ import 'package:flutter/material.dart';
 
 /// The player's button while the host holds the video (app DEC-988,
 /// DEC-1012): waiting, a ⏸ inside a turning ring, as a video that loads;
-/// [paused] by the person, a ▶ without the ring. A tap is a real pause, or
-/// back to waiting: the video never goes on before the host lets it. The
-/// screen reader hears [label].
+/// [paused] by the person, a ▶ without the ring; [stopped], when the hold
+/// waits only for the person's choice, a ⏸ without the ring (app DEC-1015).
+/// A tap is a real pause, or back to waiting: the video never goes on before
+/// the host lets it. The screen reader hears [label].
 class SsHoldButton extends StatelessWidget {
   const SsHoldButton({
     super.key,
     required this.paused,
     required this.onPressed,
     required this.label,
+    this.stopped = false,
     this.size = 64,
   });
 
   final bool paused;
+  final bool stopped;
   final VoidCallback onPressed;
   final String label;
   final double size;
@@ -40,7 +43,7 @@ class SsHoldButton extends StatelessWidget {
                   decoration: const BoxDecoration(color: Color(0x99000000), shape: BoxShape.circle),
                   child: SizedBox.square(dimension: size - 8),
                 ),
-                if (!paused)
+                if (!paused && !stopped)
                   SizedBox.square(
                     dimension: size,
                     child: const CircularProgressIndicator(strokeWidth: 3, color: _white),

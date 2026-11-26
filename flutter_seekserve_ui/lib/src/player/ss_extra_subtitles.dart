@@ -27,7 +27,8 @@ class SsExtraSubtitle {
 /// Without [panel] the player shows only its waiting button, as in the first
 /// moments of a wait (app DEC-1012). Not [visible]: the video stays held and
 /// the player draws nothing, while the host shows its own card in its place
-/// (app BUG-336).
+/// (app BUG-336). A [stopped] hold waits for nothing but the person's choice
+/// (app DEC-1015): no ring, no bar, no time left.
 @immutable
 class SsHold {
   const SsHold({
@@ -37,6 +38,7 @@ class SsHold {
     this.remaining,
     this.visible = true,
     this.panel = true,
+    this.stopped = false,
     this.actions = const [],
   });
 
@@ -46,6 +48,7 @@ class SsHold {
   final Duration? remaining;
   final bool visible;
   final bool panel;
+  final bool stopped;
   final List<SsHoldAction> actions;
 }
 
@@ -103,6 +106,10 @@ abstract interface class SsSubtitleHost {
 
   /// Hands over to a real subtitle track inside the video.
   Future<void> selectEmbedded(String trackId);
+
+  /// Turns the subtitles off as «None» in the menu does, without telling it
+  /// as the person's choice of the film (app DEC-1015).
+  Future<void> turnOff();
 }
 
 /// What the host controller needs from a player.
@@ -121,11 +128,14 @@ abstract interface class SsSubtitlePort {
 
 /// The [SsSubtitleHost] the player gives its host, over an [SsSubtitlePort].
 class SsSubtitleHostController implements SsSubtitleHost {
-  SsSubtitleHostController(this._port) {
+  SsSubtitleHostController(this._port, {this.onTurnedOff}) {
     _playing = _port.playingChanges.listen(_onPlaying);
   }
 
   final SsSubtitlePort _port;
+
+  /// Told once [turnOff] turned the subtitles off.
+  final VoidCallback? onTurnedOff;
 
   /// The line drawn over the video.
   final ValueNotifier<String?> line = ValueNotifier(null);
@@ -204,6 +214,19 @@ class SsSubtitleHostController implements SsSubtitleHost {
   Future<void> selectEmbedded(String trackId) async {
     clear();
     await _port.selectTrack(trackId);
+  }
+
+  /// The player's own track off first, so it never shows once the host's
+  /// lines go; then the video goes on, even if the person paused it, as
+  /// «Guarda» asks, and [onTurnedOff] tells the player.
+  @override
+  Future<void> turnOff() async {
+    await _port.selectNone();
+    line.value = null;
+    await _stopListening();
+    holdPaused.value = false;
+    _release(resume: true);
+    onTurnedOff?.call();
   }
 
   /// Removes the drawn line, ends a hold and stops passing track lines.
