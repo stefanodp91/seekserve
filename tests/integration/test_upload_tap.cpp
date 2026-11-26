@@ -211,7 +211,6 @@ TEST_F(UploadTap, WhatEachKindOfPeerGaveAddsUpToTheTorrentsCounts) {
         std::int64_t sent = 0;
         if (s.contains("peer_share")) {
             for (const auto& [group, share] : s["peer_share"].items()) {
-                if (group == "diag") continue;
                 received += share["received"].get<std::int64_t>();
                 sent += share["sent"].get<std::int64_t>();
             }
@@ -226,12 +225,42 @@ TEST_F(UploadTap, WhatEachKindOfPeerGaveAddsUpToTheTorrentsCounts) {
         },
         std::chrono::seconds(10)))
         << engine.get_status_json(id);
-    // Diagnosis (app BUG-792): one reader for each connection, every one closed
-    // or open, and libtorrent's count since the start next to the groups.
-    const auto diag = status(engine, id)["peer_share"]["diag"];
-    EXPECT_EQ(diag["readers_twice"], 0) << diag.dump();
-    EXPECT_GE(diag["readers_opened"].get<int>(), 1) << diag.dump();
-    EXPECT_GE(diag["total_payload_download"].get<std::int64_t>(), 2 * kFileSize) << diag.dump();
+}
+
+// The status asks the readers (app BUG-792): during a slow download, with
+// readings an hour apart, what the open connection gave shows within a tick
+// of the status, not at the next reading or when the connection closes.
+TEST_F(UploadTap, AStatusShowsWhatAnOpenConnectionGave) {
+    LoopbackSocks5 proxy;
+    ASSERT_NE(proxy.port(), 0);
+    proxy.limit_download(16 * 1024);
+    auto seeder = start_seeder();
+    auto config = engine_config(proxy.port(), /*share_when_finished=*/true);
+    config.session.peer_share_interval = std::chrono::seconds(3600);
+    SeekServeEngine engine(config);
+    ASSERT_TRUE(engine.start_server());
+
+    auto added = engine.add_torrent(magnet(*seeder));
+    ASSERT_TRUE(added);
+    const std::string id = added.value();
+    ASSERT_TRUE(wait_for([&] { return static_cast<bool>(engine.select_file(id, 0)); }));
+
+    // Half a file in, still connected: the groups hold what came, but for the
+    // last tick (a second of the proxy's 16 KB/s, and a block on its way).
+    bool seen = false;
+    std::string last;
+    EXPECT_TRUE(wait_for([&] {
+        const auto s = status(engine, id);
+        last = s.dump();
+        const auto downloaded = s["all_time_download"].get<std::int64_t>();
+        if (s["num_peers"] != 1 || downloaded < kFileSize / 2 || !s.contains("peer_share")) return false;
+        std::int64_t sum = 0;
+        for (const auto& [group, share] : s["peer_share"].items()) {
+            sum += share["received"].get<std::int64_t>();
+        }
+        seen = sum >= downloaded - 32 * 1024;
+        return seen;
+    })) << last;
 }
 
 // libtorrent starts a connection to a peer it was connected to before at that
@@ -273,7 +302,7 @@ TEST_F(UploadTap, APeerConnectedAgainCountsWhatItGaveOnce) {
     handle.connect_peer(lt::tcp::endpoint(lt::make_address_v4("127.0.0.1"), seeder->listen_port()));
     ASSERT_TRUE(wait_for([&] { return handle.status().is_seeding; }))
         << "peers " << handle.status().num_peers << ", progress " << handle.status().progress;
-    ASSERT_TRUE(wait_for([&] { return sessions.peer_share(id)->diag().readers_opened >= 2; }));
+    ASSERT_TRUE(wait_for([&] { return sessions.peer_share(id)->readers().opened >= 2; }));
 
     std::this_thread::sleep_for(std::chrono::seconds(2));
     const auto shares = sessions.peer_share(id)->shares();
@@ -284,7 +313,7 @@ TEST_F(UploadTap, APeerConnectedAgainCountsWhatItGaveOnce) {
     const auto downloaded = handle.status().all_time_download;
     EXPECT_GE(received, downloaded);
     EXPECT_LE(received, downloaded + 32 * 1024)
-        << "readers " << sessions.peer_share(id)->diag().readers_opened;
+        << "readers " << sessions.peer_share(id)->readers().opened;
 }
 
 }  // namespace

@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <mutex>
 #include <optional>
-#include <set>
 #include <vector>
 
 #include <libtorrent/peer_info.hpp>
@@ -50,23 +49,14 @@ struct ConnectionShare {
     std::optional<PeerGroup> group;
     bool started = false;
     bool closed = false;
-    // The connection it reads, as an identity only (app BUG-792 diagnosis).
-    const void* connection = nullptr;
 };
 
-// What a book saw besides the bytes, to tell its own counting from the
-// torrent's (app BUG-792 diagnosis): its readers, a connection with two of
-// them, the torrent's pauses and resumes, and libtorrent's own counts since
-// the torrent last started, which the engine adds.
-struct PeerShareDiag {
-    std::int64_t readers_opened = 0;
-    std::int64_t readers_closed = 0;
-    std::int64_t readers_twice = 0;
-    std::int64_t readers_started = 0;
-    std::int64_t pauses = 0;
-    std::int64_t resumes = 0;
-    std::int64_t total_payload_download = 0;
-    std::int64_t total_payload_upload = 0;
+// How many readers a book had: opened for a connection, started when it
+// was established, closed with it (app BUG-792).
+struct PeerShareReaders {
+    std::int64_t opened = 0;
+    std::int64_t started = 0;
+    std::int64_t closed = 0;
 };
 
 // The bytes of pieces each group gave and got over the connections of one
@@ -86,11 +76,14 @@ public:
     // connection to a peer it knew at the totals of the earlier ones (app
     // BUG-792), counted already. Only what comes after counts; once.
     void start(ConnectionShare& conn, const lt::peer_info& peer);
-    // A reader for `conn`, of the connection `connection` (an identity).
-    void open(ConnectionShare& conn, const void* connection);
-    // The torrent paused or resumed (diagnosis).
-    void paused();
-    void resumed();
+    // A reader for `conn`, of a connection just made.
+    void open(ConnectionShare& conn);
+
+    // The status asks for the bytes as they are now (app BUG-792): each
+    // reader that sees it (`seen` is its own count of asks) reads at its next
+    // tick, besides every peer_share_interval.
+    void ask();
+    bool asked_since(std::uint64_t& seen) const;
 
     // A reading of `conn`, connected, from `peer`: what it gave and got since
     // its last reading goes to its group now. Nothing before it started.
@@ -101,7 +94,7 @@ public:
     void close(ConnectionShare& conn, const lt::peer_info* last);
 
     PeerShares shares() const;
-    PeerShareDiag diag() const;
+    PeerShareReaders readers() const;
 
 private:
     PeerGroup group_of(const lt::peer_info& peer) const;
@@ -111,8 +104,8 @@ private:
     std::vector<PieceIndex> wanted_;
     bool wanted_known_ = false;
     PeerShares shares_{};
-    PeerShareDiag diag_{};
-    std::set<const void*> open_connections_;
+    PeerShareReaders readers_{};
+    std::uint64_t asks_ = 0;
 };
 
 }  // namespace seekserve

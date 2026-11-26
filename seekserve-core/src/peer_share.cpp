@@ -22,11 +22,9 @@ void PeerShareBook::set_wanted(std::vector<PieceIndex> wanted) {
     wanted_known_ = true;
 }
 
-void PeerShareBook::open(ConnectionShare& conn, const void* connection) {
+void PeerShareBook::open(ConnectionShare&) {
     std::lock_guard lock(mu_);
-    ++diag_.readers_opened;
-    conn.connection = connection;
-    if (connection && !open_connections_.insert(connection).second) ++diag_.readers_twice;
+    ++readers_.opened;
 }
 
 void PeerShareBook::start(ConnectionShare& conn, const lt::peer_info& peer) {
@@ -35,22 +33,24 @@ void PeerShareBook::start(ConnectionShare& conn, const lt::peer_info& peer) {
     conn.started = true;
     conn.received = peer.total_download;
     conn.sent = peer.total_upload;
-    ++diag_.readers_started;
+    ++readers_.started;
 }
 
-void PeerShareBook::paused() {
+void PeerShareBook::ask() {
     std::lock_guard lock(mu_);
-    ++diag_.pauses;
+    ++asks_;
 }
 
-void PeerShareBook::resumed() {
+bool PeerShareBook::asked_since(std::uint64_t& seen) const {
     std::lock_guard lock(mu_);
-    ++diag_.resumes;
+    if (seen == asks_) return false;
+    seen = asks_;
+    return true;
 }
 
-PeerShareDiag PeerShareBook::diag() const {
+PeerShareReaders PeerShareBook::readers() const {
     std::lock_guard lock(mu_);
-    return diag_;
+    return readers_;
 }
 
 void PeerShareBook::read(ConnectionShare& conn, const lt::peer_info& peer) {
@@ -66,8 +66,7 @@ void PeerShareBook::close(ConnectionShare& conn, const lt::peer_info* last) {
     if (conn.group) --shares_[static_cast<std::size_t>(*conn.group)].peers;
     conn.group.reset();
     conn.closed = true;
-    ++diag_.readers_closed;
-    if (conn.connection) open_connections_.erase(conn.connection);
+    ++readers_.closed;
 }
 
 PeerShares PeerShareBook::shares() const {

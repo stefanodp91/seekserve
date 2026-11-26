@@ -182,43 +182,28 @@ TEST(PeerShareTest, TheStatusSaysEachGroupsCountsAndNoPeer) {
     EXPECT_EQ(status.dump().find("10.0.0."), std::string::npos);
 }
 
-// App BUG-792, diagnosis: what the book saw of the connections and of the
-// torrent's pauses, to tell a connection read by two readers from a torrent
-// whose own count lost bytes. Identities only, never an address.
-TEST(PeerShareTest, TheDiagnosisCountsReadersAndASecondReaderOfOneConnection) {
+// How many readers a book had (app BUG-792): opened, started, closed.
+TEST(PeerShareTest, TheBookCountsItsReaders) {
     PeerShareBook book;
-    int first = 0;
-    int second = 0;
-    ConnectionShare a = started(book);
-    ConnectionShare b = started(book);
-    ConnectionShare again = started(book);
-    book.open(a, &first);
-    book.open(b, &second);
-    book.open(again, &first);
+    ConnectionShare a;
+    ConnectionShare b;
+    book.open(a);
+    book.open(b);
+    book.start(a, peer(1, {}, {}, 0, 0));
     book.close(a, nullptr);
-    book.paused();
-    book.resumed();
 
-    const auto diag = book.diag();
-    EXPECT_EQ(diag.readers_opened, 3);
-    EXPECT_EQ(diag.readers_closed, 1);
-    EXPECT_EQ(diag.readers_twice, 1);
-    EXPECT_EQ(diag.pauses, 1);
-    EXPECT_EQ(diag.resumes, 1);
+    const auto readers = book.readers();
+    EXPECT_EQ(readers.opened, 2);
+    EXPECT_EQ(readers.started, 1);
+    EXPECT_EQ(readers.closed, 1);
 }
 
-TEST(PeerShareTest, TheStatusCarriesTheDiagnosisNextToTheGroups) {
+TEST(PeerShareTest, TheStatusSaysTheGroupsOnly) {
     PeerShareBook book;
-    int connection = 0;
-    ConnectionShare conn = started(book);
-    book.open(conn, &connection);
-    PeerShareDiag diag = book.diag();
-    diag.total_payload_download = 1234;
     nlohmann::json status;
-    put_peer_share(status, book.shares(), &diag);
+    put_peer_share(status, book.shares());
 
-    EXPECT_EQ(status["peer_share"]["diag"]["readers_opened"], 1);
-    EXPECT_EQ(status["peer_share"]["diag"]["total_payload_download"], 1234);
+    EXPECT_EQ(status["peer_share"].size(), 3u);
     EXPECT_TRUE(status["peer_share"].contains("whole"));
 }
 
@@ -260,4 +245,19 @@ TEST(PeerShareTest, AConnectionStartsOnce) {
     book.read(conn, peer(1, {}, lt::peer_info::seed, 2000, 0));
 
     EXPECT_EQ(book.shares()[static_cast<int>(PeerGroup::whole)].received, 1000);
+}
+
+// A status asks the book: every reader reads at its next tick, not only every
+// peer_share_interval (app BUG-792), so the status lags a tick at most.
+TEST(PeerShareTest, AReaderSeesEachAskOnce) {
+    PeerShareBook book;
+    std::uint64_t seen = 0;
+    EXPECT_FALSE(book.asked_since(seen));
+    book.ask();
+    EXPECT_TRUE(book.asked_since(seen));
+    EXPECT_FALSE(book.asked_since(seen));
+    book.ask();
+    book.ask();
+    EXPECT_TRUE(book.asked_since(seen));
+    EXPECT_FALSE(book.asked_since(seen));
 }

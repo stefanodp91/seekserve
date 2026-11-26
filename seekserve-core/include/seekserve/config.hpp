@@ -37,8 +37,9 @@ struct SessionConfig {
     // before it is taken back (multiplied by its failure count).
     std::chrono::seconds min_reconnect_time{60};
     // How often each connection of a torrent is read for who gave and got
-    // how many bytes of pieces, besides when it closes (app DEC-995, DEC-996,
-    // BUG-792; PeerShareBook). 0 = never, as before.
+    // how many bytes of pieces, besides when it closes and at the tick after
+    // a status (app DEC-995, DEC-996, BUG-792; PeerShareBook). 0 = never, as
+    // before.
     std::chrono::seconds peer_share_interval{0};
     // Whether a torrent with every wanted piece shares, as libtorrent would.
     // Off = its tap closed to a byte a second, no new connection made only to

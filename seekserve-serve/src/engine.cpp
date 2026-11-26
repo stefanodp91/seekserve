@@ -874,11 +874,11 @@ std::string SeekServeEngine::get_status_json(const TorrentId& id) {
 
     // What each kind of peer gave and got since the torrent was added (app
     // DEC-995, DEC-996, BUG-792).
+    // The readers read at their next tick: the next status has the bytes of
+    // the connections still open, a tick old at most.
     if (auto book = sessions_->peer_share(id)) {
-        auto diag = book->diag();
-        diag.total_payload_download = st.total_payload_download;
-        diag.total_payload_upload = st.total_payload_upload;
-        put_peer_share(status_json, book->shares(), &diag);
+        book->ask();
+        put_peer_share(status_json, book->shares());
     }
 
     status_json["alerts_dropped"] = alerts_dropped_.load();

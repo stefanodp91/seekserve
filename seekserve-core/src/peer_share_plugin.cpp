@@ -38,7 +38,7 @@ public:
     PeerShareReader(lt::peer_connection_handle handle, std::shared_ptr<PeerShareBook> book,
                     std::int64_t every)
         : handle_(std::move(handle)), book_(std::move(book)), every_(every) {
-        book_->open(conn_, handle_.native_handle().get());
+        book_->open(conn_);
     }
 
     ~PeerShareReader() override { book_->close(conn_, nullptr); }
@@ -52,9 +52,11 @@ public:
     bool on_have_all() override { return start(); }
     bool on_have_none() override { return start(); }
 
-    // Once a second, from the connection's own tick.
+    // Once a second, from the connection's own tick: a reading every `every_`
+    // ticks, and at the first tick after the status asked.
     void tick() override {
-        if (++ticks_ < every_) return;
+        const bool asked = book_->asked_since(asks_seen_);
+        if (++ticks_ < every_ && !asked) return;
         ticks_ = 0;
         lt::peer_info peer;
         if (read(peer)) book_->read(conn_, peer);
@@ -92,6 +94,7 @@ private:
     std::shared_ptr<PeerShareBook> book_;
     std::int64_t every_;
     std::int64_t ticks_ = 0;
+    std::uint64_t asks_seen_ = 0;
     bool started_ = false;
     ConnectionShare conn_;
 };
@@ -103,16 +106,6 @@ public:
         : id_(std::move(id)), books_(std::move(books)), book_(books_->open(id_)), every_(every) {}
 
     ~PeerShareTorrent() override { books_->close(id_, book_); }
-
-    // Counted only: libtorrent pauses and resumes as before (diagnosis).
-    bool on_pause() override {
-        book_->paused();
-        return false;
-    }
-    bool on_resume() override {
-        book_->resumed();
-        return false;
-    }
 
     std::shared_ptr<lt::peer_plugin> new_connection(lt::peer_connection_handle const& handle) override {
         try {
