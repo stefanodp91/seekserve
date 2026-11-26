@@ -110,6 +110,10 @@ abstract interface class SsSubtitleHost {
   /// Turns the subtitles off as «None» in the menu does, without telling it
   /// as the person's choice of the film (app DEC-1015).
   Future<void> turnOff();
+
+  /// Ends the hold and the video goes on, even if the person paused it: a
+  /// way out that says «go on» (app DEC-1017).
+  void goOn();
 }
 
 /// What the host controller needs from a player.
@@ -227,6 +231,12 @@ class SsSubtitleHostController implements SsSubtitleHost {
     holdPaused.value = false;
     _release(resume: true);
     onTurnedOff?.call();
+  }
+
+  @override
+  void goOn() {
+    holdPaused.value = false;
+    _release(resume: true);
   }
 
   /// Removes the drawn line, ends a hold and stops passing track lines.

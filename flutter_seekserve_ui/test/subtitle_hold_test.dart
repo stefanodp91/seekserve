@@ -319,4 +319,18 @@ void main() {
     expect(find.text('10 s'), findsNothing);
     expect(find.bySemanticsLabel('Fermo'), findsOneWidget);
   });
+
+  // App DEC-1017: «Continua» goes on even when the person paused.
+  test('going on ends the hold and plays, even paused by the person', () async {
+    final port = _PlayingPort();
+    final host = SsSubtitleHostController(port);
+    host.hold(hold);
+    host.toggleHoldPause();
+    final plays = port.plays;
+    host.goOn();
+    await Future<void>.delayed(Duration.zero);
+    expect(host.held.value, isNull);
+    expect(host.holdPaused.value, isFalse);
+    expect(port.plays, plays + 1);
+  });
 }
