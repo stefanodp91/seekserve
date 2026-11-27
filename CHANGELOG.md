@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-11-28
 
 ### Added — The player's wait, one panel for the host's holds and the app's own waits
 

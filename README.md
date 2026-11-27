@@ -2,7 +2,7 @@
 
 **Edge-first torrent streaming SDK with HTTP Range support, intelligent piece scheduling, offline caching, resume data, optional WebTorrent, and a full Flutter toolkit.**
 
-> **Version 0.2.0** (2026-10-15, see [CHANGELOG.md](CHANGELOG.md)); work happens on `dev`, handoff notes in [RESUME.md](RESUME.md).
+> **Version 0.3.0** (2026-11-28, see [CHANGELOG.md](CHANGELOG.md): the passenger read for a listener, the subtitles of a torrent and of a TV share, the player's wait panel, the peer share counted per connection); work happens on `dev`, handoff notes in [RESUME.md](RESUME.md).
 > Its consumer is the Android app Obsidian Eclipse: the engine runs in the app's foreground service through `libseekserve.so` and JNI, `flutter_seekserve` supplies the Dart types and `flutter_seekserve_ui` the player. The app pins a commit of this repository by SHA. In the mobile builds WebTorrent is off by default (WebRTC ignores the SOCKS proxy that carries every peer connection through Tor), and libtorrent is built with the patch in `patches/libtorrent/`.
 
 SeekServe is a C++17 library that downloads torrent content and serves it locally via an HTTP Range-compliant server on loopback. Video players like VLC can connect to it and play, seek, and scrub through torrent video as if it were a regular HTTP stream. An intelligent piece scheduler ensures the right pieces are downloaded first for instant playback and fast seek.
