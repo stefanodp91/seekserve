@@ -159,4 +159,39 @@ void main() {
     final text = tester.widget<Text>(find.text('Il video carica lentamente'));
     expect(MediaQuery.textScalerOf(tester.element(find.byWidget(text))).scale(10), lessThanOrEqualTo(13));
   });
+
+  // App BUG-806, DEC-1023: a film the person paused loads with no circle.
+  group('SsLoadingCircle', () {
+    Future<void> pump(WidgetTester tester, {required bool buffering, required bool playing, SsHold? wait}) =>
+        tester.pumpWidget(Directionality(
+          textDirection: TextDirection.ltr,
+          child: SsLoadingCircle(
+            buffering: Stream<bool>.value(buffering),
+            bufferingNow: buffering,
+            playing: ValueNotifier(playing),
+            appWait: ValueNotifier<SsHold?>(wait),
+            circle: const Text('circle'),
+          ),
+        ));
+
+    testWidgets('a film that wants to go and loads shows the circle', (tester) async {
+      await pump(tester, buffering: true, playing: true);
+      expect(find.text('circle'), findsOneWidget);
+    });
+
+    testWidgets('a film the person paused shows no circle while it loads', (tester) async {
+      await pump(tester, buffering: true, playing: false);
+      expect(find.text('circle'), findsNothing);
+    });
+
+    testWidgets('the app\'s own wait says it instead of the circle', (tester) async {
+      await pump(tester, buffering: true, playing: true, wait: const SsHold(message: 'Carico il video…'));
+      expect(find.text('circle'), findsNothing);
+    });
+
+    testWidgets('no loading, no circle', (tester) async {
+      await pump(tester, buffering: false, playing: true);
+      expect(find.text('circle'), findsNothing);
+    });
+  });
 }

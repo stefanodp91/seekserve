@@ -904,24 +904,14 @@ class _PlayerOverlayState extends State<_PlayerOverlay> {
           behavior: HitTestBehavior.opaque,
           onTap: _toggle,
         ),
-        // Buffering indicator, unless the app says the wait itself (app DEC-1016).
-        StreamBuilder<bool>(
-          stream: widget.player.stream.buffering,
-          // The controls can be built again while the video plays (a new
-          // subtitle configuration): start from what the player says now.
-          initialData: widget.player.state.buffering,
-          builder: (ctx, snap) {
-            if (snap.data != true) return const SizedBox.shrink();
-            final appWait = widget.appWait;
-            if (appWait != null) {
-              return ValueListenableBuilder<SsHold?>(
-                valueListenable: appWait,
-                builder: (ctx, wait, circle) => wait == null ? circle! : const SizedBox.shrink(),
-                child: _circle(),
-              );
-            }
-            return _circle();
-          },
+        // Buffering indicator for a film that wants to go, unless the app
+        // says the wait itself (app DEC-1016, DEC-1023).
+        SsLoadingCircle(
+          buffering: widget.player.stream.buffering,
+          bufferingNow: widget.player.state.buffering,
+          playing: _playing,
+          appWait: widget.appWait,
+          circle: _circle(),
         ),
         // The host's subtitle line, under the controls.
         if (widget.subtitleHost != null)

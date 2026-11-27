@@ -118,3 +118,41 @@ class _Not implements ValueListenable<bool> {
   @override
   void removeListener(VoidCallback listener) => of.removeListener(listener);
 }
+
+/// The player's own circle while the video loads (app DEC-1016, DEC-1023):
+/// only for a film that wants to go, and only while the app's own wait does
+/// not say it. A film the person paused shows no circle while it loads (app
+/// BUG-806).
+class SsLoadingCircle extends StatelessWidget {
+  const SsLoadingCircle({
+    super.key,
+    required this.buffering,
+    required this.bufferingNow,
+    required this.playing,
+    required this.circle,
+    this.appWait,
+  });
+
+  final Stream<bool> buffering;
+
+  /// What the player says now: the controls can be built again while the
+  /// video plays.
+  final bool bufferingNow;
+  final ValueListenable<bool> playing;
+  final ValueListenable<SsHold?>? appWait;
+  final Widget circle;
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder<bool>(
+        stream: buffering,
+        initialData: bufferingNow,
+        builder: (context, snap) {
+          if (snap.data != true) return const SizedBox.shrink();
+          final wait = appWait;
+          return ListenableBuilder(
+            listenable: Listenable.merge([playing, ?wait]),
+            builder: (context, _) => playing.value && wait?.value == null ? circle : const SizedBox.shrink(),
+          );
+        },
+      );
+}
