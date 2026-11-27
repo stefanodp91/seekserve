@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+### Added — The player's wait, one panel for the host's holds and the app's own waits
+
+#### `flutter_seekserve_ui`
+
+- **A hold of the subtitle host has a button and a panel** (app DEC-988, DEC-1012; `2d0fe33`): during a hold the
+  player's button is a pause inside a turning ring, as for a video that loads; a tap is a real pause, a second one goes
+  back to waiting, and the video never goes on before the host lets it (the person's play no longer lets a hold go, app
+  DEC-945 replaced). A play from elsewhere during a hold stops the video again; at the end the video goes on unless the
+  person paused it. The panel says what to expect and offers the host's ways out; labels for the screen reader on the
+  button and a live region on the message (`SsHoldButton`, `SsHoldOverlay`).
+- **A stopped hold** (app DEC-1015; `dcfbd8b`): a hold the host marks stopped waits only for the person's choice, with
+  no ring, no bar and no time left. The host can turn the subtitles off as the menu's «None» does
+  (`SsSubtitleHost.turnOff`), without telling it as the person's choice of the film.
+- **The app's own wait** (app DEC-1016; `5cb1b9e`): `SsVideoPlayer.appWait` draws the same panel for a wait the app
+  names (the video that loads, Tor away) without pausing the video for it: the player goes on by itself when the data
+  come. The ▶/⏸ of the controls has the ring during it (`SsWaitPlayButton`); the panel scrolls within the screen and its
+  text grows at most 130 %.
+- **`SsSubtitleHost.goOn`** (app DEC-1017; `c6135d9`): a way out that ends the hold and plays the video even when the
+  person paused it.
+- **`onSubtitleHost`** (app DEC-1018; `eefa540`): the host of each new player is handed to the app at once, before any
+  tap, so a remembered subtitle choice goes on with the live host.
+- **The video's audio tracks** are told to the host once the video is loaded (app DEC-1007; `97bdaff`).
+
+### Fixed — The loading circle only for a film that wants to go
+
+#### `flutter_seekserve_ui`
+
+- A film the person paused while the player still loads no longer shows the loading circle (app BUG-806, DEC-1023;
+  `85ab1b7`, `SsLoadingCircle`). Tests: 134 in `flutter_seekserve_ui`.
+
+### Fixed — What each kind of peer gave and got, counted per connection
+
+#### `seekserve-core`, `seekserve-serve`
+
+- **One reader per connection** (app BUG-792; `85cd3fc`): the tally of a torrent's peers told connections apart by
+  their remote address; behind a SOCKS5 proxy with proxy hostnames two web seeds on one port were taken for one peer
+  connected again, and the bytes a connection gave after its last reading were lost when it closed. A session plugin
+  (`peer_share_plugin`) now gives each torrent a `PeerShareBook` and each connection a reader, through libtorrent's
+  public plugin API only; the book keeps no address. The sum of the groups is the torrent's `all_time_download` and
+  `all_time_upload` (`UploadTap` on a local swarm).
+- **A connection counts from where it stood when established** (`5c827d2`): libtorrent starts a connection to a peer
+  it knew at that peer's earlier totals, which were counted again at each connection.
+- **A status is a tick old at most** (`4bcaec1`): the engine's status asks the book, and each open connection is read
+  at its next tick, not every `peer_share_interval` only. The diagnosis entry added meanwhile (`e0ebb5e`) is out again.
+
 ### Added — A passenger read that never leads the download
 
 #### `seekserve-core`, `seekserve-serve`
