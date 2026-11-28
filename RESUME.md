@@ -156,8 +156,10 @@ ANDROID_NDK_HOME=~/Library/Android/sdk/ndk/28.2.13676358 VCPKG_ROOT=~/vcpkg ./sc
 
 App DEC-1032: the CHANGELOG's "Unreleased" became `## 0.3.0 - 2026-11-28`; `CMakeLists.txt`, `vcpkg.json`,
 `flutter_seekserve/pubspec.yaml` and `flutter_seekserve_ui/pubspec.yaml` say 0.3.0, and the README's status line too.
-No source changed with the number: the app's `libseekserve.so` is still the one built from `4bcaec1` (the commits
-after it are Dart only), and the version is not compiled into the library.
+No C++ source changed with the number, but `CMakeLists.txt` and `vcpkg.json` count as part of the library for the
+app's natives check (its BUG-787), so the app's `libseekserve.so` was rebuilt from `34abd80` on the Mac (app
+`31db0c0d5`) before its release 1.6.0+31-fakeflix: same exports, 16 KB segments, no WebRTC. A new version number
+here means rebuilding the app's library before its next release.
 
 ## Version 0.2.0 (2026-10-15)
 
